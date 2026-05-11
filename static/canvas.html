@@ -8,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="/static/theme.js?v=20260509-global-theme-output-drag"></script>
+    <link rel="stylesheet" href="/static/design-system.css?v=21">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&display=swap');
         :root { --ease:cubic-bezier(.4,0,.2,1); --page:#f8fafc; --grid:#d9e1ea; --panel:rgba(255,255,255,.92); --card:rgba(255,255,255,.96); --card-solid:#fff; --soft:#f8fafc; --soft-2:#f1f5f9; --line:#e8edf3; --line-2:#cbd5e1; --text:#111827; --muted:#64748b; --faint:#94a3b8; --shadow:rgba(15,23,42,.08); --strong:#111827; --strong-text:#fff; }
@@ -16,7 +17,10 @@
         body { margin:0; height:100vh; overflow:hidden; background:var(--page); color:var(--text); font-family:'Inter',-apple-system,sans-serif; -webkit-font-smoothing:antialiased; }
         .shell { position:relative; height:100vh; overflow:hidden; }
         .topbar { position:absolute; top:22px; left:24px; right:24px; z-index:30; display:flex; align-items:flex-start; justify-content:space-between; pointer-events:none; }
-        .panel { pointer-events:auto; background:var(--panel); border:1px solid var(--line); border-radius:24px; box-shadow:0 16px 44px var(--shadow); backdrop-filter:blur(16px); }
+        /* DESIGN.md §8.3 — 顶部浮卡走 dark glass card，0 圆角、1px dark-border、无柔光阴影 */
+        .panel { pointer-events:auto; background:rgba(28,28,30,0.92); color:#f5f5f5; border:1px solid #2a2a2d; border-radius:0; box-shadow:inset 0 1px 0 rgba(255,255,255,0.04); backdrop-filter:blur(8px); }
+        .panel.canvas-nav .current-canvas-title { color:#f5f5f5; }
+        .panel.canvas-nav .current-canvas-time { color:#9a9a9a; }
         .library { width:310px; max-height:calc(100vh - 44px); padding:14px; display:flex; flex-direction:column; gap:12px; }
         .canvas-nav { width:max-content; max-width:min(360px, calc(100vw - 48px)); padding:8px 10px 8px 8px; display:flex; align-items:center; gap:8px; }
         .canvas-nav-meta { min-width:0; display:flex; flex-direction:column; gap:2px; }
@@ -61,11 +65,20 @@
         .canvas-restore:hover { background:#ecfdf5; color:#059669; border-color:#a7f3d0; }
         .canvas-item.active .canvas-delete { background:rgba(255,255,255,.14); color:#fff; border-color:rgba(255,255,255,.18); opacity:1; }
         .canvas-item.active .canvas-delete:hover { background:rgba(248,113,113,.22); color:#fecaca; }
-        .toolbar { padding:10px; display:flex; gap:8px; align-items:center; }
-        .tool-btn { height:38px; min-width:38px; padding:0 12px; border-radius:999px; display:flex; align-items:center; justify-content:center; gap:7px; color:var(--muted); background:var(--card-solid); border:1px solid var(--line); font-size:11px; font-weight:700; transition:all .2s var(--ease); pointer-events:auto; }
-        .tool-btn:hover { background:var(--soft-2); color:var(--text); }
-        .theme-toggle.active { background:var(--strong); color:var(--strong-text); border-color:var(--strong); }
-        .board { position:absolute; inset:0; cursor:grab; background-color:var(--page); background-image:radial-gradient(var(--grid) 1px, transparent 1px); background-size:24px 24px; }
+        /* DESIGN.md §17.4 工具栏：dark glass + 32×32 像素方块按钮 */
+        .toolbar { padding:6px; display:flex; gap:4px; align-items:center; }
+        .tool-btn { width:32px; height:32px; min-width:32px; padding:0; border-radius:0; display:flex; align-items:center; justify-content:center; color:#f5f5f5; background:transparent; border:none; transition:none; pointer-events:auto; position:relative; }
+        .tool-btn:hover { background:#0e0e10; color:#f5f5f5; }
+        .tool-btn.is-active { background:#161618; color:#fa520f; }
+        .tool-btn .tool-label { display:none; }
+        .tool-btn .pixel-icon { color:inherit; }
+        /* canvas-nav 内的小工具按钮（返回按钮）也跟随 dark 风格 */
+        .panel.canvas-nav .tool-btn { color:#f5f5f5; }
+        .panel.canvas-nav .tool-btn:hover { background:#0e0e10; }
+        .theme-toggle.active { background:#161618; color:#fa520f; }
+        /* §5 网格纸：80×80 cream 主格，linear-gradient 双向 1px 线（替换原 radial-gradient 24px） */
+        .board { position:absolute; inset:0; cursor:grab; background-color:#fffaeb; background-image:linear-gradient(to right, rgba(230,213,168,0.55) 1px, transparent 1px), linear-gradient(to bottom, rgba(230,213,168,0.55) 1px, transparent 1px); background-size:80px 80px; }
+        .theme-dark .board { background-color:#0e0e10; background-image:linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px); }
         .world { position:absolute; left:0; top:0; width:6000px; height:4000px; transform-origin:0 0; }
         .links { position:absolute; inset:0; width:6000px; height:4000px; overflow:visible; pointer-events:none; z-index:1; }
         .link { stroke:var(--faint); stroke-width:2.5; fill:none; opacity:.82; pointer-events:none; }
@@ -219,6 +232,35 @@
         .comfy-run.running i { color:#facc15; fill:#facc15; animation:zapPulse .8s ease-in-out infinite; }
         @keyframes zapPulse { 0%,100% { transform:scale(1); opacity:.72; } 50% { transform:scale(1.18); opacity:1; } }
         .hint { position:absolute; left:50%; bottom:24px; transform:translateX(-50%); z-index:25; color:#94a3b8; font-size:11px; font-weight:700; pointer-events:none; }
+
+        /* DESIGN.md §17.4 右侧浮动属性面板：dark glass，floating right，280px 宽，0 圆角 */
+        .inspector { position:absolute; top:80px; right:24px; width:280px; max-height:calc(100vh - 120px); z-index:32; pointer-events:auto; background:rgba(28,28,30,0.92); color:#f5f5f5; border:1px solid #2a2a2d; border-radius:0; box-shadow:inset 0 1px 0 rgba(255,255,255,0.04); backdrop-filter:blur(8px); padding:16px; display:none; flex-direction:column; gap:12px; overflow:auto; }
+        .inspector.open { display:flex; }
+        .inspector .insp-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .inspector .insp-tag { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; background:#0f0f0f; color:#fff; font-size:12px; font-weight:500; letter-spacing:0.01em; border-radius:0; }
+        .inspector .insp-tag .pixel-icon { color:#fa520f; }
+        .inspector .insp-close { width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; background:transparent; color:#9a9a9a; border:none; cursor:pointer; border-radius:0; }
+        .inspector .insp-close:hover { color:#fa520f; }
+        .inspector .insp-section { display:flex; flex-direction:column; gap:6px; }
+        .inspector .insp-label { color:#9a9a9a; font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:0.08em; }
+        .inspector .insp-value { color:#f5f5f5; font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,Menlo,monospace; font-size:13px; line-height:1.45; word-break:break-all; }
+        .inspector .insp-field { background:#1c1c1e; border:1px solid #2a2a2d; border-radius:0; padding:8px 10px; color:#f5f5f5; font-family:'JetBrains Mono',ui-monospace,monospace; font-size:12px; outline:none; }
+        .inspector .insp-field:focus { border-color:#fa520f; }
+        .inspector .insp-row { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; }
+        .inspector .insp-actions { display:flex; gap:8px; margin-top:auto; padding-top:8px; border-top:1px solid #2a2a2d; }
+        .inspector .insp-btn { flex:1; height:32px; display:inline-flex; align-items:center; justify-content:center; gap:6px; background:#0f0f0f; color:#fff; font-size:12px; font-weight:500; border:none; border-radius:0; cursor:pointer; }
+        .inspector .insp-btn:hover { background:#000; }
+        .inspector .insp-btn.is-secondary { background:#26262a; color:#f5f5f5; }
+        .inspector .insp-btn.is-secondary:hover { background:#161618; }
+        .inspector .insp-btn .pixel-icon { color:#fa520f; }
+
+        /* DESIGN.md §17.4 右下角角标：48×48 像素品牌 "IC" 橙色 */
+        .canvas-brand-mark { position:absolute; right:24px; bottom:24px; z-index:24; width:48px; height:48px; display:flex; align-items:center; justify-content:center; color:#fa520f; pointer-events:none; }
+        .canvas-brand-mark .pixel-icon { width:48px; height:48px; }
+
+        /* Gate（画布选择/回收站）顶部段标签风：cream 网格 + dark glass 卡 */
+        .canvas-gate { background:#fffaeb !important; background-image:linear-gradient(to right, rgba(230,213,168,0.55) 1px, transparent 1px), linear-gradient(to bottom, rgba(230,213,168,0.55) 1px, transparent 1px) !important; background-size:80px 80px !important; }
+        .theme-dark .canvas-gate { background:#0e0e10 !important; background-image:linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px) !important; }
         .drop-overlay { position:absolute; inset:0; z-index:20; display:none; align-items:center; justify-content:center; color:#64748b; background:rgba(248,250,252,.72); backdrop-filter:blur(2px); font-weight:800; letter-spacing:.16em; }
         .drop-overlay.active { display:flex; }
         .create-menu { position:absolute; z-index:40; display:none; width:190px; padding:8px; border-radius:18px; background:rgba(255,255,255,.96); border:1px solid #e8edf3; box-shadow:0 20px 50px rgba(15,23,42,.14); backdrop-filter:blur(16px); }
@@ -349,6 +391,23 @@
         .canvas-gate.trash-mode #gateCreateBtn { display:none; }
         .trash-note { display:none; margin-top:14px; padding:10px 12px; border-radius:12px; background:#fff8e6; color:#92400e; font-size:11px; line-height:1.35; font-weight:700; border:1px solid #fde68a; }
         .canvas-gate.trash-mode .trash-note { display:block; }
+        /* DESIGN.md §17.4 回收站：cream 网格底 + dark glass 卡 + §6 段标签 */
+        .canvas-gate.trash-mode .gate-panel { background:rgba(28,28,30,0.92); color:#f5f5f5; border:1px solid #2a2a2d; border-radius:0; box-shadow:inset 0 1px 0 rgba(255,255,255,0.04); backdrop-filter:blur(8px); }
+        .canvas-gate.trash-mode .gate-title { color:#fff; background:#0f0f0f; padding:8px 14px; display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:500; letter-spacing:0.01em; border-radius:0; }
+        .canvas-gate.trash-mode .gate-title::after { content:""; display:inline-block; width:12px; height:8px; background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 6' shape-rendering='crispEdges'><rect x='0' y='1' width='2' height='2' fill='%23fa520f'/><rect x='2' y='2' width='2' height='2' fill='%23fa520f'/><rect x='4' y='2' width='2' height='2' fill='%23fa520f'/><rect x='6' y='1' width='2' height='2' fill='%23fa520f'/><rect x='3' y='3' width='2' height='1' fill='%23fa520f'/></svg>") no-repeat center / contain; }
+        .canvas-gate.trash-mode .gate-subtitle { color:#9a9a9a; }
+        .canvas-gate.trash-mode .gate-count-pill { background:#26262a; color:#f5f5f5; border-radius:4px; }
+        .canvas-gate.trash-mode .gate-list { background:#1c1c1e; border:1px solid #2a2a2d; border-radius:0; }
+        .canvas-gate.trash-mode .canvas-item { background:#161618; border:1px solid #2a2a2d; border-radius:0; }
+        .canvas-gate.trash-mode .canvas-card-title,
+        .canvas-gate.trash-mode .canvas-card-time { color:#f5f5f5; }
+        .canvas-gate.trash-mode .gate-back-link,
+        .canvas-gate.trash-mode .gate-icon-btn { background:#1c1c1e; color:#f5f5f5; border:1px solid #2a2a2d; border-radius:0; }
+        .canvas-gate.trash-mode .gate-back-link:hover,
+        .canvas-gate.trash-mode .gate-icon-btn:hover { background:#0e0e10; color:#fa520f; border-color:#2a2a2d; }
+        .canvas-gate.trash-mode .trash-note { background:#1c1c1e; color:#ffb83e; border:1px solid #2a2a2d; border-radius:0; }
+        /* §15.6 checkbox 多选样式：trash 模式下的画布卡角标 */
+        .canvas-gate.trash-mode .canvas-trash-check { position:absolute; left:8px; top:8px; width:14px; height:14px; background:#1c1c1e; border:1px solid #2a2a2d; border-radius:0; z-index:3; pointer-events:none; }
         .create-confirm,.create-cancel { width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
         .create-confirm { background:#111827; color:#fff; }
         .create-cancel { background:#fff; color:#64748b; border:1px solid #e8edf3; }
@@ -415,7 +474,7 @@
     <div id="shell" class="shell no-canvas">
         <div class="topbar">
             <div class="panel canvas-nav">
-                <button id="backToManagerBtn" class="tool-btn" type="button" title="返回画布管理" aria-label="返回画布管理"><i data-lucide="arrow-left" class="w-4 h-4"></i></button>
+                <button id="backToManagerBtn" class="tool-btn" type="button" title="返回画布管理" aria-label="返回画布管理"><svg class="pixel-icon pixel-icon--md" style="transform:rotate(180deg);"><use href="#chevron-right"/></svg></button>
                 <div class="canvas-nav-meta">
                     <div id="currentCanvasTitle" class="current-canvas-title">未命名画布</div>
                     <div id="currentCanvasTime" class="current-canvas-time">--</div>
@@ -423,14 +482,14 @@
                 <p id="saveState" style="display:none">请选择或新建画布</p>
             </div>
             <div class="panel toolbar editor-only">
-                <button class="tool-btn" onclick="addImageNode()"><i data-lucide="image-plus" class="w-4 h-4"></i>图片</button>
-                <button class="tool-btn" onclick="addPromptNode()"><i data-lucide="text-cursor-input" class="w-4 h-4"></i>提示词</button>
-                <button class="tool-btn" onclick="addLLMNode()"><i data-lucide="message-square-text" class="w-4 h-4"></i>LLM</button>
-                <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i>API生成</button>
-                <button class="tool-btn" onclick="addMsGenNode()"><i data-lucide="cloud-lightning" class="w-4 h-4"></i>MS生成</button>
-                <button class="tool-btn" onclick="addComfyNode()"><i data-lucide="workflow" class="w-4 h-4"></i>ComfyUI</button>
-                <button class="tool-btn" onclick="addOutputNode()"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
-                <button class="tool-btn" onclick="groupSelectedImages()"><i data-lucide="group" class="w-4 h-4"></i>分组</button>
+                <button class="tool-btn" onclick="addImageNode()" title="图片" aria-label="图片"><svg class="pixel-icon pixel-icon--md"><use href="#nav-zimage"/></svg></button>
+                <button class="tool-btn" onclick="addPromptNode()" title="提示词" aria-label="提示词"><svg class="pixel-icon pixel-icon--md"><use href="#nav-chat"/></svg></button>
+                <button class="tool-btn" onclick="addLLMNode()" title="LLM" aria-label="LLM"><svg class="pixel-icon pixel-icon--md"><use href="#flame"/></svg></button>
+                <button class="tool-btn" onclick="addGeneratorNode()" title="API 生成" aria-label="API 生成"><svg class="pixel-icon pixel-icon--md"><use href="#diamond"/></svg></button>
+                <button class="tool-btn" onclick="addMsGenNode()" title="MS 生成" aria-label="MS 生成"><svg class="pixel-icon pixel-icon--md"><use href="#nav-online"/></svg></button>
+                <button class="tool-btn" onclick="addComfyNode()" title="ComfyUI" aria-label="ComfyUI"><svg class="pixel-icon pixel-icon--md"><use href="#nav-canvas"/></svg></button>
+                <button class="tool-btn" onclick="addOutputNode()" title="Output" aria-label="Output"><svg class="pixel-icon pixel-icon--md"><use href="#send"/></svg></button>
+                <button class="tool-btn" onclick="groupSelectedImages()" title="分组" aria-label="分组"><svg class="pixel-icon pixel-icon--md"><use href="#plus"/></svg></button>
             </div>
         </div>
 
@@ -486,6 +545,50 @@
                 <div id="nodes"></div>
             </div>
         </div>
+        <!-- DESIGN.md §17.4 右侧浮动属性面板，节点选中时显示 -->
+        <aside id="inspectorPanel" class="inspector editor-only" aria-label="节点属性面板">
+            <div class="insp-header">
+                <span class="insp-tag" id="inspectorTag">
+                    <span id="inspectorTagText">Properties</span>
+                    <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#chevron-down"/></svg>
+                </span>
+                <button class="insp-close" type="button" onclick="closeInspector()" title="关闭" aria-label="关闭">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#cross"/></svg>
+                </button>
+            </div>
+            <div class="insp-section">
+                <div class="insp-label">Type</div>
+                <div class="insp-value" id="inspectorType">-</div>
+            </div>
+            <div class="insp-section">
+                <div class="insp-label">Position</div>
+                <div class="insp-value" id="inspectorPos">-</div>
+            </div>
+            <div class="insp-section">
+                <div class="insp-label">Size</div>
+                <div class="insp-value" id="inspectorSize">-</div>
+            </div>
+            <div class="insp-section" id="inspectorExtraWrap" style="display:none;">
+                <div class="insp-label" id="inspectorExtraLabel">Name</div>
+                <div class="insp-value" id="inspectorExtra">-</div>
+            </div>
+            <div class="insp-actions">
+                <button class="insp-btn is-secondary" type="button" onclick="inspectorDuplicateNode()" title="复制节点">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#copy"/></svg>
+                    <span>Duplicate</span>
+                </button>
+                <button class="insp-btn" type="button" onclick="inspectorDeleteNode()" title="删除节点">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#trash"/></svg>
+                    <span>Delete</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- DESIGN.md §17.4 右下角 IC 像素品牌字角标 -->
+        <div class="canvas-brand-mark editor-only" aria-hidden="true">
+            <svg class="pixel-icon" viewBox="0 0 48 48"><use href="#ic-brand"/></svg>
+        </div>
+
         <div class="hint editor-only">拖拽画布移动，Ctrl 框选多选，拖动选中节点可一起移动。图片/提示词节点右下端口拖线到生成节点。</div>
         <div id="outputLightbox" class="output-lightbox" onclick="closeOutputLightbox()">
             <div id="outputPreview" class="output-preview" onclick="event.stopPropagation()">
@@ -1765,6 +1868,72 @@
             refreshGeometry();
             refreshGeometryAfterLayout();
             refreshIcons();
+            // DESIGN.md §17.4 选中节点时同步右侧属性面板
+            syncInspector();
+        }
+
+        // ====================================================================
+        // DESIGN.md §17.4 右侧浮动属性面板（dark glass card）
+        // 只读 UI 层；点击 Duplicate/Delete 通过现有 nodes 数据结构操作
+        // ====================================================================
+        function syncInspector(){
+            const panel = document.getElementById('inspectorPanel');
+            if(!panel) return;
+            if(selected.size !== 1) { panel.classList.remove('open'); return; }
+            const id = [...selected][0];
+            const node = nodes.find(n => n.id === id);
+            if(!node) { panel.classList.remove('open'); return; }
+            const typeLabel = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'msgen' ? 'Modelscope' : 'Generator';
+            document.getElementById('inspectorTagText').textContent = typeLabel;
+            document.getElementById('inspectorType').textContent = node.type;
+            document.getElementById('inspectorPos').textContent = `x ${Math.round(node.x)} · y ${Math.round(node.y)}`;
+            const size = defaultNodeSize(node.type);
+            document.getElementById('inspectorSize').textContent = `${Math.round(node.w || size.w)} × ${Math.round(node.h || size.h || 0)}`;
+            const extraWrap = document.getElementById('inspectorExtraWrap');
+            const extraLabel = document.getElementById('inspectorExtraLabel');
+            const extra = document.getElementById('inspectorExtra');
+            if(node.type === 'image' && node.name) {
+                extraLabel.textContent = 'Name';
+                extra.textContent = node.name;
+                extraWrap.style.display = '';
+            } else if(node.type === 'prompt' && node.text) {
+                extraLabel.textContent = 'Prompt';
+                extra.textContent = (node.text || '').slice(0, 120) + ((node.text || '').length > 120 ? '…' : '');
+                extraWrap.style.display = '';
+            } else if(node.type === 'llm' && node.model) {
+                extraLabel.textContent = 'Model';
+                extra.textContent = node.model;
+                extraWrap.style.display = '';
+            } else {
+                extraWrap.style.display = 'none';
+            }
+            panel.classList.add('open');
+        }
+        function closeInspector(){
+            selected.clear();
+            const panel = document.getElementById('inspectorPanel');
+            if(panel) panel.classList.remove('open');
+            render();
+        }
+        function inspectorDeleteNode(){
+            if(selected.size !== 1) return;
+            const id = [...selected][0];
+            deleteNode(id);
+        }
+        function inspectorDuplicateNode(){
+            if(selected.size !== 1) return;
+            const id = [...selected][0];
+            const node = nodes.find(n => n.id === id);
+            if(!node) return;
+            const clone = JSON.parse(JSON.stringify(node));
+            clone.id = (typeof uid === 'function' ? uid() : 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+            clone.x = (node.x || 0) + 32;
+            clone.y = (node.y || 0) + 32;
+            nodes.push(clone);
+            selected.clear();
+            selected.add(clone.id);
+            if(typeof scheduleSave === 'function') scheduleSave();
+            render();
         }
         function isNodeControl(target){
             return !!target.closest('textarea, input, select, option, button, .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer');

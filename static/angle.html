@@ -5,10 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>Angle Control | 视角重塑</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="/static/theme.js?v=20260509"></script>
+    <title>Angle control · Infinite-Canvas</title>
+    <link rel="stylesheet" href="/static/design-system.css?v=21">
+    <script src="/static/theme.js?v=20260511a"></script>
     <script type="importmap">
         {
             "imports": {
@@ -17,460 +16,806 @@
         }
     </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap');
-
-        :root {
-            --accent: #111827;
-            --bg: #f9fafb;
-            --card: #ffffff;
-            --easing: cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        /* --- 极简悬浮浅灰滚动条 (无底色/左移) --- */
-        *::-webkit-scrollbar {
-            width: 10px !important;
-            height: 10px !important;
-            background: transparent !important;
-        }
-
-        *::-webkit-scrollbar-track {
-            background: transparent !important;
-            border: none !important;
-        }
-
-        *::-webkit-scrollbar-thumb {
-            background-color: #d8d8d8 !important;
-            border: 3px solid transparent !important;
-            border-right-width: 5px !important;
-            /* 增加右侧间距，使滚动条向左位移 */
-            background-clip: padding-box !important;
-            border-radius: 10px !important;
-        }
-
-        *::-webkit-scrollbar-thumb:hover {
-            background-color: #c0c0c0 !important;
-        }
-
-        *::-webkit-scrollbar-corner {
-            background: transparent !important;
-        }
-
-        * {
-            scrollbar-width: thin !important;
-            scrollbar-color: #d8d8d8 transparent !important;
-        }
-
+        /* ============================================================
+           angle.html 页内特化样式（DESIGN.md v2.1 §17.2 模板）
+           - 不重新定义 token，所有色值来自 design-system.css
+           - 仅添加 §17.2 左右两栏布局 + 本页特有的 Three.js 容器外框
+           ============================================================ */
+        html, body { height: 100%; }
         body {
-            background-color: var(--bg);
-            font-family: 'Inter', -apple-system, sans-serif;
-            color: var(--accent);
-            -webkit-font-smoothing: antialiased;
+            background: var(--bg);
+            background-image:
+                linear-gradient(to right,  rgba(230, 213, 168, 0.55) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.55) 1px, transparent 1px);
+            background-size: 80px 80px;
+            min-height: 100vh;
+        }
+        body.studio-theme-dark {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right,  rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
-        .container-box {
-            max-width: 1280px;
-            margin: 0 auto;
-            padding: 0 40px;
-            margin-top: 50px;
-        }
-
-        /* 统一组件风格 */
-        .glass-btn {
-            background: #111827;
-            transition: all 0.3s var(--easing);
-        }
-
-        .glass-btn:hover {
-            background: #000;
-            transform: translateY(-1px);
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
-        }
-
-        .glass-btn:active {
-            transform: scale(0.98);
-        }
-
-        .upload-item {
-            background: var(--card);
-            border: 1px dashed #e2e8f0;
-            transition: all 0.4s var(--easing);
-        }
-
-        .upload-item:hover {
-            border-color: #000;
-            background: #fff;
-            transform: translateY(-2px);
-        }
-
-        .result-frame {
-            background: #ffffff;
-            border-radius: 32px;
-            border: 1px solid #f1f5f9;
-            box-shadow: 0 2px 15px rgba(0, 0, 0, 0.02);
-        }
-
-        .masonry-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 1.25rem;
-        }
-
-        @media (min-width: 768px) {
-            .masonry-grid {
-                grid-template-columns: repeat(4, 1fr);
-            }
-        }
-
-        .masonry-item {
-            aspect-ratio: 1 / 1;
-            background: #fff;
-            border: 1px solid #f1f5f9;
-            border-radius: 24px;
-            overflow: hidden;
-            transition: all 0.5s var(--easing);
-            position: relative;
-        }
-
-        .masonry-item:hover {
-            transform: translateY(-6px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
-        }
-
-        .nano-input {
-            background: #ffffff;
-            border-radius: 16px;
-            transition: all 0.3s ease;
-            border: 1px solid #e5e7eb;
-        }
-
-        .nano-input:focus {
-            background: #ffffff;
-            box-shadow: 0 0 0 2px #000;
-            border-color: transparent;
-        }
-
-        @keyframes b-loading {
-            0% {
-                transform: scale(1);
-                background: #000;
-            }
-
-            50% {
-                transform: scale(1.15);
-                background: #444;
-            }
-
-            100% {
-                transform: scale(1);
-                background: #000;
-            }
-        }
-
-        .loading-box {
-            width: 10px;
-            height: 10px;
-            animation: b-loading 1s infinite var(--easing);
-        }
-
-        /* 复合切换组件样式 - 来自 zimage */
-        .mode-switcher {
-            position: relative;
-            background: #f1f1f1;
-            padding: 4px;
-            border-radius: 14px;
+        /* §17.2 主布局：左 380 参数面板 + 右栏图片网格 */
+        .page-wrap {
             display: flex;
-            width: 100%;
+            min-height: 100vh;
+            gap: 0;
+        }
+        .param-panel {
+            width: 380px;
+            flex-shrink: 0;
+            padding: 32px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            border-right: 1px solid var(--border);
+            background: transparent;
+        }
+        body.studio-theme-dark .param-panel { border-right-color: var(--dark-border); }
+
+        .stage-main {
+            flex: 1;
+            padding: 32px 32px 64px 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            min-width: 0;
         }
 
-        .mode-btn {
-            position: relative;
-            z-index: 10;
+        /* 参数面板内部分组 */
+        .field { display: flex; flex-direction: column; gap: 8px; }
+        .field-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--ink);
+        }
+        .field-hint {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        /* 右栏顶部标题区 */
+        .stage-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        /* dropzone 上传后的 64×64 缩略图条 */
+        .dropzone-thumb {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--stage-bg);
+            border: 1px solid var(--border);
+        }
+        body.studio-theme-dark .dropzone-thumb {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
+        }
+        .dropzone-thumb img {
+            width: 64px;
+            height: 64px;
+            object-fit: cover;
+            display: block;
+            flex-shrink: 0;
+        }
+        .dropzone-thumb .thumb-meta {
             flex: 1;
-            padding: 8px 0;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .dropzone-thumb .thumb-name {
+            font-size: 14px;
+            color: var(--ink);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .dropzone-thumb .thumb-sub {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+        .dropzone-thumb .thumb-remove {
+            width: 24px;
+            height: 24px;
+            background: var(--ink);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .dropzone-thumb .thumb-remove:hover { background: var(--primary-deep); }
+        body.studio-theme-dark .dropzone-thumb .thumb-remove { background: var(--primary); }
+
+        /* radio 行容器：两个等宽（engine 切换） */
+        .radio-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .radio-grid .radio-row {
+            padding: 10px 12px;
+            background: var(--bg-2);
+            border: 1px solid transparent;
+        }
+        body.studio-theme-dark .radio-grid .radio-row {
+            background: var(--dark-elev);
+        }
+
+        /* ====================================================
+           Three.js 3D 球容器（angle.html 核心特色）
+           §8.1/8.3 边规则：1px solid var(--border) + 0 圆角
+           ==================================================== */
+        .three-stage-card {
+            background: var(--stage-bg);
+            border: 1px solid var(--border);
+            border-radius: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        body.studio-theme-dark .three-stage-card {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
+        }
+        .three-stage-card .three-canvas-wrap {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background: var(--dark-bg);
+            min-height: 0;
+        }
+        /* threeContainer 占满父级（Three.js renderer 会注入 canvas） */
+        #threeContainer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #threeContainer canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+        }
+        .three-stage-card .three-tag {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* 角度控制条三组（rotation / pitch / distance）容器 */
+        .angle-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            padding: 16px;
+            background: var(--stage-bg);
+            border-top: 1px solid var(--border);
+        }
+        body.studio-theme-dark .angle-controls {
+            background: var(--dark-elev);
+            border-top-color: var(--dark-border);
+        }
+        .angle-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .angle-row-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .angle-row-head .angle-label {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--ink);
+        }
+        .angle-row-head .angle-reset {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: var(--muted);
+            padding: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .angle-row-head .angle-reset:hover { color: var(--ink); }
+
+        /* dropzone 4:3 比例显示（上传区与 Three.js 区高度协调） */
+        .dropzone-aspect {
+            aspect-ratio: 4 / 3;
+            min-height: 0;
+            position: relative;
+        }
+        .dropzone-aspect .preview-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+        .dropzone-aspect.has-file { padding: 0; }
+        .dropzone-aspect.has-file .preview-img { display: block; }
+        .dropzone-aspect.has-file .upload-content { display: none; }
+
+        /* Result Card 主舞台 */
+        .result-card {
+            background: var(--stage-bg);
+            border: 1px solid var(--border);
+            border-radius: 0;
+            position: relative;
+            aspect-ratio: 4 / 3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        body.studio-theme-dark .result-card {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
+        }
+        .result-card .out-img {
+            display: none;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            cursor: zoom-in;
+        }
+        .result-card .out-img.is-visible { display: block; }
+        .result-card .empty-stage {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            color: var(--muted);
             text-align: center;
-            font-size: 11px;
-            font-weight: 800;
-            text-transform: uppercase;
-            color: #999;
-            transition: color 0.3s ease;
+        }
+        .result-card .empty-stage .image-placeholder {
+            width: 160px;
+            height: 160px;
+            aspect-ratio: auto;
+        }
+        .result-card .out-download {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            width: 32px;
+            height: 32px;
+            background: var(--ink);
+            color: #fff;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+        }
+        .result-card .out-download.is-visible { display: inline-flex; }
+        .result-card .out-download:hover { background: #000; }
+
+        /* loading 状态（§16.3 棋盘 + 像素 dot pulse + cloud 进度） */
+        .loading-stage {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            width: 100%;
+            height: 100%;
+            padding: 32px;
+        }
+        .loading-stage.is-visible { display: flex; }
+        .loading-stage .image-placeholder {
+            width: 200px;
+            height: 200px;
+            aspect-ratio: auto;
+        }
+        .loading-stage .term-card {
+            width: 100%;
+            max-width: 480px;
+        }
+        .loading-stage .term-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 0 4px 0;
+        }
+        .loading-stage .term-bar .bar-track {
+            flex: 1;
+            height: 4px;
+            background: var(--dark-muted);
+        }
+        .loading-stage .term-bar .bar-fill {
+            height: 100%;
+            background: var(--primary);
+            width: 0%;
+        }
+
+        /* Archive grid 标题与 §16.2 grid */
+        .archive-section {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .archive-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+        @media (max-width: 1280px) {
+            .archive-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .archive-grid { grid-template-columns: 1fr; }
+        }
+        .archive-card {
+            position: relative;
+            background: var(--stage-bg);
+            border: 1px solid var(--border);
+            border-radius: 0;
+            overflow: hidden;
+            aspect-ratio: 1 / 1;
             cursor: pointer;
         }
+        body.studio-theme-dark .archive-card {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
+        }
+        .archive-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .archive-card .cloud-chip {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            background: rgba(28, 28, 30, 0.92);
+            color: var(--dark-text);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            line-height: 1;
+            border-radius: 0;
+            backdrop-filter: blur(8px);
+        }
+        .archive-card .cloud-chip .pixel-icon { color: var(--primary); }
+        .archive-card .archive-meta {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            padding: 8px 12px;
+            background: var(--bg-2);
+            color: var(--ink);
+            font-size: 12px;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 0.15s step-end;
+        }
+        body.studio-theme-dark .archive-card .archive-meta {
+            background: rgba(28, 28, 30, 0.92);
+            color: var(--dark-text);
+        }
+        .archive-card:hover .archive-meta { opacity: 1; }
+        .archive-card.is-selected { border-color: var(--primary); }
 
-        .mode-btn.active {
-            color: #000;
+        .archive-empty {
+            grid-column: 1 / -1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 48px 16px;
+            color: var(--muted);
+            text-align: center;
+        }
+        .archive-empty .image-placeholder {
+            width: 160px;
+            height: 160px;
+            aspect-ratio: auto;
         }
 
-        .mode-glider {
+        /* Lightbox：§16.5 全黑 .92 + 0 backdrop-blur */
+        .lightbox-mask {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(15, 15, 15, 0.92);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 48px;
+        }
+        .lightbox-mask.is-open { display: flex; }
+        .lightbox-actions {
             position: absolute;
-            height: calc(100% - 8px);
-            width: calc(50% - 4px);
-            background: #fff;
-            border-radius: 11px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-            transition: transform 0.3s var(--easing);
-            z-index: 1;
+            top: 24px;
+            right: 24px;
+            display: inline-flex;
+            gap: 8px;
+            z-index: 2;
+        }
+        .lightbox-actions .lb-btn {
+            width: 32px;
+            height: 32px;
+            background: transparent;
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0;
+        }
+        .lightbox-actions .lb-btn:hover { background: rgba(255, 255, 255, 0.08); }
+        .lightbox-actions .lb-btn .pixel-icon { color: #fff; }
+
+        .lightbox-meta {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: var(--ink);
+            color: #fff;
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+        .lightbox-meta.is-visible { display: inline-flex; }
+        .lightbox-img {
+            max-width: 100%;
+            max-height: calc(100vh - 192px);
+            object-fit: contain;
+        }
+        .lightbox-footer {
+            position: absolute;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: inline-flex;
+            gap: 12px;
+            z-index: 2;
+        }
+
+        @media (max-width: 1024px) {
+            .page-wrap { flex-direction: column; }
+            .param-panel {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
         }
     </style>
-    <link rel="stylesheet" href="/static/theme.css?v=20260510-studio-pages-blue-dark10">
 </head>
 
-<body class="selection:bg-black selection:text-white">
+<body>
+    <!-- 内联 pixel sprite：所有 <use href="#xxx"/> 引用 -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+        <symbol id="i-chevron-right" viewBox="0 0 12 8" shape-rendering="crispEdges">
+            <rect x="3" y="1" width="2" height="2" fill="currentColor"/>
+            <rect x="4" y="2" width="2" height="2" fill="currentColor"/>
+            <rect x="5" y="3" width="2" height="2" fill="currentColor"/>
+            <rect x="4" y="4" width="2" height="2" fill="currentColor"/>
+            <rect x="3" y="5" width="2" height="2" fill="currentColor"/>
+        </symbol>
+        <symbol id="i-chevron-down" viewBox="0 0 8 6" shape-rendering="crispEdges">
+            <rect x="0" y="1" width="2" height="2" fill="currentColor"/>
+            <rect x="2" y="2" width="2" height="2" fill="currentColor"/>
+            <rect x="4" y="2" width="2" height="2" fill="currentColor"/>
+            <rect x="6" y="1" width="2" height="2" fill="currentColor"/>
+            <rect x="3" y="3" width="2" height="1" fill="currentColor"/>
+        </symbol>
+        <symbol id="i-cross" viewBox="0 0 12 12" shape-rendering="crispEdges">
+            <rect x="2" y="2" width="2" height="2" fill="currentColor"/>
+            <rect x="4" y="4" width="2" height="2" fill="currentColor"/>
+            <rect x="5" y="5" width="2" height="2" fill="currentColor"/>
+            <rect x="6" y="6" width="2" height="2" fill="currentColor"/>
+            <rect x="8" y="8" width="2" height="2" fill="currentColor"/>
+            <rect x="8" y="2" width="2" height="2" fill="currentColor"/>
+            <rect x="6" y="4" width="2" height="2" fill="currentColor"/>
+            <rect x="4" y="6" width="2" height="2" fill="currentColor"/>
+            <rect x="2" y="8" width="2" height="2" fill="currentColor"/>
+        </symbol>
+        <symbol id="i-upload" viewBox="0 0 12 12" shape-rendering="crispEdges">
+            <rect x="5" y="1" width="2" height="6" fill="currentColor"/>
+            <rect x="3" y="3" width="2" height="2" fill="currentColor"/>
+            <rect x="7" y="3" width="2" height="2" fill="currentColor"/>
+            <rect x="2" y="5" width="2" height="2" fill="currentColor"/>
+            <rect x="8" y="5" width="2" height="2" fill="currentColor"/>
+            <rect x="1" y="9" width="10" height="2" fill="currentColor"/>
+        </symbol>
+        <symbol id="i-download" viewBox="0 0 12 12" shape-rendering="crispEdges">
+            <rect x="5" y="1" width="2" height="6" fill="currentColor"/>
+            <rect x="3" y="5" width="2" height="2" fill="currentColor"/>
+            <rect x="7" y="5" width="2" height="2" fill="currentColor"/>
+            <rect x="2" y="3" width="2" height="2" fill="currentColor"/>
+            <rect x="8" y="3" width="2" height="2" fill="currentColor"/>
+            <rect x="1" y="9" width="10" height="2" fill="currentColor"/>
+        </symbol>
+        <symbol id="i-reset" viewBox="0 0 12 12" shape-rendering="crispEdges">
+            <rect x="3" y="2" width="6" height="1" fill="currentColor"/>
+            <rect x="2" y="3" width="1" height="6" fill="currentColor"/>
+            <rect x="9" y="3" width="1" height="6" fill="currentColor"/>
+            <rect x="3" y="9" width="6" height="1" fill="currentColor"/>
+            <rect x="5" y="5" width="2" height="2" fill="currentColor"/>
+            <rect x="1" y="1" width="2" height="2" fill="currentColor"/>
+        </symbol>
+        <symbol id="i-cloud" viewBox="0 0 16 16" shape-rendering="crispEdges">
+            <rect x="5" y="4" width="4" height="1" fill="currentColor"/>
+            <rect x="4" y="5" width="1" height="3" fill="currentColor"/>
+            <rect x="9" y="5" width="1" height="1" fill="currentColor"/>
+            <rect x="10" y="6" width="3" height="1" fill="currentColor"/>
+            <rect x="13" y="7" width="1" height="3" fill="currentColor"/>
+            <rect x="2" y="9" width="1" height="2" fill="currentColor"/>
+            <rect x="3" y="8" width="1" height="3" fill="currentColor"/>
+            <rect x="3" y="11" width="11" height="1" fill="currentColor"/>
+            <rect x="12" y="10" width="2" height="1" fill="currentColor"/>
+        </symbol>
+    </svg>
 
-    <div class="container-box">
-        <header class="flex flex-col md:flex-row justify-between items-end mb-16 gap-6">
-            <div class="space-y-1">
-                <h1 class="text-4xl font-extrabold tracking-[-0.05em] flex items-center">
-                    ANGLE CONTROL<span class="text-base mt-3 ml-1">®</span>
-                </h1>
-                <p class="text-[10px] font-bold uppercase tracking-[0.5em] text-gray-400">Camera & Perspective Control
-                </p>
+    <div class="page-wrap">
+        <!-- ================== 左：380px 参数面板 ================== -->
+        <aside class="param-panel">
+            <!-- 顶部段标签 §6 -->
+            <div>
+                <span class="section-tag">
+                    Angle control
+                    <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+                </span>
             </div>
-            <nav class="flex gap-8 text-[11px] font-bold uppercase tracking-widest text-gray-500">
-                <span class="text-black border-b-2 border-black pb-1">Angle</span>
-            </nav>
-        </header>
 
-        <main class="space-y-12">
-            <!-- Row 1: Upload and 3D Control -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-10 items-start">
-                <section class="group w-full">
-                    <h3 class="text-[9px] font-black uppercase tracking-[0.3em] mb-5 text-gray-400">01. Input Source
-                    </h3>
-                    <div id="dropzone"
-                        class="upload-item relative overflow-hidden rounded-2xl aspect-[4/3] flex flex-col items-center justify-center cursor-pointer">
-                        <input type="file" id="fileInput" class="hidden" accept="image/*">
-
-                        <div id="uploadContent" class="text-center space-y-4">
-                            <div
-                                class="w-14 h-14 rounded-full border border-gray-200 bg-white flex items-center justify-center mx-auto group-hover:bg-black group-hover:text-white group-hover:border-black transition-all duration-500">
-                                <i data-lucide="arrow-up" class="w-5 h-5"></i>
-                            </div>
-                            <p class="text-[11px] font-bold uppercase tracking-tight">Drop image here</p>
-                        </div>
-
-                        <img id="previewImg" class="hidden absolute inset-0 w-full h-full object-cover">
-
-                        <div id="changeOverlay"
-                            class="hidden absolute inset-0 bg-black/10 backdrop-blur-sm items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                            <span
-                                class="bg-white px-5 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-2xl">Change</span>
-                        </div>
+            <!-- 输入图上传 §15.8 -->
+            <div class="field">
+                <label class="field-label">Input image</label>
+                <div id="dropzone" class="dropzone dropzone-aspect">
+                    <input type="file" id="fileInput" accept="image/*" style="display:none">
+                    <div class="upload-content" id="uploadContent" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;width:100%;height:100%;">
+                        <svg class="pixel-icon" style="width:32px;height:32px;color:var(--primary)" aria-hidden="true">
+                            <use href="#i-upload"/>
+                        </svg>
+                        <div class="text-body">Drop image or click</div>
+                        <div class="field-hint">PNG / JPG, drag &amp; drop, click, or paste</div>
                     </div>
-                </section>
+                    <img id="previewImg" class="preview-img" alt="input">
+                </div>
+            </div>
 
-                <section id="cameraControl" class="space-y-6 w-full">
-                    <h3 class="text-[9px] font-black uppercase tracking-[0.3em] text-gray-400">02. Camera Control</h3>
-                    <div
-                        class="w-full aspect-[4/3] flex flex-col md:flex-row bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                        <!-- 3D View -->
-                        <div id="threeContainer" class="relative flex-1 bg-[#222] h-full min-h-0"></div>
+            <!-- 提示词 §15.2 -->
+            <div class="field">
+                <label class="field-label" for="promptInput">Prompt
+                    <span class="field-hint">auto-filled by 3D control</span>
+                </label>
+                <textarea id="promptInput" class="textarea" rows="4"
+                    placeholder="请通过右侧 3D 控制器调整角度，或输入提示词"></textarea>
+            </div>
 
-                        <!-- Controls -->
-                        <div
-                            class="w-full md:w-64 flex-shrink-0 p-5 flex flex-col justify-center gap-4 border-l border-gray-100 bg-white overflow-y-auto">
-                            <!-- Horizontal -->
-                            <div class="space-y-3">
-                                <div
-                                    class="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                                    <div class="flex items-center gap-2">
-                                        <i data-lucide="move-horizontal" class="w-3 h-3"></i>
-                                        <span>Rotation</span>
-                                    </div>
-                                    <div class="flex items-center gap-1.5">
-                                        <button onclick="resetControl('h')"
-                                            class="text-gray-300 hover:text-black transition-colors p-1" title="Reset">
-                                            <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
-                                        </button>
-                                        <div class="flex items-center bg-gray-100 rounded-md px-2">
-                                            <input type="number" id="val-horizontal" value="0"
-                                                class="w-10 bg-transparent py-1 text-black text-center outline-none border-none p-0 text-[10px] font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                oninput="syncInput('h')">
-                                            <span class="text-gray-400 select-none text-[10px]">°</span>
-                                        </div>
-                                    </div>
+            <!-- 引擎切换 §15.7 — 替换 mode-switcher 玻璃胶囊 -->
+            <div class="field">
+                <label class="field-label">Engine</label>
+                <div class="radio-grid">
+                    <label class="radio-row">
+                        <input type="radio" name="engine" value="local" checked onchange="switchEngine('local')">
+                        <span class="radio-box"></span>
+                        <span>Local · ComfyUI</span>
+                    </label>
+                    <label class="radio-row">
+                        <input type="radio" name="engine" value="cloud" onchange="switchEngine('cloud')">
+                        <span class="radio-box"></span>
+                        <span>Cloud · ModelScope</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 主 CTA §7.1 -->
+            <div style="margin-top:auto; padding-top:16px;">
+                <button id="genBtn" type="button" class="btn-primary" onclick="handleGenerate()" style="width:100%; justify-content:center;">
+                    <span id="btnText">Generate</span>
+                    <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- ================== 右：3D 控制 + 结果 + Archive ================== -->
+        <main class="stage-main">
+            <!-- 顶部：camera control + result preview 两列 -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+                <!-- ============== Three.js 3D 球容器 ============== -->
+                <section>
+                    <div class="stage-header" style="margin-bottom:12px;">
+                        <span class="section-tag">
+                            Camera control
+                            <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+                        </span>
+                    </div>
+                    <div class="three-stage-card" id="cameraControl">
+                        <div class="three-canvas-wrap">
+                            <!-- threeContainer 保留 ID，Three.js renderer 注入 -->
+                            <div id="threeContainer"></div>
+                        </div>
+
+                        <!-- §15.4 三组 slider：rotation / pitch / distance -->
+                        <div class="angle-controls">
+                            <!-- Rotation -->
+                            <div class="angle-row">
+                                <div class="angle-row-head">
+                                    <span class="angle-label">Rotation</span>
+                                    <button type="button" class="angle-reset" onclick="resetControl('h')" title="Reset rotation">
+                                        <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-reset"/></svg>
+                                    </button>
                                 </div>
-                                <input type="range" id="rotate-h" min="-90" max="90" value="0"
-                                    class="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black">
+                                <div class="slider">
+                                    <div class="slider-track" id="rotH-track">
+                                        <div class="slider-fill" id="rotH-fill" style="width:50%"></div>
+                                        <div class="slider-handle" id="rotH-handle" style="left:50%"></div>
+                                    </div>
+                                    <span class="slider-value" id="rotH-value">0°</span>
+                                </div>
+                                <!-- 原 range/number input 保留（隐藏），桥接 Three.js 逻辑 -->
+                                <input type="range" id="rotate-h" min="-90" max="90" value="0" style="display:none">
+                                <input type="number" id="val-horizontal" value="0" style="display:none" oninput="syncInput('h')">
                             </div>
 
-                            <!-- Vertical -->
-                            <div class="space-y-3">
-                                <div
-                                    class="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                                    <div class="flex items-center gap-2">
-                                        <i data-lucide="move-vertical" class="w-3 h-3"></i>
-                                        <span>Pitch</span>
-                                    </div>
-                                    <div class="flex items-center gap-1.5">
-                                        <button onclick="resetControl('v')"
-                                            class="text-gray-300 hover:text-black transition-colors p-1" title="Reset">
-                                            <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
-                                        </button>
-                                        <div class="flex items-center bg-gray-100 rounded-md px-2">
-                                            <input type="number" id="val-vertical" value="0"
-                                                class="w-10 bg-transparent py-1 text-black text-center outline-none border-none p-0 text-[10px] font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                oninput="syncInput('v')">
-                                            <span class="text-gray-400 select-none text-[10px]">°</span>
-                                        </div>
-                                    </div>
+                            <!-- Pitch -->
+                            <div class="angle-row">
+                                <div class="angle-row-head">
+                                    <span class="angle-label">Pitch</span>
+                                    <button type="button" class="angle-reset" onclick="resetControl('v')" title="Reset pitch">
+                                        <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-reset"/></svg>
+                                    </button>
                                 </div>
-                                <input type="range" id="rotate-v" min="-90" max="90" value="0"
-                                    class="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black">
+                                <div class="slider">
+                                    <div class="slider-track" id="rotV-track">
+                                        <div class="slider-fill" id="rotV-fill" style="width:50%"></div>
+                                        <div class="slider-handle" id="rotV-handle" style="left:50%"></div>
+                                    </div>
+                                    <span class="slider-value" id="rotV-value">0°</span>
+                                </div>
+                                <input type="range" id="rotate-v" min="-90" max="90" value="0" style="display:none">
+                                <input type="number" id="val-vertical" value="0" style="display:none" oninput="syncInput('v')">
                             </div>
 
                             <!-- Distance -->
-                            <div class="space-y-3">
-                                <div
-                                    class="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                                    <div class="flex items-center gap-2">
-                                        <i data-lucide="zoom-in" class="w-3 h-3"></i>
-                                        <span>Distance</span>
-                                    </div>
-                                    <div class="flex items-center gap-1.5">
-                                        <button onclick="resetControl('d')"
-                                            class="text-gray-300 hover:text-black transition-colors p-1" title="Reset">
-                                            <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
-                                        </button>
-                                        <div class="flex items-center bg-gray-100 rounded-md px-2">
-                                            <input type="number" id="val-distance" value="4.0" step="0.1"
-                                                class="w-10 bg-transparent py-1 text-black text-center outline-none border-none p-0 text-[10px] font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                oninput="syncInput('d')">
-                                        </div>
-                                    </div>
+                            <div class="angle-row">
+                                <div class="angle-row-head">
+                                    <span class="angle-label">Distance</span>
+                                    <button type="button" class="angle-reset" onclick="resetControl('d')" title="Reset distance">
+                                        <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-reset"/></svg>
+                                    </button>
                                 </div>
-                                <input type="range" id="distance" min="0.1" max="8" value="4" step="0.1"
-                                    class="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black">
+                                <div class="slider">
+                                    <div class="slider-track" id="dist-track">
+                                        <div class="slider-fill" id="dist-fill" style="width:49.4%"></div>
+                                        <div class="slider-handle" id="dist-handle" style="left:49.4%"></div>
+                                    </div>
+                                    <span class="slider-value" id="dist-value">4.0</span>
+                                </div>
+                                <input type="range" id="distance" min="0.1" max="8" value="4" step="0.1" style="display:none">
+                                <input type="number" id="val-distance" value="4.0" step="0.1" style="display:none" oninput="syncInput('d')">
                             </div>
                         </div>
                     </div>
                 </section>
-            </div>
 
-            <!-- Row 2: Parameters & Result -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-10 items-stretch">
-                <section class="flex flex-col space-y-6">
-                    <h3 class="text-[9px] font-black uppercase tracking-[0.3em] text-gray-400">03. Parameters</h3>
-
-                    <div class="space-y-3 flex-1 flex flex-col">
-                        <div class="flex items-center gap-2 text-gray-800 ml-1">
-                            <i data-lucide="text-quote" class="w-3 h-3"></i>
-                            <span class="text-[10px] font-bold uppercase tracking-widest">Prompt</span>
-                        </div>
-                        <textarea id="promptInput"
-                            class="nano-input w-full flex-1 p-5 text-sm outline-none resize-none placeholder-gray-300"
-                            placeholder="请通过右侧控制器调整，或输入提示词"></textarea>
+                <!-- ============== Result Preview ============== -->
+                <section>
+                    <div class="stage-header" style="margin-bottom:12px;">
+                        <span class="section-tag">
+                            Result preview
+                            <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+                        </span>
                     </div>
-
-                    <!-- Engine Switcher -->
-                    <div class="mode-switcher">
-                        <div id="modeLocal" class="mode-btn active flex items-center justify-center gap-1.5"
-                            onclick="switchEngine('local')">
-                            <i data-lucide="monitor" class="w-3 h-3"></i>
-                            <span>Local</span>
-                        </div>
-                        <div id="modeCloud" class="mode-btn flex items-center justify-center gap-1.5"
-                            onclick="switchEngine('cloud')">
-                            <i data-lucide="cloud" class="w-3 h-3"></i>
-                            <span>ModelScope</span>
-                        </div>
-                        <div id="glider" class="mode-glider"></div>
-                    </div>
-
-                    <button id="genBtn" onclick="handleGenerate()"
-                        class="glass-btn w-full py-5 text-white rounded-xl font-bold text-[11px] uppercase tracking-[0.4em] flex items-center justify-center gap-3 shadow-xl shadow-black/10 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <i data-lucide="zap" id="btnIcon" class="w-4 h-4 text-yellow-400"></i>
-                        <span id="btnText">Generate New Angle</span>
-                    </button>
-                </section>
-
-                <section class="space-y-6 flex flex-col">
-                    <h3 class="text-[9px] font-black uppercase tracking-[0.3em] text-gray-400">04. Result Preview</h3>
-                    <div id="resultBox"
-                        class="result-frame relative aspect-[4/3] w-full flex items-center justify-center overflow-hidden group">
-                        <div id="emptyState" class="text-center space-y-4 opacity-20">
-                            <i data-lucide="camera" class="w-12 h-12 mx-auto stroke-[1px]"></i>
-                            <p class="text-[10px] font-black tracking-[0.5em] uppercase">Canvas Ready</p>
+                    <div id="resultBox" class="result-card">
+                        <!-- empty state -->
+                        <div id="emptyState" class="empty-stage">
+                            <div class="image-placeholder"></div>
+                            <div class="text-body">Canvas ready</div>
+                            <div class="field-hint">Upload image and adjust angle</div>
                         </div>
 
-                        <div id="loadingState" class="hidden flex flex-col items-center gap-5 w-full max-w-[80%]">
-                            <div class="loading-box"></div>
-                            <p class="text-[10px] font-bold uppercase tracking-[0.4em] animate-pulse">Processing...</p>
-                            <!-- Progress Bar -->
-                            <div id="cloud-progress-container" class="hidden w-full mt-4">
-                                <div class="flex justify-between text-[9px] font-bold text-gray-400 mb-1 uppercase tracking-widest">
-                                    <span id="cloud-status-text">Pending...</span>
+                        <!-- loading state（§16.3 棋盘 + §16.4 terminal） -->
+                        <div id="loadingState" class="loading-stage">
+                            <div class="image-placeholder">
+                                <span class="section-tag">
+                                    Rendering
+                                    <span class="pixel-dot-pulse"><span></span><span></span><span></span></span>
+                                </span>
+                            </div>
+                            <!-- cloud 进度（terminal 风） -->
+                            <div id="cloud-progress-container" class="terminal-card term-card" style="display:none">
+                                <div>
+                                    <span class="term-prompt">&gt;</span>
+                                    <span id="cloud-status-text">Pending</span>
+                                </div>
+                                <div class="term-bar">
+                                    <div class="bar-track">
+                                        <div class="bar-fill" id="cloud-progress-bar"></div>
+                                    </div>
                                     <span id="cloud-percent">0%</span>
                                 </div>
-                                <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                                    <div id="cloud-progress-bar" class="bg-black h-full rounded-full transition-all duration-300" style="width: 0%"></div>
-                                </div>
+                                <div class="term-info">cloud · modelscope · qwen-image-edit-2511</div>
                             </div>
                         </div>
 
-                        <div id="textResult"
-                            class="hidden w-full h-full p-12 flex flex-col items-center justify-center text-center space-y-8">
-                            <i data-lucide="terminal" class="w-12 h-12 text-gray-300 mx-auto"></i>
-                            <div class="space-y-4 max-w-md">
-                                <p class="text-[10px] font-bold uppercase tracking-[0.5em] text-gray-400">Generated
-                                    Command
-                                </p>
-                                <h2 id="generatedText" class="text-2xl font-bold leading-relaxed text-gray-900"></h2>
-                            </div>
-                            <button onclick="copyText()"
-                                class="px-8 py-3 bg-gray-100 hover:bg-black hover:text-white rounded-full text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2">
-                                <i data-lucide="copy" class="w-3 h-3"></i> Copy
-                            </button>
-                        </div>
-
-                        <img id="outputImg"
-                            class="hidden w-full h-full object-contain p-8 cursor-zoom-in transition-all duration-700 hover:scale-[1.02]"
-                            onclick="zoomImage()">
-
-                        <a id="downloadBtn" href="#" download
-                            class="hidden absolute bottom-8 right-8 w-14 h-14 bg-white shadow-2xl rounded-2xl flex items-center justify-center hover:bg-black hover:text-white transition-all duration-500 border border-gray-100">
-                            <i data-lucide="download" class="w-5 h-5"></i>
+                        <!-- output image -->
+                        <img id="outputImg" class="out-img" onclick="zoomImage()" alt="result">
+                        <a id="downloadBtn" class="out-download" href="#" download>
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#i-download"/></svg>
                         </a>
                     </div>
                 </section>
             </div>
-        </main>
 
-        <section class="mt-32">
-            <div class="flex items-center gap-6 mb-10">
-                <h2 class="text-[11px] font-black uppercase tracking-[0.5em]">Archive</h2>
-                <div class="h-px flex-1 bg-black/5"></div>
-            </div>
-            <div id="masonry" class="masonry-grid"></div>
-            <div id="loadMoreTrigger"
-                class="py-16 text-center opacity-20 text-[10px] font-bold uppercase tracking-widest">
-                End of Archive
-            </div>
-        </section>
-    </div>
-
-    <div id="lightbox" onclick="handleOutsideClick(event)"
-        class="hidden fixed inset-0 z-50 bg-white/95 backdrop-blur-3xl flex items-center justify-center p-8">
-        <button onclick="closeLightbox()"
-            class="absolute top-10 right-10 p-2 hover:rotate-90 transition-transform duration-500">
-            <i data-lucide="x" class="w-8 h-8"></i>
-        </button>
-
-        <div class="max-w-6xl w-full h-full flex flex-col items-center justify-center">
-            <div class="relative">
-                <div id="lightboxRes"
-                    class="absolute top-4 left-4 bg-black/30 backdrop-blur-md border border-white/20 text-white px-3 py-1.5 rounded-full text-[10px] font-medium tracking-wider opacity-0 transition-opacity duration-300 pointer-events-none">
+            <!-- ============== Archive 历史 §16.2 ============== -->
+            <section class="archive-section" style="margin-top:16px;">
+                <div class="stage-header">
+                    <span class="section-tag">
+                        <span id="archiveCountLabel">Archive (0)</span>
+                        <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+                    </span>
+                    <span class="text-mono text-muted">Tap any card to preview</span>
                 </div>
-                <img id="lightboxImg" src="" class="hidden max-h-[80vh] rounded-3xl shadow-2xl">
-            </div>
-            <div class="mt-8">
-                <button onclick="downloadLightboxImage()"
-                    class="px-10 py-4 bg-black text-white rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-xl">
-                    <i data-lucide="save" class="w-4 h-4"></i> Save Master
-                </button>
-            </div>
-        </div>
+
+                <div id="masonry" class="archive-grid">
+                    <div id="archiveEmpty" class="archive-empty">
+                        <div class="image-placeholder"></div>
+                        <div class="text-body">No archive yet</div>
+                        <div class="field-hint">Generated angles will appear here</div>
+                    </div>
+                </div>
+                <div id="loadMoreTrigger" style="padding:24px 0; text-align:center; color:var(--muted); font-family:var(--font-mono); font-size:12px;">
+                    End of archive
+                </div>
+            </section>
+        </main>
     </div>
 
+    <!-- ============================ Lightbox (§16.5) ============================ -->
+    <div id="lightbox" class="lightbox-mask" onclick="handleOutsideClick(event)">
+        <div class="lightbox-meta" id="lightboxRes">
+            <svg class="pixel-icon pixel-icon--sm"><use href="#i-chevron-right"/></svg>
+            <span id="lightboxResText">— × —</span>
+        </div>
+        <div class="lightbox-actions">
+            <button class="lb-btn" type="button" onclick="downloadLightboxImage()" title="Download">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#i-download"/></svg>
+            </button>
+            <button class="lb-btn" type="button" onclick="closeLightbox()" title="Close">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#i-cross"/></svg>
+            </button>
+        </div>
+        <img id="lightboxImg" class="lightbox-img" src="" alt="preview">
+    </div>
+
+    <!-- ====================================================================
+         Three.js 3D 球逻辑 — 严格保留原版（v1 文件原样），不修改
+         ==================================================================== -->
     <script type="module">
         import * as THREE from 'three';
 
@@ -491,7 +836,8 @@
             if (!container || !statusText || !progressBar) return;
 
             // Show container if hidden
-            if (container.classList.contains('hidden')) {
+            if (container.style.display === 'none' || container.classList.contains('hidden')) {
+                container.style.display = '';
                 container.classList.remove('hidden');
             }
 
@@ -571,6 +917,11 @@
 
             // Real-time update prompt
             updatePromptWithAngle(lon, lat, dist);
+
+            // 同步 §15.4 slider UI（新增的桥接层；不修改 Three.js 计算）
+            if (typeof window.syncSliderUI === 'function') {
+                window.syncSliderUI(lon, lat, dist);
+            }
         }
 
         window.syncInput = (type) => {
@@ -715,32 +1066,114 @@
         };
     </script>
 
+    <!-- ====================================================================
+         业务逻辑 + §15.4 slider 桥接
+         ==================================================================== -->
     <script>
-        lucide.createIcons();
-        
-        // --- Engine Switcher Logic (UI Only) ---
+        /* ============================================================
+           §15.4 自定义 slider 桥接层
+           - DOM: .slider-track .slider-fill .slider-handle .slider-value
+           - 用户拖动 →（同步）→ 原 <input type="range">.value → window.updateCamera()
+           - Three.js 主动更新（拖动 3D 球面、Reset）→ syncSliderUI(lon,lat,dist) → 更新 fill / handle / value 文本
+           ============================================================ */
+        const ANGLE_SLIDERS = [
+            { id: 'rotH', rangeId: 'rotate-h',  min: -90, max: 90, step: 1,   suffix: '°',  type: 'h' },
+            { id: 'rotV', rangeId: 'rotate-v',  min: -90, max: 90, step: 1,   suffix: '°',  type: 'v' },
+            { id: 'dist', rangeId: 'distance',  min: 0.1, max: 8,  step: 0.1, suffix: '',   type: 'd' },
+        ];
+
+        function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+        function pctFromValue(v, min, max) { return ((v - min) / (max - min)) * 100; }
+
+        function valueFromClientX(track, clientX, min, max, step) {
+            const rect = track.getBoundingClientRect();
+            let pct = (clientX - rect.left) / rect.width;
+            pct = clamp(pct, 0, 1);
+            let raw = min + pct * (max - min);
+            // 量化到 step
+            const stepped = Math.round(raw / step) * step;
+            // 处理浮点精度
+            const fixed = step < 1 ? parseFloat(stepped.toFixed(2)) : Math.round(stepped);
+            return clamp(fixed, min, max);
+        }
+
+        // 同步 §15.4 UI 到当前值（由 Three.js updateCamera 调用）
+        window.syncSliderUI = function(lon, lat, dist) {
+            const vals = { h: lon, v: lat, d: dist };
+            ANGLE_SLIDERS.forEach(cfg => {
+                const v = vals[cfg.type];
+                if (v === undefined) return;
+                const pct = clamp(pctFromValue(v, cfg.min, cfg.max), 0, 100);
+                const fill = document.getElementById(cfg.id + '-fill');
+                const handle = document.getElementById(cfg.id + '-handle');
+                const display = document.getElementById(cfg.id + '-value');
+                if (fill) fill.style.width = pct + '%';
+                if (handle) handle.style.left = pct + '%';
+                if (display) {
+                    const text = (cfg.step < 1) ? v.toFixed(1) : String(v);
+                    display.innerText = text + cfg.suffix;
+                }
+            });
+        };
+
+        // 给每个 §15.4 slider 绑定鼠标 / 触摸事件 → 回写到原 <input range> → 触发 input 事件 → 走 Three.js
+        ANGLE_SLIDERS.forEach(cfg => {
+            const track = document.getElementById(cfg.id + '-track');
+            if (!track) return;
+            const rangeEl = document.getElementById(cfg.rangeId);
+            if (!rangeEl) return;
+            let dragging = false;
+
+            const applyFromClientX = (clientX) => {
+                const newVal = valueFromClientX(track, clientX, cfg.min, cfg.max, cfg.step);
+                if (parseFloat(rangeEl.value) !== newVal) {
+                    rangeEl.value = newVal;
+                    // 触发原 input 事件 → window.updateCamera()
+                    rangeEl.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            };
+
+            track.addEventListener('mousedown', (e) => {
+                dragging = true;
+                applyFromClientX(e.clientX);
+                e.preventDefault();
+            });
+            window.addEventListener('mousemove', (e) => {
+                if (dragging) applyFromClientX(e.clientX);
+            });
+            window.addEventListener('mouseup', () => dragging = false);
+
+            track.addEventListener('touchstart', (e) => {
+                dragging = true;
+                if (e.touches[0]) applyFromClientX(e.touches[0].clientX);
+            }, { passive: true });
+            window.addEventListener('touchmove', (e) => {
+                if (dragging && e.touches[0]) applyFromClientX(e.touches[0].clientX);
+            }, { passive: true });
+            window.addEventListener('touchend', () => dragging = false);
+        });
+
+        // 初始化 UI（updateCamera 第一次会在 module script 末尾调用，但确保 fallback）
+        window.addEventListener('load', () => {
+            if (typeof window.updateCamera === 'function') window.updateCamera();
+        });
+
+        /* ============================================================
+           Engine 切换（radio）— 替代旧 mode-switcher
+           ============================================================ */
         let currentEngine = 'local';
         const ENGINE_MODE_KEY = 'angle_engine_mode';
 
         window.switchEngine = function(mode) {
             currentEngine = mode;
             localStorage.setItem(ENGINE_MODE_KEY, mode);
-
-            const glider = document.getElementById('glider');
-            const localBtn = document.getElementById('modeLocal');
-            const cloudBtn = document.getElementById('modeCloud');
-
-            if (mode === 'local') {
-                glider.style.transform = 'translateX(0)';
-                localBtn.classList.add('active');
-                cloudBtn.classList.remove('active');
-            } else {
-                glider.style.transform = 'translateX(100%)';
-                cloudBtn.classList.add('active');
-                localBtn.classList.remove('active');
-            }
+            const radios = document.querySelectorAll('input[name="engine"]');
+            radios.forEach(r => { r.checked = (r.value === mode); });
         };
 
+        /* ============================================================
+           CLIENT_ID
+           ============================================================ */
         function generateUUID() {
             if (typeof crypto !== 'undefined' && crypto.randomUUID) {
                 try { return crypto.randomUUID(); } catch (e) { }
@@ -753,11 +1186,15 @@
         const CLIENT_ID = localStorage.getItem("client_id") || generateUUID();
         localStorage.setItem("client_id", CLIENT_ID);
 
+        /* ============================================================
+           Dropzone + 文件上传（API schema 不变）
+           ============================================================ */
         let uploadedPath = "";
         let uploadedFile = null; // Store raw file for cloud upload
         let currentResult = null;
         let allHistory = [];
         let currentIndex = 0;
+        let archiveCount = 0;
         const PAGE_SIZE = 30;
 
         const dropzone = document.getElementById('dropzone');
@@ -771,14 +1208,14 @@
         // Drag and Drop
         dropzone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            dropzone.classList.add('border-black', 'bg-gray-50');
+            dropzone.classList.add('is-over');
         });
         dropzone.addEventListener('dragleave', () => {
-            dropzone.classList.remove('border-black', 'bg-gray-50');
+            dropzone.classList.remove('is-over');
         });
         dropzone.addEventListener('drop', (e) => {
             e.preventDefault();
-            dropzone.classList.remove('border-black', 'bg-gray-50');
+            dropzone.classList.remove('is-over');
             if (e.dataTransfer.files && e.dataTransfer.files[0]) {
                 handleFile(e.dataTransfer.files[0]);
             }
@@ -802,21 +1239,20 @@
 
         async function handleFile(file) {
             if (!file) return;
-            uploadedFile = file; // Store for cloud usage
+            uploadedFile = file;
             const btn = document.getElementById('genBtn');
             const btnText = document.getElementById('btnText');
 
+            btn.classList.add('is-disabled');
             btn.disabled = true;
-            btnText.innerText = "Uploading...";
+            btnText.innerText = "Uploading…";
 
             const reader = new FileReader();
             reader.onload = (e) => {
                 previewImg.src = e.target.result;
-                previewImg.classList.remove('hidden');
-                document.getElementById('uploadContent').classList.add('opacity-0');
-                document.getElementById('changeOverlay').classList.replace('hidden', 'flex');
+                dropzone.classList.add('has-file');
 
-                // Automatically apply to 3D scene
+                // Automatically apply to 3D scene（保留 Three.js 桥接）
                 if (window.update3DTexture) {
                     window.update3DTexture(e.target.result);
                 }
@@ -829,59 +1265,26 @@
                 const res = await fetch('/api/upload', { method: 'POST', body: formData });
                 const data = await res.json();
                 uploadedPath = data.files[0].comfy_name;
+                btn.classList.remove('is-disabled');
                 btn.disabled = false;
-                btnText.innerText = "Generate New Angle";
+                btnText.innerText = "Generate";
             } catch (err) {
                 console.error("Upload error");
-                btnText.innerText = "Upload Failed";
+                btnText.innerText = "Upload failed";
+                btn.classList.remove('is-disabled');
                 btn.disabled = false;
             }
         }
 
-        function applyAngleToPrompt() {
-            const h = parseInt(document.getElementById('rotate-h').value);
-            const v = parseInt(document.getElementById('rotate-v').value);
-
-            let parts = [];
-            if (h !== 0) {
-                const dir = h > 0 ? "向右" : "向左";
-                parts.push(`${dir}旋转${Math.abs(h)}度`);
-            }
-            if (v !== 0) {
-                const dir = v > 0 ? "俯视" : "仰视";
-                parts.push(`${dir}${Math.abs(v)}度`);
-            }
-
-            if (parts.length === 0) {
-                parts.push("保持原位");
-            }
-
-            const resultText = `将相机${parts.join("，")}`;
-
-            const promptInput = document.getElementById('promptInput');
-            // Check if there is existing content, if so append new line
-            if (promptInput.value.trim()) {
-                promptInput.value += '\n' + resultText;
-            } else {
-                promptInput.value = resultText;
-            }
-
-            // Visual feedback
-            promptInput.style.transition = "0.2s";
-            promptInput.style.borderColor = "#000";
-            promptInput.style.boxShadow = "0 0 0 2px rgba(0,0,0,0.1)";
-            setTimeout(() => {
-                promptInput.style.borderColor = "";
-                promptInput.style.boxShadow = "";
-            }, 500);
-        }
-
+        /* ============================================================
+           Cloud 生成（保留原 /api/angle/generate + /api/angle/poll_status schema）
+           ============================================================ */
         async function runCloudTask() {
             if (!uploadedFile) throw new Error("Please upload an image first");
 
             // Get token from centralized management (Personal -> Global)
             let token = localStorage.getItem('modelscope_api_token');
-            
+
             if (!token) {
                 try {
                     const res = await fetch('/api/config/token');
@@ -897,10 +1300,6 @@
             if (!token) {
                 if (window.parent && typeof window.parent.openTokenModal === 'function') {
                     window.parent.openTokenModal();
-                    // Allow the error to propagate so user sees the message
-                    // const err = new Error("请先点击右上角设置 ModelScope Token");
-                    // err.silent = true;
-                    // throw err;
                 }
                 throw new Error("请先点击右上角设置 ModelScope Token");
             }
@@ -914,7 +1313,6 @@
             });
 
             const dataUri = await toBase64(uploadedFile);
-            console.log("DataURI generated, length:", dataUri.length);
 
             // Submit task via dedicated Angle endpoint
             // Get Client ID from parent if available
@@ -935,69 +1333,69 @@
             };
 
             // Reset Progress Bar
-            document.getElementById('cloud-progress-container').classList.add('hidden');
+            const progEl = document.getElementById('cloud-progress-container');
+            progEl.style.display = 'none';
             document.getElementById('cloud-progress-bar').style.width = '0%';
             document.getElementById('cloud-percent').innerText = '0%';
 
             let response;
             try {
-                 response = await fetch('/api/angle/generate', {
+                response = await fetch('/api/angle/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
             } catch (netErr) {
-                 throw new Error(`Network Error: ${netErr.message}`);
+                throw new Error(`Network Error: ${netErr.message}`);
             }
 
-            // Handle Timeout / Continue Loop
+            // Handle Timeout / Continue Loop（保留轮询超时机制）
             while (response.ok) {
-                 const data = await response.json();
-                 
-                 // If success with URL
-                 if (data.url) {
-                     return { images: [data.url] };
-                 }
+                const data = await response.json();
 
-                 // If timeout status, ask user
-                 if (data.status === 'timeout') {
-                     const taskId = data.task_id;
-                     const userContinue = confirm("Cloud generation is taking longer than expected (300s). The queue might be full.\n\nDo you want to continue waiting?");
-                     
-                     if (userContinue) {
-                         // Call poll endpoint
-                         const pollPayload = {
-                             "task_id": taskId,
-                             "api_key": token,
-                             "client_id": clientId
-                         };
-                         
-                         // Update UI to show we are still waiting
-                         updateCloudProgress({status: "Resuming...", progress: 0, total: 150});
-                         
-                         response = await fetch('/api/angle/poll_status', {
+                // If success with URL
+                if (data.url) {
+                    return { images: [data.url] };
+                }
+
+                // If timeout status, ask user
+                if (data.status === 'timeout') {
+                    const taskId = data.task_id;
+                    const userContinue = confirm("Cloud generation is taking longer than expected (300s). The queue might be full.\n\nDo you want to continue waiting?");
+
+                    if (userContinue) {
+                        // Call poll endpoint
+                        const pollPayload = {
+                            "task_id": taskId,
+                            "api_key": token,
+                            "client_id": clientId
+                        };
+
+                        // Update UI to show we are still waiting
+                        updateCloudProgressLocal({status: "Resuming...", progress: 0, total: 150});
+
+                        response = await fetch('/api/angle/poll_status', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(pollPayload)
-                         });
-                         continue; // Loop back to check response
-                     } else {
-                         throw new Error("User cancelled waiting.");
-                     }
-                 }
-                 
-                 // Unknown success response
-                 throw new Error("Unknown response format");
+                        });
+                        continue; // Loop back to check response
+                    } else {
+                        throw new Error("User cancelled waiting.");
+                    }
+                }
+
+                // Unknown success response
+                throw new Error("Unknown response format");
             }
 
             if (!response.ok) {
-                 const errText = await response.text();
-                 // Try to parse JSON error if possible
-                 try {
-                     const errJson = JSON.parse(errText);
-                     if (errJson.detail) throw new Error(errJson.detail);
-                 } catch (e) {}
-                 throw new Error(`Generation Failed: ${errText}`);
+                const errText = await response.text();
+                try {
+                    const errJson = JSON.parse(errText);
+                    if (errJson.detail) throw new Error(errJson.detail);
+                } catch (e) {}
+                throw new Error(`Generation Failed: ${errText}`);
             }
 
             const data = await response.json();
@@ -1010,56 +1408,66 @@
             }
         }
 
+        // 本地小工具：手动更新 cloud progress（轮询时用），不影响 postMessage 桥
+        function updateCloudProgressLocal(data) {
+            const container = document.getElementById('cloud-progress-container');
+            const statusText = document.getElementById('cloud-status-text');
+            const progressBar = document.getElementById('cloud-progress-bar');
+            const percentText = document.getElementById('cloud-percent');
+            if (!container || !statusText || !progressBar) return;
+            container.style.display = '';
+            if (data.status) statusText.innerText = data.status;
+            if (typeof data.progress !== 'undefined' && typeof data.total !== 'undefined') {
+                const percent = Math.min(100, Math.round((data.progress / data.total) * 100));
+                progressBar.style.width = `${percent}%`;
+                percentText.innerText = `${percent}%`;
+            }
+        }
+
+        /* ============================================================
+           主生成逻辑（API 调用保持原样）
+           ============================================================ */
         async function handleGenerate() {
             if (!uploadedPath && currentEngine === 'local') {
-                // ... existing local check ...
-                const dropzone = document.getElementById('dropzone');
-                dropzone.style.transition = "0.2s";
-                dropzone.style.borderColor = "#ef4444";
-                dropzone.style.transform = "scale(0.98)";
-                setTimeout(() => {
-                    dropzone.style.borderColor = "";
-                    dropzone.style.transform = "scale(1)";
-                }, 300);
+                // 闪一下 dropzone 边
+                dropzone.style.borderColor = 'var(--primary-deep)';
+                setTimeout(() => { dropzone.style.borderColor = ''; }, 400);
                 return;
             }
-            
+
             if (!uploadedFile && currentEngine === 'cloud') {
-                 alert("Please upload an image first");
-                 return;
+                alert("Please upload an image first");
+                return;
             }
 
             // Allow manual prompt even if angle not applied, but require prompt input
             if (!promptInput.value.trim()) {
-                promptInput.style.transition = "0.2s";
-                promptInput.style.borderColor = "#ef4444";
-                setTimeout(() => {
-                    promptInput.style.borderColor = "";
-                }, 300);
+                promptInput.style.borderColor = 'var(--primary-deep)';
+                setTimeout(() => { promptInput.style.borderColor = ''; }, 400);
                 return;
             }
 
             const btn = document.getElementById('genBtn');
             const btnText = document.getElementById('btnText');
 
+            btn.classList.add('is-disabled');
             btn.disabled = true;
-            btn.style.backgroundColor = '#333';
-            btn.innerHTML = `<i data-lucide="zap" class="w-4 h-4 text-yellow-400 fill-yellow-400 animate-pulse"></i><span class="tracking-[0.4em] text-[11px] uppercase">Processing...</span>`;
-            lucide.createIcons();
+            btnText.innerText = "Processing…";
 
-            document.getElementById('emptyState').classList.add('hidden');
-            document.getElementById('outputImg').classList.add('hidden');
-            document.getElementById('textResult').classList.add('hidden'); // Ensure text result is hidden
-            document.getElementById('loadingState').classList.remove('hidden');
+            // 切换 result-card 状态
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('outputImg').classList.remove('is-visible');
+            document.getElementById('downloadBtn').classList.remove('is-visible');
+            document.getElementById('loadingState').classList.add('is-visible');
 
             try {
                 let data;
-                
+
                 if (currentEngine === 'cloud') {
                     // Cloud Logic
                     data = await runCloudTask();
                 } else {
-                    // Local Logic
+                    // Local Logic（API schema 不变）
                     const seed = Math.floor(Math.random() * 1000000000000000);
                     const res = await fetch('/api/generate', {
                         method: 'POST',
@@ -1085,17 +1493,16 @@
                 const downloadBtn = document.getElementById('downloadBtn');
 
                 outputImg.src = data.images[0];
-                outputImg.classList.remove('hidden');
-                document.getElementById('loadingState').classList.add('hidden');
+                outputImg.classList.add('is-visible');
+                document.getElementById('loadingState').classList.remove('is-visible');
 
                 downloadBtn.href = data.images[0];
-                downloadBtn.classList.remove('hidden');
+                downloadBtn.classList.add('is-visible');
                 downloadBtn.download = `Angle-${Date.now()}.png`;
 
-                btn.style.backgroundColor = '';
-                btn.innerHTML = `<i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i><span id="btnText">Generate New Angle</span>`;
+                btn.classList.remove('is-disabled');
                 btn.disabled = false;
-                lucide.createIcons();
+                btnText.innerText = "Generate";
 
                 // Add to history
                 renderImageCard({
@@ -1107,67 +1514,67 @@
 
             } catch (err) {
                 console.error(err);
-                btn.style.backgroundColor = '';
-                btn.innerHTML = `<i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i><span id="btnText">Generation Failed</span>`;
-                lucide.createIcons();
-                document.getElementById('loadingState').classList.add('hidden');
-                document.getElementById('emptyState').classList.remove('hidden');
+                document.getElementById('loadingState').classList.remove('is-visible');
+                document.getElementById('emptyState').style.display = '';
+                btn.classList.remove('is-disabled');
                 btn.disabled = false;
+                btnText.innerText = "Generation failed";
                 if (!err.silent) {
                     alert(err.message);
                 }
             }
         }
+        window.handleGenerate = handleGenerate;
 
-        window.copyText = () => {
-            const text = document.getElementById('generatedText').innerText;
-            navigator.clipboard.writeText(text).then(() => {
-                const btn = document.querySelector('#textResult button');
-                const originalHTML = btn.innerHTML;
-                btn.innerHTML = `<i data-lucide="check" class="w-3 h-3"></i> Copied`;
-                setTimeout(() => {
-                    btn.innerHTML = originalHTML;
-                    lucide.createIcons();
-                }, 2000);
-            });
-        };
+        /* ============================================================
+           Archive 渲染 §16.1 + §16.2
+           ============================================================ */
+        function escapeHtml(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
 
-        // History Management
         function renderImageCard(data, isNew = false) {
             const masonry = document.getElementById('masonry');
             const imgUrl = data.images ? data.images[0] : '';
             if (!imgUrl) return;
 
-            const card = document.createElement('div');
-            card.className = "masonry-item relative group cursor-pointer";
+            // hide empty placeholder
+            const ae = document.getElementById('archiveEmpty');
+            if (ae) ae.style.display = 'none';
 
+            const card = document.createElement('div');
+            card.className = "archive-card";
             card.onclick = () => openLightbox(imgUrl);
-            
-            // ModelScope Badge
+
+            // §8.3 dark glass chip 标记 cloud
             const isCloud = data.is_cloud || (imgUrl && imgUrl.includes('cloud_angle'));
-            const badgeHtml = isCloud ? `
-                <div class="absolute top-3 left-3 z-10">
-                    <img src="/static/modelscope.gif" class="h-4 w-auto object-contain bg-white/90 rounded-full p-0.5 shadow-sm">
-                </div>
+            const cloudChipHtml = isCloud ? `
+                <span class="cloud-chip">
+                    <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-cloud"/></svg>
+                    cloud
+                </span>
             ` : '';
 
             card.innerHTML = `
-                <img src="${imgUrl}" class="w-full h-full object-cover block transform group-hover:scale-105 transition-transform duration-[1.5s]">
-                ${badgeHtml}
-                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 p-6 flex flex-col justify-end pointer-events-none">
-                    <p class="text-white text-[10px] font-bold uppercase tracking-widest line-clamp-2">${data.prompt || "Angle Control"}</p>
-                </div>
+                <img src="${imgUrl}" alt="archive">
+                ${cloudChipHtml}
+                <div class="archive-meta">${escapeHtml(data.prompt || 'Angle control')}</div>
             `;
 
             if (isNew) masonry.prepend(card);
             else masonry.appendChild(card);
+
+            archiveCount += 1;
+            document.getElementById('archiveCountLabel').innerText = 'Archive (' + archiveCount + ')';
         }
 
         function loadNextPage() {
             const batch = allHistory.slice(currentIndex, currentIndex + PAGE_SIZE);
             if (batch.length === 0) {
                 const el = document.getElementById('loadMoreTrigger');
-                if (el) el.innerText = "End of Archive";
+                if (el) el.innerText = "End of archive";
                 return;
             }
             batch.forEach(item => renderImageCard(item, false));
@@ -1181,29 +1588,42 @@
                 if (history && Array.isArray(history)) {
                     allHistory = history;
                     document.getElementById('masonry').innerHTML = '';
+                    archiveCount = 0;
+                    // 重新挂回 empty placeholder（万一历史为空）
+                    if (allHistory.length === 0) {
+                        document.getElementById('masonry').innerHTML = `
+                            <div id="archiveEmpty" class="archive-empty">
+                                <div class="image-placeholder"></div>
+                                <div class="text-body">No archive yet</div>
+                                <div class="field-hint">Generated angles will appear here</div>
+                            </div>
+                        `;
+                    }
                     currentIndex = 0;
                     loadNextPage();
                 }
             } catch (e) { console.error(e); }
         }
 
-        // Lightbox
+        /* ============================================================
+           Lightbox（§16.5：纯黑 .92，无 backdrop-blur）
+           ============================================================ */
         function openLightbox(url) {
             const img = document.getElementById('lightboxImg');
-            const resPill = document.getElementById('lightboxRes');
+            const meta = document.getElementById('lightboxRes');
+            const resText = document.getElementById('lightboxResText');
 
-            resPill.style.opacity = '0';
+            meta.classList.remove('is-visible');
             img.src = url;
 
             const lb = document.getElementById('lightbox');
-            lb.classList.replace('hidden', 'flex');
-            img.classList.remove('hidden');
+            lb.classList.add('is-open');
             document.body.style.overflow = 'hidden';
 
             const updateRes = () => {
                 if (img.naturalWidth) {
-                    resPill.innerText = `${img.naturalWidth} x ${img.naturalHeight}`;
-                    resPill.style.opacity = '1';
+                    resText.innerText = `${img.naturalWidth} × ${img.naturalHeight}`;
+                    meta.classList.add('is-visible');
                 }
             };
 
@@ -1213,13 +1633,21 @@
 
         function closeLightbox() {
             const lb = document.getElementById('lightbox');
-            lb.classList.replace('flex', 'hidden');
-            document.body.style.overflow = 'auto';
+            lb.classList.remove('is-open');
+            document.body.style.overflow = '';
         }
+        window.closeLightbox = closeLightbox;
 
         function handleOutsideClick(e) {
             if (e.target.id === 'lightbox') closeLightbox();
         }
+        window.handleOutsideClick = handleOutsideClick;
+
+        document.addEventListener('keydown', (e) => {
+            const lb = document.getElementById('lightbox');
+            if (!lb.classList.contains('is-open')) return;
+            if (e.key === 'Escape') closeLightbox();
+        });
 
         function downloadLightboxImage() {
             const imgUrl = document.getElementById('lightboxImg').src;
@@ -1230,12 +1658,23 @@
             link.click();
             document.body.removeChild(link);
         }
+        window.downloadLightboxImage = downloadLightboxImage;
 
         function zoomImage() {
             if (currentResult && currentResult.images && currentResult.images[0]) {
                 openLightbox(currentResult.images[0]);
             }
         }
+        window.zoomImage = zoomImage;
+
+        /* ============================================================
+           主题 postMessage 同步（保留）
+           ============================================================ */
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'studio-theme') {
+                document.body.offsetHeight; // 强制重绘
+            }
+        });
 
         // Init
         const observer = new IntersectionObserver((entries) => {
@@ -1250,7 +1689,6 @@
             if (savedMode && (savedMode === 'local' || savedMode === 'cloud')) {
                 switchEngine(savedMode);
             }
-
             loadHistory();
             observer.observe(document.getElementById('loadMoreTrigger'));
         };

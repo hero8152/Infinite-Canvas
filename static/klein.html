@@ -5,355 +5,624 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>Flux Klein | 极简一体化终端</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="/static/theme.js?v=20260509"></script>
+    <title>Image edit · Infinite-Canvas</title>
+    <link rel="stylesheet" href="/static/design-system.css?v=21">
+    <script src="/static/theme.js?v=20260511a"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&display=swap');
-
-        :root {
-            --accent: #111827;
-            --bg: #f9fafb;
-            --card: #ffffff;
-            --easing: cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        *::-webkit-scrollbar { width:10px!important; height:10px!important; background:transparent!important; }
-        *::-webkit-scrollbar-track { background:transparent!important; border:none!important; }
-        *::-webkit-scrollbar-thumb { background-color:#d8d8d8!important; border:3px solid transparent!important; border-right-width:5px!important; background-clip:padding-box!important; border-radius:10px!important; }
-        *::-webkit-scrollbar-thumb:hover { background-color:#c0c0c0!important; }
-        *::-webkit-scrollbar-corner { background:transparent!important; }
-        * { scrollbar-width:thin!important; scrollbar-color:#d8d8d8 transparent!important; }
-
+        /* ============================================================
+           klein.html 页内特化样式（DESIGN.md v2.1 §17.2 模板）
+           - 不重新定义 token，所有色值来自 design-system.css
+           - 仅添加 §17.2 左右两栏布局 + 3 上传插槽 + engine dark glass
+           ============================================================ */
+        html, body { height: 100%; }
         body {
-            background-color: var(--bg);
-            font-family: 'Inter', -apple-system, sans-serif;
-            color: var(--accent);
-            -webkit-font-smoothing: antialiased;
+            background: var(--bg);
+            background-image:
+                linear-gradient(to right,  rgba(230, 213, 168, 0.55) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.55) 1px, transparent 1px);
+            background-size: 80px 80px;
+            min-height: 100vh;
+        }
+        body.studio-theme-dark {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right,  rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
-        .container-box {
-            max-width: 1280px;
-            margin: 0 auto;
-            padding: 0 40px;
-            margin-top: 50px;
+        /* §17.2 主布局：左 380 参数面板 + 右栏图片网格 */
+        .page-wrap {
+            display: flex;
+            min-height: 100vh;
+            gap: 0;
+        }
+        .param-panel {
+            width: 380px;
+            flex-shrink: 0;
+            padding: 32px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            border-right: 1px solid var(--border);
+            background: transparent;
+        }
+        body.studio-theme-dark .param-panel { border-right-color: var(--dark-border); }
+
+        .stage-main {
+            flex: 1;
+            padding: 32px 32px 64px 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            min-width: 0;
         }
 
-        .nano-input {
-            background: var(--card);
-            border: 1px solid #eef0f2;
-            transition: all 0.3s var(--easing);
+        /* 参数字段分组 */
+        .field { display: flex; flex-direction: column; gap: 8px; }
+        .field-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--ink);
         }
-        .nano-input:focus { border-color: #000; box-shadow: 0 0 0 1px #000; }
+        .field-hint {
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 400;
+        }
 
-        .upload-item {
-            background: var(--card);
-            border: 1px dashed #e2e8f0;
-            transition: all 0.4s var(--easing);
+        /* 右栏顶部标题区 */
+        .stage-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        /* —— 3 上传插槽（核心：§15.8 dropzone 横向 3 列）—— */
+        .slot-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+        }
+        /* 紧凑版 dropzone，覆盖部分 .dropzone 默认 padding/min-height */
+        .slot-dropzone {
+            min-height: 110px;
+            padding: 12px 8px;
+            gap: 6px;
             position: relative;
             overflow: hidden;
         }
-        .upload-item:hover { border-color: #000; background: #fff; transform: translateY(-2px); }
-        .upload-item.drag-over { border-style: solid; border-color: #000; box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
-
-        .preview-img {
+        .slot-dropzone .slot-label {
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .slot-dropzone.has-file .slot-label {
+            position: absolute;
+            top: 6px;
+            left: 8px;
+            z-index: 2;
+            background: var(--ink);
+            color: #fff;
+            padding: 2px 6px;
+            font-size: 10px;
+        }
+        .slot-dropzone .slot-thumb {
             position: absolute;
             inset: 0;
             width: 100%;
             height: 100%;
             object-fit: cover;
-            animation: fadeIn 0.5s var(--easing);
+            display: none;
         }
-
-        .glass-btn {
-            background: #111827;
-            transition: all 0.3s var(--easing);
+        .slot-dropzone.has-file .slot-thumb { display: block; }
+        .slot-dropzone .slot-remove {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 16px;
+            height: 16px;
+            background: var(--ink);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 3;
+            padding: 0;
+            border-radius: 0;
         }
-        .glass-btn:hover { background: #000; transform: translateY(-1px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
-        .glass-btn:active { transform: scale(0.98); }
+        .slot-dropzone.has-file .slot-remove { display: inline-flex; }
+        .slot-dropzone .slot-remove:hover { background: var(--primary-deep); }
 
-        /* Engine panel (above run button) */
-        .engine-panel {
-            background: #fff;
-            border: 1px solid #edf0f3;
-            border-radius: 24px;
-            padding: 12px;
+        /* —— Engine panel: §8.3 Dark Glass Card（即使 light 模式也是暗色，作为视觉强调） —— */
+        .engine-card {
+            background: var(--dark-elev);
+            color: var(--dark-text);
+            border: 1px solid var(--dark-border);
+            border-radius: 0;
+            padding: 16px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .engine-card .engine-title {
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--dark-muted);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .engine-card .engine-title .pixel-icon { color: var(--primary); }
+        .engine-card .radio-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .engine-card .radio-row {
+            padding: 10px 12px;
+            background: #26262a;
+            border: 1px solid var(--dark-border);
+            color: var(--dark-text);
+            font-size: 13px;
+        }
+        /* 当前激活的 radio 视觉强调（橙色 1px 边） */
+        .engine-card .radio-row.is-active {
+            border-color: var(--primary);
+        }
+        .engine-card .radio-row .radio-box {
+            background: #1a1a1c;
+            border-color: var(--dark-border);
+        }
+        .engine-card .engine-divider {
+            height: 1px;
+            background: var(--dark-border);
+            margin: 4px 0;
+        }
+        .engine-card .lora-row {
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
-        .engine-label {
+        .engine-card .lora-label {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 6px;
-            color: #94a3b8;
-            font-size: 10px;
-            font-weight: 600;
-            letter-spacing: .04em;
+            font-size: 12px;
+            color: var(--dark-text);
         }
-        .engine-switch {
-            background: #f8fafc;
-            border: 1px solid #edf2f7;
-            border-radius: 999px;
-            padding: 3px;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2px;
+        .engine-card .lora-label .field-hint { color: var(--dark-muted); }
+        /* slider 在 dark engine card 内的覆盖（track 用 dark border、fill 用 primary 橙） */
+        .engine-card .slider-track {
+            background: var(--dark-border);
         }
-        .engine-btn {
-            border-radius: 999px;
-            height: 34px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            color: #64748b;
-            font-size: 10px;
-            font-weight: 600;
-            letter-spacing: .02em;
-            transition: all .25s var(--easing);
-            cursor: pointer;
+        .engine-card .slider-track .slider-fill {
+            background: var(--primary);
         }
-        .engine-btn.active {
-            background: #fff;
-            color: #111827;
-            box-shadow: 0 1px 3px rgba(15,23,42,.08);
+        .engine-card .slider-value {
+            background: #26262a;
+            color: var(--dark-text);
         }
-        .engine-btn:not(.active):hover { color: #111827; background: rgba(0,0,0,.04); }
+        .engine-card .checkbox-row {
+            color: var(--dark-text);
+        }
+        .engine-card .checkbox-row .check-box {
+            background: #1a1a1c;
+            border-color: var(--dark-border);
+        }
 
-        /* Cloud progress */
-        .cloud-status {
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            color: #64748b;
+        /* engine status 提示行 */
+        .engine-status {
             display: none;
             align-items: center;
             gap: 8px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--dark-muted);
         }
-        .cloud-status.visible { display: flex; }
-        .cloud-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #10b981;
-            animation: pulse 1.5s ease-in-out infinite;
-        }
-        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.4)} }
+        .engine-status.is-visible { display: inline-flex; }
 
-        .result-frame {
-            background: #ffffff;
-            border-radius: 32px;
-            border: 1px solid #f1f5f9;
-            box-shadow: 0 2px 15px rgba(0,0,0,0.02);
+        /* 图片网格里的"正在生成"占位卡 */
+        .render-placeholder {
+            display: flex;
+            flex-direction: column;
+        }
+        .render-placeholder .image-placeholder { aspect-ratio: 1 / 1; }
+        .render-placeholder .placeholder-meta {
+            background: var(--bg-2);
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        body.studio-theme-dark .render-placeholder .placeholder-meta {
+            background: var(--dark-elev);
+            color: var(--dark-text);
         }
 
-        .masonry-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
+        /* empty state */
+        .stage-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 64px 16px;
+            min-height: 320px;
+            color: var(--muted);
         }
-        @media (min-width: 768px) { .masonry-grid { grid-template-columns: repeat(4, 1fr); } }
+        .stage-empty .image-placeholder { width: 160px; height: 160px; aspect-ratio: auto; }
 
-        .masonry-item {
-            aspect-ratio: 1 / 1;
-            border-radius: 24px;
+        /* —— Lightbox (DESIGN.md §16.5 spec：纯黑 .92，无 backdrop-blur) —— */
+        .lightbox-mask {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(15, 15, 15, 0.92);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 48px;
+        }
+        .lightbox-mask.is-open { display: flex; }
+        .lightbox-actions {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            display: inline-flex;
+            gap: 8px;
+            z-index: 2;
+        }
+        .lightbox-actions .lb-btn {
+            width: 32px;
+            height: 32px;
+            background: transparent;
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0;
+        }
+        .lightbox-actions .lb-btn:hover { background: rgba(255, 255, 255, 0.08); }
+        .lightbox-actions .lb-btn .pixel-icon { color: #fff; }
+        .lightbox-meta {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: var(--ink);
+            color: #fff;
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+        .lightbox-stage {
+            position: relative;
+            width: min(1200px, calc(100vw - 96px));
+            max-height: calc(100vh - 192px);
+            aspect-ratio: 16 / 10;
+            background: #000;
             overflow: hidden;
-            background: #fff;
-            border: 1px solid #f1f5f9;
-            transition: all 0.5s var(--easing);
+            user-select: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        .masonry-item:hover { transform: translateY(-6px); box-shadow: 0 20px 40px rgba(0,0,0,0.08); }
+        .lightbox-stage.is-compare { border-color: var(--primary); }
+        .lightbox-stage img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+        }
+        #compareOriginalWrapper {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            clip-path: inset(0 50% 0 0);
+        }
+        #compareSliderLine {
+            position: absolute;
+            top: 0; bottom: 0;
+            left: 50%;
+            width: 1px;
+            background: var(--primary);
+            transform: translateX(-50%);
+            cursor: ew-resize;
+            z-index: 3;
+        }
+        #compareSliderHandle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 14px;
+            height: 14px;
+            background: var(--primary);
+            border: 1px solid var(--ink);
+            transform: translate(-50%, -50%);
+            cursor: ew-resize;
+            transition: none;
+        }
+        .compare-tag {
+            position: absolute;
+            top: 16px;
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            background: var(--ink);
+            color: #fff;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.04em;
+            z-index: 2;
+            pointer-events: none;
+        }
+        .compare-tag--before { left: 16px; }
+        .compare-tag--after  { right: 16px; }
+        .lightbox-footer {
+            position: absolute;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: inline-flex;
+            gap: 12px;
+            z-index: 2;
+        }
+        .action-btn .pixel-icon { color: var(--ink); }
+        body.studio-theme-dark .action-btn .pixel-icon { color: var(--dark-text); }
 
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @media (max-width: 1024px) {
+            .page-wrap { flex-direction: column; }
+            .param-panel {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
+        }
     </style>
-    <link rel="stylesheet" href="/static/theme.css?v=20260510-studio-pages-blue-dark10">
 </head>
 
-<body class="antialiased transition-colors duration-300">
-    <div class="container-box min-h-screen flex flex-col">
-        <header class="flex justify-between items-end mb-10">
-            <div class="space-y-1">
-                <h1 class="text-4xl font-extrabold tracking-tighter italic">FLUX KLEIN</h1>
-                <p class="text-[10px] font-bold uppercase tracking-[0.4em] text-gray-400">Next-Gen Generative Interface</p>
+<body>
+    <div class="page-wrap">
+        <!-- ================== 左：380px 参数面板 ================== -->
+        <aside class="param-panel">
+            <!-- 顶部 §6 黑色 section-tag -->
+            <div>
+                <span class="section-tag">
+                    Image edit
+                    <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#chevron-down"/></svg>
+                </span>
             </div>
-        </header>
 
-        <main class="grid grid-cols-1 lg:grid-cols-12 gap-12">
-            <div class="lg:col-span-5 space-y-10">
-                <section class="space-y-4">
-                    <div class="flex items-center gap-2 text-gray-400">
-                        <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
-                        <span class="text-[10px] font-black uppercase tracking-widest">Input Prompt</span>
-                    </div>
-                    <textarea id="promptInput" rows="5"
-                        class="nano-input w-full p-6 rounded-3xl text-sm outline-none resize-none placeholder-gray-300"
-                        placeholder="Describe your vision here..."></textarea>
-                </section>
-
-                <section class="space-y-4">
-                    <div class="flex items-center gap-2 text-gray-400">
-                        <i data-lucide="image" class="w-3.5 h-3.5"></i>
-                        <span class="text-[10px] font-black uppercase tracking-widest">Reference Layers</span>
-                        <span id="cloudImgNote" class="hidden ml-auto text-[9px] font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full">Cloud uses Main image</span>
-                    </div>
-                    <div class="grid grid-cols-3 gap-4">
-                        <div id="drop-zone-1" onclick="document.getElementById('file1').click()"
-                            class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file1" class="hidden" onchange="handleFile(this.files[0], 1)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black transition-colors"></i>
-                            <span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Main</span>
-                            <img id="prev1" class="preview-img hidden">
-                            <button id="del1" onclick="clearSlot(1, event)"
-                                class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10 flex items-center justify-center text-xs">×</button>
-                        </div>
-                        <div id="drop-zone-2" onclick="document.getElementById('file2').click()"
-                            class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file2" class="hidden" onchange="handleFile(this.files[0], 2)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black transition-colors"></i>
-                            <span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Aux A</span>
-                            <img id="prev2" class="preview-img hidden">
-                            <button id="del2" onclick="clearSlot(2, event)"
-                                class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10 flex items-center justify-center text-xs">×</button>
-                        </div>
-                        <div id="drop-zone-3" onclick="document.getElementById('file3').click()"
-                            class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file3" class="hidden" onchange="handleFile(this.files[0], 3)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black transition-colors"></i>
-                            <span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Aux B</span>
-                            <img id="prev3" class="preview-img hidden">
-                            <button id="del3" onclick="clearSlot(3, event)"
-                                class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10 flex items-center justify-center text-xs">×</button>
-                        </div>
-                    </div>
-                </section>
-
-                <div class="engine-panel">
-                    <div class="engine-label">
-                        <i data-lucide="cpu" class="w-3.5 h-3.5"></i>
-                        <span>Engine</span>
-                    </div>
-                    <div class="engine-switch">
-                        <button id="localBtn" class="engine-btn active" onclick="setEngine('local')">
-                            <i data-lucide="cpu" class="w-3 h-3"></i>Local
-                        </button>
-                        <button id="cloudBtn" class="engine-btn" onclick="setEngine('cloud')">
-                            <i data-lucide="cloud" class="w-3 h-3"></i>ModelScope
+            <!-- 核心：3 个并排上传插槽（§15.8 dropzone 紧凑版 + §16.7 缩略图 + 删除浮块） -->
+            <div class="field">
+                <label class="field-label">
+                    Reference layers
+                    <span class="field-hint">Main required</span>
+                </label>
+                <div class="slot-grid">
+                    <div id="drop-zone-1" class="dropzone slot-dropzone" onclick="document.getElementById('file1').click()">
+                        <input type="file" id="file1" accept="image/*" style="display:none" onchange="handleFile(this.files[0], 1)">
+                        <img id="prev1" class="slot-thumb" alt="main">
+                        <svg class="pixel-icon" style="width:18px;height:18px;color:var(--primary)" aria-hidden="true"><use href="#upload"/></svg>
+                        <span class="slot-label">Main</span>
+                        <button id="del1" class="slot-remove" type="button" onclick="clearSlot(1, event)" title="Remove">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#cross"/></svg>
                         </button>
                     </div>
-                    <div id="cloudStatusBar" class="cloud-status">
-                        <div class="cloud-dot"></div>
-                        <span id="cloudStatusText">Connecting...</span>
+                    <div id="drop-zone-2" class="dropzone slot-dropzone" onclick="document.getElementById('file2').click()">
+                        <input type="file" id="file2" accept="image/*" style="display:none" onchange="handleFile(this.files[0], 2)">
+                        <img id="prev2" class="slot-thumb" alt="aux a">
+                        <svg class="pixel-icon" style="width:18px;height:18px;color:var(--primary)" aria-hidden="true"><use href="#plus"/></svg>
+                        <span class="slot-label">Aux A</span>
+                        <button id="del2" class="slot-remove" type="button" onclick="clearSlot(2, event)" title="Remove">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#cross"/></svg>
+                        </button>
                     </div>
-                    <div id="loraSection" class="hidden flex-col gap-3 pt-2 border-t border-gray-100">
-                        <label class="flex items-center gap-3 cursor-pointer select-none" onclick="toggleLora()">
-                            <div class="relative w-9 h-5 flex-shrink-0">
-                                <div id="loraTrack" class="w-full h-full bg-gray-200 rounded-full transition-colors duration-200"></div>
-                                <div id="loraThumb" class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"></div>
+                    <div id="drop-zone-3" class="dropzone slot-dropzone" onclick="document.getElementById('file3').click()">
+                        <input type="file" id="file3" accept="image/*" style="display:none" onchange="handleFile(this.files[0], 3)">
+                        <img id="prev3" class="slot-thumb" alt="aux b">
+                        <svg class="pixel-icon" style="width:18px;height:18px;color:var(--primary)" aria-hidden="true"><use href="#plus"/></svg>
+                        <span class="slot-label">Aux B</span>
+                        <button id="del3" class="slot-remove" type="button" onclick="clearSlot(3, event)" title="Remove">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#cross"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <span class="field-hint">PNG / JPG, drag &amp; drop, click, or paste while hovering</span>
+            </div>
+
+            <!-- 提示词 §15.2 -->
+            <div class="field">
+                <label class="field-label" for="promptInput">
+                    Prompt
+                    <span class="field-hint">node 168</span>
+                </label>
+                <textarea id="promptInput" class="textarea" rows="4"
+                    placeholder="Describe how to edit the image…"></textarea>
+            </div>
+
+            <!-- Seed §15.5 number-input -->
+            <div class="field">
+                <label class="field-label">
+                    Seed
+                    <span class="field-hint">node 158</span>
+                </label>
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div class="number-input">
+                        <button type="button" class="num-btn" onclick="seedDelta(-1)">-</button>
+                        <input type="text" id="seedInput" value="0" inputmode="numeric"
+                            onchange="commitSeed(this.value)">
+                        <button type="button" class="num-btn" onclick="seedDelta(1)">+</button>
+                    </div>
+                    <label class="checkbox-row">
+                        <input type="checkbox" id="seedRandom" checked>
+                        <span class="check-box"></span>
+                        <span>Random</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Engine panel: §8.3 dark glass card -->
+            <div class="engine-card">
+                <div class="engine-title">
+                    <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#chevron-right"/></svg>
+                    Engine
+                </div>
+                <div class="radio-grid" id="engineSwitch">
+                    <label class="radio-row is-active" data-engine="local">
+                        <input type="radio" name="provider" value="local" checked>
+                        <span class="radio-box"></span>
+                        <span>Local · ComfyUI</span>
+                    </label>
+                    <label class="radio-row" data-engine="cloud">
+                        <input type="radio" name="provider" value="cloud">
+                        <span class="radio-box"></span>
+                        <span>Cloud · Klein</span>
+                    </label>
+                </div>
+                <div id="engineStatus" class="engine-status">
+                    <span class="pixel-dot-pulse" style="color: var(--primary)">
+                        <span></span><span></span><span></span>
+                    </span>
+                    <span id="engineStatusText">Ready</span>
+                </div>
+
+                <!-- Cloud-only LoRA strength -->
+                <div id="loraSection" style="display:none; flex-direction:column; gap:10px;">
+                    <div class="engine-divider"></div>
+                    <label class="checkbox-row">
+                        <input type="checkbox" id="loraToggle" onchange="toggleLora()">
+                        <span class="check-box"></span>
+                        <span>Detail-enhance LoRA</span>
+                    </label>
+                    <div id="loraStrengthRow" class="lora-row" style="display:none;">
+                        <div class="lora-label">
+                            <span>LoRA strength</span>
+                            <span id="loraVal" class="slider-value">0.80</span>
+                        </div>
+                        <div class="slider">
+                            <div class="slider-track" id="loraTrack">
+                                <div class="slider-fill"   id="loraFill"   style="width:78%"></div>
+                                <div class="slider-handle" id="loraHandle" style="left:78%"></div>
                             </div>
-                            <span class="text-[10px] font-bold text-gray-600 uppercase tracking-wider">细节增强 LoRA</span>
-                        </label>
-                        <div id="loraStrengthRow" class="hidden flex-col gap-1.5">
-                            <div class="flex justify-between">
-                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-widest">LoRA Strength</span>
-                                <span id="loraStrengthVal" class="text-[9px] font-bold text-gray-600">0.80</span>
-                            </div>
-                            <input type="range" id="loraStrengthSlider" min="0.1" max="1.0" step="0.05" value="0.8"
-                                class="w-full cursor-pointer accent-black" style="height:2px"
-                                oninput="document.getElementById('loraStrengthVal').textContent=parseFloat(this.value).toFixed(2)">
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <button id="genBtn" onclick="submitWorkflow()"
-                    class="glass-btn w-full py-5 text-white rounded-xl font-bold flex items-center justify-center gap-3 shadow-lg">
-                    <i data-lucide="zap" id="btnIcon" class="w-4 h-4 text-yellow-400"></i>
-                    <span id="btnText" class="tracking-[0.3em] text-[11px] uppercase">Execute Synthesis</span>
+            <!-- 主 CTA §7.1 -->
+            <div style="margin-top:auto; padding-top:16px;">
+                <button id="genBtn" type="button" class="btn-primary" onclick="submitWorkflow()" style="width:100%; justify-content:center;">
+                    <span id="btnText">Edit</span>
+                    <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#chevron-right"/></svg>
                 </button>
             </div>
+        </aside>
 
-            <div class="lg:col-span-7">
-                <div id="resultBox"
-                    class="result-frame min-h-[500px] lg:h-full flex items-center justify-center relative overflow-hidden group">
-                    <div id="placeholder" class="text-center space-y-4 opacity-20">
-                        <i data-lucide="layout" class="w-12 h-12 mx-auto stroke-[1px]"></i>
-                        <p class="text-[10px] font-black tracking-[0.5em] uppercase">Canvas Ready</p>
-                    </div>
-                    <div id="loader" class="hidden text-center space-y-4">
-                        <div class="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto"></div>
-                        <p class="text-[10px] font-black tracking-[0.5em] uppercase">Synthesizing</p>
-                    </div>
-                    <img id="outputImg"
-                        class="hidden w-full h-full object-contain p-8 cursor-zoom-in transition-all duration-700"
-                        onclick="zoomImage()">
-                    <a id="downloadBtn" href="#" download
-                        class="hidden absolute top-8 right-8 w-12 h-12 bg-white/90 backdrop-blur-md shadow-2xl rounded-2xl flex items-center justify-center hover:bg-black hover:text-white active:scale-95 transition-all">
-                        <i data-lucide="download" class="w-4 h-4"></i>
-                    </a>
+        <!-- ================== 右：网格主区 ================== -->
+        <main class="stage-main">
+            <div class="stage-header">
+                <span class="section-tag">
+                    <span id="archiveCountLabel">Recent edits (0)</span>
+                    <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#chevron-down"/></svg>
+                </span>
+                <span class="text-mono text-muted">Tap any card to open before / after compare</span>
+            </div>
+
+            <!-- §16.2 image-grid 4 列 -->
+            <div id="imageGrid" class="image-grid">
+                <div id="emptyState" class="stage-empty" style="grid-column: 1 / -1;">
+                    <div class="image-placeholder"></div>
+                    <div class="text-body">No edits yet</div>
+                    <div class="field-hint">Upload Main image, write a prompt and press Edit</div>
                 </div>
+            </div>
+
+            <div id="loadMoreTrigger"
+                class="text-mono text-muted"
+                style="text-align:center; padding:24px 0; cursor:pointer; display:none;">
+                Load more
             </div>
         </main>
-
-        <section class="mt-32">
-            <div class="flex items-center gap-6 mb-12">
-                <h2 class="text-[11px] font-black uppercase tracking-[0.5em]">Archives</h2>
-                <div class="h-px flex-1 bg-gray-100"></div>
-            </div>
-            <div id="masonry" class="masonry-grid"></div>
-            <div id="loadMoreTrigger"
-                class="py-20 text-center text-gray-300 text-[10px] font-bold uppercase tracking-widest cursor-pointer hover:text-black transition-colors">
-                Load More Archive
-            </div>
-        </section>
     </div>
 
-    <div id="lightbox" onclick="handleOutsideClick(event)"
-        class="hidden fixed inset-0 z-50 flex items-center justify-center p-6 bg-white/95 backdrop-blur-3xl">
-        <div class="max-w-6xl w-full flex flex-col items-center relative">
-            <div class="relative w-full flex justify-center mb-8">
-                <div id="compareContainer"
-                    class="hidden relative w-full h-[75vh] rounded-[2.5rem] overflow-hidden shadow-2xl bg-[#fafafa]">
-                    <img id="compareGenerated" class="absolute inset-0 w-full h-full object-contain">
-                    <div id="compareOriginalWrapper"
-                        class="absolute inset-0 w-full h-full overflow-hidden border-r-2 border-white/50">
-                        <img id="compareOriginal" class="absolute inset-0 w-full h-full object-contain">
-                    </div>
-                    <div id="compareSlider" class="absolute inset-y-0 left-1/2 w-0.5 bg-white z-20 cursor-ew-resize">
-                        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-white shadow-2xl rounded-full flex items-center justify-center border border-gray-100">
-                            <i data-lucide="move-horizontal" class="w-4 h-4 text-black"></i>
-                        </div>
-                    </div>
-                </div>
-                <img id="lightboxImg" src="" class="hidden max-h-[75vh] rounded-[2.5rem] shadow-2xl object-contain">
-                <div id="lightboxRes"
-                    class="absolute top-6 left-6 bg-black/30 backdrop-blur-md border border-white/20 text-white px-3 py-1.5 rounded-full text-[10px] font-medium tracking-wider opacity-0 transition-opacity duration-300 pointer-events-none z-30">
-                </div>
-                <button onclick="downloadLightboxImage()"
-                    class="absolute top-6 right-6 bg-black text-white w-12 h-12 rounded-2xl flex items-center justify-center shadow-2xl z-30 hover:scale-105 transition-transform">
-                    <i data-lucide="download" class="w-5 h-5"></i>
-                </button>
+    <!-- =================================================================
+         Lightbox (§16.5)：纯黑 .92，无 backdrop-blur
+         若有原图 (params["278"].image) → before/after 滑块对比
+         否则 → 单图展示
+         ================================================================= -->
+    <div id="lightbox" class="lightbox-mask" onclick="handleLightboxOutside(event)">
+        <div class="lightbox-meta" id="lightboxMeta" style="display:none">
+            <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-right"/></svg>
+            <span id="lightboxResText">— × —</span>
+        </div>
+        <div class="lightbox-actions">
+            <button class="lb-btn" type="button" onclick="downloadLightbox()" title="Download">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#download"/></svg>
+            </button>
+            <button class="lb-btn" type="button" onclick="closeLightbox()" title="Close">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#cross"/></svg>
+            </button>
+        </div>
+
+        <div class="lightbox-stage" id="compareStage">
+            <img id="compareGenerated" alt="after">
+            <div id="compareOriginalWrapper">
+                <img id="compareOriginal" alt="before">
             </div>
-            <div class="w-full bg-white border border-gray-100 rounded-[2rem] p-8 shadow-sm flex justify-between items-center gap-8">
-                <div class="flex-1">
-                    <span class="text-[9px] font-black text-gray-300 uppercase tracking-widest block mb-2">Prompt Execution</span>
-                    <p id="lightboxPrompt" class="text-gray-700 text-sm leading-relaxed"></p>
-                </div>
-                <button id="sameStyleBtn" onclick="applySameStyle()"
-                    class="hidden whitespace-nowrap bg-black text-white px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-800 transition-all active:scale-95 flex items-center gap-2">
-                    <i data-lucide="copy" class="w-4 h-4"></i> Replicate
-                </button>
+            <span class="compare-tag compare-tag--before">BEFORE</span>
+            <span class="compare-tag compare-tag--after">AFTER</span>
+            <div id="compareSliderLine">
+                <div id="compareSliderHandle"></div>
             </div>
-            <button onclick="closeLightbox()"
-                class="absolute -top-12 -right-12 p-4 text-gray-400 hover:text-black transition-colors">
-                <i data-lucide="x" class="w-8 h-8"></i>
+            <img id="lightboxSingle" alt="result" style="display:none">
+        </div>
+
+        <div class="lightbox-footer">
+            <button class="btn-tonal" id="sameStyleBtn" type="button" onclick="applySameStyle()"
+                style="display:none; background:var(--bg-2); color:var(--ink);">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#copy"/></svg>
+                Replicate
             </button>
         </div>
     </div>
 
     <script>
-        lucide.createIcons();
+        /* ============================================================
+           klein.html 业务逻辑
+           - 保留两条 API 路径（schema 不动）：
+             1) POST /api/generate workflow_json="Flux2-Klein.json"
+                params:
+                  "168" { text: prompt }
+                  "158" { noise_seed: int }
+                  "278" { image: uploadedNames[1] }  // main
+                  "270" { image: uploadedNames[2] }  // aux A
+                  "292" { image: uploadedNames[3] }  // aux B
+                  "313" { value: hasAuxA }
+                  "314" { value: hasAuxB }
+             2) POST /api/ms/generate (云端 Klein + LoRA)
+                fields: prompt, model, image_urls[], loras{}, client_id
+             3) POST /api/upload + /api/history?type=klein 保持不变
+           ============================================================ */
 
         function generateUUID() {
             if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -364,65 +633,113 @@
                 return v.toString(16);
             });
         }
-        const CLIENT_ID_KEY = "client_id";
-        let CLIENT_ID = localStorage.getItem(CLIENT_ID_KEY) || generateUUID();
-        localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
+        const CLIENT_ID = localStorage.getItem('client_id') || generateUUID();
+        localStorage.setItem('client_id', CLIENT_ID);
 
-        let uploadedNames = { 1: "", 2: "", 3: "" };
-        let base64Images = { 1: "", 2: "", 3: "" };
-        let allHistory = [];
+        /* 状态 */
+        let uploadedNames = { 1: "", 2: "", 3: "" };   // ComfyUI 端 comfy_name
+        let base64Images  = { 1: "", 2: "", 3: "" };   // 云端用的 base64 dataURL
         let currentResult = null;
         let currentLightboxData = null;
-        let currentIndex = 0;
-        const PAGE_SIZE = 24;
-        let isLoading = false;
-        let engine = 'local';
-        let loraEnabled = false;
+        let provider     = 'local';
+        let loraEnabled  = false;
+        let loraValue    = 0.8;
+        const renderedIds = new Set();
+        let archiveCount  = 0;
 
-        // 引擎切换
-        function setEngine(mode) {
-            engine = mode;
-            document.getElementById('localBtn').classList.toggle('active', mode === 'local');
-            document.getElementById('cloudBtn').classList.toggle('active', mode === 'cloud');
-            document.getElementById('cloudImgNote').classList.toggle('hidden', mode === 'local');
-            const loraSection = document.getElementById('loraSection');
-            if (mode === 'cloud') {
-                loraSection.classList.remove('hidden');
-                loraSection.classList.add('flex');
-            } else {
-                loraSection.classList.add('hidden');
-                loraSection.classList.remove('flex');
-            }
+        /* ============== Seed Number Input + Random ============== */
+        function seedDelta(d) {
+            const el = document.getElementById('seedInput');
+            const rand = document.getElementById('seedRandom');
+            rand.checked = false;
+            let v = parseInt(el.value, 10) || 0;
+            v = Math.max(0, v + d);
+            el.value = v;
+        }
+        function commitSeed(v) {
+            const rand = document.getElementById('seedRandom');
+            rand.checked = false;
+            let n = parseInt(v, 10);
+            if (isNaN(n) || n < 0) n = 0;
+            document.getElementById('seedInput').value = n;
         }
 
+        /* ============== 引擎切换（radio + dark glass card） ============== */
+        document.querySelectorAll('#engineSwitch input[name="provider"]').forEach(r => {
+            r.addEventListener('change', () => {
+                provider = r.value;
+                document.querySelectorAll('#engineSwitch .radio-row').forEach(el => {
+                    el.classList.toggle('is-active', el.dataset.engine === provider);
+                });
+                const loraSec = document.getElementById('loraSection');
+                loraSec.style.display = (provider === 'cloud') ? 'flex' : 'none';
+            });
+        });
+
+        /* ============== LoRA toggle + slider（§15.4 自实现） ============== */
         function toggleLora() {
-            loraEnabled = !loraEnabled;
-            document.getElementById('loraTrack').style.background = loraEnabled ? '#111827' : '';
-            document.getElementById('loraThumb').style.transform = loraEnabled ? 'translateX(16px)' : '';
-            const row = document.getElementById('loraStrengthRow');
-            row.classList.toggle('hidden', !loraEnabled);
-            row.classList.toggle('flex', loraEnabled);
+            loraEnabled = document.getElementById('loraToggle').checked;
+            document.getElementById('loraStrengthRow').style.display = loraEnabled ? 'flex' : 'none';
         }
-
-        function setCloudStatus(text, visible = true) {
-            const bar = document.getElementById('cloudStatusBar');
-            const label = document.getElementById('cloudStatusText');
-            label.textContent = text;
-            bar.classList.toggle('visible', visible);
+        const loraTrack  = document.getElementById('loraTrack');
+        const loraFill   = document.getElementById('loraFill');
+        const loraHandle = document.getElementById('loraHandle');
+        const loraValEl  = document.getElementById('loraVal');
+        function setLora(v) {
+            v = Math.max(0.1, Math.min(1.0, v));
+            loraValue = v;
+            const pct = ((v - 0.1) / 0.9) * 100;
+            loraFill.style.width = pct + '%';
+            loraHandle.style.left = pct + '%';
+            loraValEl.innerText = v.toFixed(2);
         }
+        function loraFromClientX(clientX) {
+            const rect = loraTrack.getBoundingClientRect();
+            let pct = (clientX - rect.left) / rect.width;
+            pct = Math.max(0, Math.min(1, pct));
+            return 0.1 + pct * 0.9;
+        }
+        let loraDragging = false;
+        loraTrack.addEventListener('mousedown', (e) => {
+            loraDragging = true;
+            setLora(loraFromClientX(e.clientX));
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (loraDragging) setLora(loraFromClientX(e.clientX));
+        });
+        window.addEventListener('mouseup', () => loraDragging = false);
+        loraTrack.addEventListener('touchstart', (e) => {
+            loraDragging = true;
+            setLora(loraFromClientX(e.touches[0].clientX));
+        }, { passive: true });
+        window.addEventListener('touchmove', (e) => {
+            if (loraDragging && e.touches[0])
+                setLora(loraFromClientX(e.touches[0].clientX));
+        }, { passive: true });
+        window.addEventListener('touchend', () => loraDragging = false);
+        setLora(0.8);
 
-        // 拖拽上传
+        /* ============== 3 Dropzone 上传逻辑 ============== */
         let hoveredSlot = null;
         [1, 2, 3].forEach(id => {
-            const zone = document.getElementById(`drop-zone-${id}`);
+            const zone = document.getElementById('drop-zone-' + id);
             if (!zone) return;
-            zone.ondragover = (e) => { e.preventDefault(); zone.classList.add('drag-over'); };
-            zone.ondragleave = () => { zone.classList.remove('drag-over'); };
-            zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0], id); };
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('is-over');
+            });
+            zone.addEventListener('dragleave', () => zone.classList.remove('is-over'));
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('is-over');
+                if (e.dataTransfer.files && e.dataTransfer.files[0])
+                    handleFile(e.dataTransfer.files[0], id);
+            });
             zone.addEventListener('mouseenter', () => hoveredSlot = id);
             zone.addEventListener('mouseleave', () => { if (hoveredSlot === id) hoveredSlot = null; });
         });
 
+        // 粘贴：在当前 hover 的 slot 上粘贴图片
         window.addEventListener('paste', (e) => {
             if (!hoveredSlot) return;
             const items = (e.clipboardData || e.originalEvent.clipboardData).items;
@@ -436,342 +753,492 @@
 
         async function handleFile(file, index) {
             if (!file) return;
+            const zone = document.getElementById('drop-zone-' + index);
+            const prev = document.getElementById('prev' + index);
+
+            // 本地预览 + 上传到 ComfyUI
             const reader = new FileReader();
             reader.onload = (e) => {
                 base64Images[index] = e.target.result;
-                const prev = document.getElementById(`prev${index}`);
                 prev.src = e.target.result;
-                prev.classList.remove('hidden');
-                document.getElementById(`del${index}`).classList.remove('hidden');
+                zone.classList.add('has-file');
             };
             reader.readAsDataURL(file);
 
-            // Also upload to ComfyUI for local mode
             const formData = new FormData();
             formData.append('files', file);
             try {
                 const res = await fetch('/api/upload', { method: 'POST', body: formData });
                 const data = await res.json();
                 uploadedNames[index] = data.files[0].comfy_name;
-            } catch (e) { uploadedNames[index] = file.name; }
+            } catch (e) {
+                uploadedNames[index] = file.name;
+            }
         }
 
         function clearSlot(index, ev) {
             if (ev) ev.stopPropagation();
-            const prev = document.getElementById(`prev${index}`);
-            prev.src = ""; prev.classList.add("hidden");
-            document.getElementById(`del${index}`).classList.add("hidden");
+            const zone = document.getElementById('drop-zone-' + index);
+            const prev = document.getElementById('prev' + index);
+            const input = document.getElementById('file' + index);
+            prev.src = '';
+            input.value = '';
+            zone.classList.remove('has-file');
             uploadedNames[index] = "";
             base64Images[index] = "";
         }
 
+        /* ============== 主生成逻辑：API schema 与旧版完全一致 ============== */
         async function submitWorkflow() {
-            if (engine === 'cloud') {
-                await submitCloud();
-            } else {
-                await submitLocal();
-            }
+            if (provider === 'cloud') return submitCloud();
+            return submitLocal();
         }
 
         async function submitLocal() {
-            if (!uploadedNames[1]) { alert("Please upload Main Image (Slot 1)"); return; }
+            if (!uploadedNames[1]) {
+                flashSlot(1);
+                return;
+            }
             const btn = document.getElementById('genBtn');
-            const loader = document.getElementById('loader');
-            const placeholder = document.getElementById('placeholder');
-            const outputImg = document.getElementById('outputImg');
-            const downloadBtn = document.getElementById('downloadBtn');
-
+            const btnText = document.getElementById('btnText');
+            btn.classList.add('is-disabled');
             btn.disabled = true;
-            btn.style.backgroundColor = '#333';
-            btn.innerHTML = `<i data-lucide="zap" class="w-4 h-4 text-yellow-400 fill-yellow-400 animate-pulse"></i><span class="tracking-[0.3em] text-[11px] uppercase">Synthesizing...</span>`;
-            lucide.createIcons();
-            placeholder.classList.add('hidden');
-            loader.classList.remove('hidden');
+            btnText.innerText = 'Synthesizing…';
+            setEngineStatus('local · queued', true);
 
+            // 插入"正在生成"占位卡到网格首位
+            document.getElementById('emptyState').style.display = 'none';
+            const placeholderId = 'render-' + Date.now();
+            insertRenderPlaceholder(placeholderId);
+
+            // seed：random 勾选时每次随机
+            const randEl = document.getElementById('seedRandom');
+            let seed;
+            if (randEl.checked) {
+                seed = Math.floor(Math.random() * 1000000);
+                document.getElementById('seedInput').value = seed;
+            } else {
+                seed = parseInt(document.getElementById('seedInput').value, 10) || 0;
+            }
+
+            // === 与旧版 schema 完全一致的 payload ===
+            const promptText = document.getElementById('promptInput').value;
             const payload = {
-                prompt: document.getElementById('promptInput').value,
+                prompt: promptText,
                 workflow_json: "Flux2-Klein.json",
                 type: "klein",
                 params: {
-                    "168": { "text": document.getElementById('promptInput').value },
-                    "158": { "noise_seed": Math.floor(Math.random() * 1000000) },
+                    "168": { "text": promptText },
+                    "158": { "noise_seed": seed },
                     "278": { "image": uploadedNames[1] },
                     "270": { "image": uploadedNames[2] || "" },
                     "292": { "image": uploadedNames[3] || "" },
                     "313": { "value": uploadedNames[2] !== "" },
                     "314": { "value": uploadedNames[3] !== "" }
-                }
+                },
+                client_id: CLIENT_ID
             };
 
             try {
                 const response = await fetch('/api/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...payload, client_id: CLIENT_ID })
+                    body: JSON.stringify(payload)
                 });
                 const result = await response.json();
-                if (result.images?.[0]) {
-                    currentResult = result;
-                    outputImg.src = result.images[0];
-                    outputImg.classList.remove('hidden');
-                    downloadBtn.classList.remove('hidden');
-                    downloadBtn.href = result.images[0];
-                    renderImageCard(result, true);
-                } else if (result.error) {
-                    alert("Generation failed: " + result.error);
-                    placeholder.classList.remove('hidden');
-                }
+                if (result.error) throw new Error(result.error);
+                if (!result.images?.length) throw new Error('No images returned');
+                currentResult = result;
+                removeRenderPlaceholder(placeholderId);
+                renderImageCard(result, true);
+                openLightbox(result);
+                setEngineStatus('local · done', false);
             } catch (err) {
-                alert("Generation failed: " + err.message);
-                placeholder.classList.remove('hidden');
+                console.error('Local generation error', err);
+                replacePlaceholderWithError(placeholderId, err.message || 'Render failed');
+                setEngineStatus('local · error', false);
             } finally {
-                loader.classList.add('hidden');
+                btn.classList.remove('is-disabled');
                 btn.disabled = false;
-                btn.style.backgroundColor = '';
-                btn.innerHTML = `<i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i><span class="tracking-[0.3em] text-[11px] uppercase">Execute Synthesis</span>`;
-                lucide.createIcons();
+                btnText.innerText = 'Edit';
             }
         }
 
         async function submitCloud() {
-            const prompt = document.getElementById('promptInput').value.trim();
-            if (!prompt) { alert("Please enter a prompt"); return; }
-            if (!base64Images[1]) { alert("Please upload Main Image (Slot 1) for cloud generation"); return; }
+            const promptText = (document.getElementById('promptInput').value || '').trim();
+            if (!promptText) { flashSlot(0); return; }
+            if (!base64Images[1]) { flashSlot(1); return; }
 
             const btn = document.getElementById('genBtn');
-            const loader = document.getElementById('loader');
-            const placeholder = document.getElementById('placeholder');
-            const outputImg = document.getElementById('outputImg');
-            const downloadBtn = document.getElementById('downloadBtn');
-
+            const btnText = document.getElementById('btnText');
+            btn.classList.add('is-disabled');
             btn.disabled = true;
-            btn.style.backgroundColor = '#333';
-            btn.innerHTML = `<i data-lucide="cloud" class="w-4 h-4 text-blue-400 animate-pulse"></i><span class="tracking-[0.3em] text-[11px] uppercase">Cloud Processing...</span>`;
-            lucide.createIcons();
-            placeholder.classList.add('hidden');
-            loader.classList.remove('hidden');
-            setCloudStatus('Submitting to ModelScope...');
+            btnText.innerText = 'Cloud processing…';
+            setEngineStatus('cloud · submitting', true);
 
-            // Collect image URLs (base64 data URIs)
+            document.getElementById('emptyState').style.display = 'none';
+            const placeholderId = 'render-' + Date.now();
+            insertRenderPlaceholder(placeholderId);
+
+            // 收集所有 base64 image_urls（slot 1/2/3 中已上传的）
             const imageUrls = [base64Images[1], base64Images[2], base64Images[3]].filter(Boolean);
 
+            // === 与旧版 schema 完全一致的 cloud payload ===
+            const msPayload = {
+                prompt: promptText,
+                model: 'black-forest-labs/FLUX.2-klein-9B',
+                image_urls: imageUrls,
+                client_id: CLIENT_ID
+            };
+            if (loraEnabled) {
+                msPayload.loras = { 'Daniel8152/Klein-enhance': loraValue };
+            }
+
             try {
-                setCloudStatus('Processing with FLUX.2-Klein...');
-                const msPayload = {
-                    prompt,
-                    model: 'black-forest-labs/FLUX.2-klein-9B',
-                    image_urls: imageUrls,
-                    client_id: CLIENT_ID
-                };
-                if (loraEnabled) {
-                    const strength = parseFloat(document.getElementById('loraStrengthSlider').value);
-                    msPayload.loras = { 'Daniel8152/Klein-enhance': strength };
-                }
                 const response = await fetch('/api/ms/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(msPayload)
                 });
-
                 if (!response.ok) {
-                    const err = await response.json();
+                    const err = await response.json().catch(() => ({}));
                     throw new Error(err.detail || 'Cloud generation failed');
                 }
-
                 const result = await response.json();
-                if (result.url) {
-                    const resultData = {
-                        prompt,
-                        images: [result.url],
-                        timestamp: Date.now() / 1000,
-                        type: 'klein',
-                        model: 'black-forest-labs/FLUX.2-klein-9B'
-                    };
-                    currentResult = resultData;
-                    outputImg.src = result.url;
-                    outputImg.classList.remove('hidden');
-                    downloadBtn.classList.remove('hidden');
-                    downloadBtn.href = result.url;
-                    renderImageCard(resultData, true);
-                    setCloudStatus('Done!', false);
-                }
+                if (!result.url) throw new Error('No image URL returned');
+                const resultData = {
+                    prompt: promptText,
+                    images: [result.url],
+                    timestamp: Date.now() / 1000,
+                    type: 'klein',
+                    model: 'black-forest-labs/FLUX.2-klein-9B'
+                };
+                currentResult = resultData;
+                removeRenderPlaceholder(placeholderId);
+                renderImageCard(resultData, true);
+                openLightbox(resultData);
+                setEngineStatus('cloud · done', false);
             } catch (err) {
-                setCloudStatus(err.message, false);
-                alert("Cloud generation failed: " + err.message);
-                placeholder.classList.remove('hidden');
+                console.error('Cloud generation error', err);
+                replacePlaceholderWithError(placeholderId, err.message || 'Cloud render failed');
+                setEngineStatus('cloud · error', false);
             } finally {
-                loader.classList.add('hidden');
+                btn.classList.remove('is-disabled');
                 btn.disabled = false;
-                btn.style.backgroundColor = '';
-                btn.innerHTML = `<i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i><span class="tracking-[0.3em] text-[11px] uppercase">Execute Synthesis</span>`;
-                lucide.createIcons();
+                btnText.innerText = 'Edit';
             }
         }
 
-        // --- Compare Slider ---
-        function initCompareSlider() {
-            const container = document.getElementById('compareContainer');
-            const wrapper = document.getElementById('compareOriginalWrapper');
-            const slider = document.getElementById('compareSlider');
-            let isDragging = false;
-            const updateSlider = (clientX) => {
-                const rect = container.getBoundingClientRect();
-                let percent = Math.max(0, Math.min(100, (clientX - rect.left) / rect.width * 100));
-                wrapper.style.clipPath = `inset(0 ${100 - percent}% 0 0)`;
-                slider.style.left = `${percent}%`;
-            };
-            const start = (e) => { isDragging = true; e.preventDefault(); };
-            const end = () => isDragging = false;
-            const move = (e) => {
-                if (!isDragging) return;
-                updateSlider(e.touches ? e.touches[0].clientX : e.clientX);
-            };
-            container.addEventListener('mousedown', (e) => { if (e.target === slider) return; updateSlider(e.clientX); start(e); });
-            slider.addEventListener('mousedown', start);
-            window.addEventListener('mouseup', end);
-            window.addEventListener('mousemove', move);
-            slider.addEventListener('touchstart', start, { passive: false });
-            window.addEventListener('touchend', end);
-            window.addEventListener('touchmove', move, { passive: false });
+        function flashSlot(idx) {
+            if (idx === 0) {
+                const ta = document.getElementById('promptInput');
+                ta.classList.add('is-error');
+                setTimeout(() => ta.classList.remove('is-error'), 600);
+                return;
+            }
+            const zone = document.getElementById('drop-zone-' + idx);
+            if (!zone) return;
+            zone.style.borderColor = 'var(--primary-deep)';
+            zone.style.borderStyle = 'solid';
+            setTimeout(() => {
+                zone.style.borderColor = '';
+                zone.style.borderStyle = '';
+            }, 500);
         }
-        initCompareSlider();
 
-        function openLightbox(dataOrUrl) {
-            const lb = document.getElementById('lightbox');
-            const img = document.getElementById('lightboxImg');
-            const comp = document.getElementById('compareContainer');
-            const promptEl = document.getElementById('lightboxPrompt');
-            const sameStyleBtn = document.getElementById('sameStyleBtn');
-            const resPill = document.getElementById('lightboxRes');
+        function setEngineStatus(text, visible) {
+            const bar = document.getElementById('engineStatus');
+            document.getElementById('engineStatusText').innerText = text;
+            bar.classList.toggle('is-visible', !!visible);
+        }
 
-            let data = (typeof dataOrUrl === 'string') ? { images: [dataOrUrl] } : dataOrUrl;
+        /* ============== 渲染图卡 §16.1 + 占位 §16.3 + 错误 §16.6 ============== */
+        function insertRenderPlaceholder(id) {
+            const grid = document.getElementById('imageGrid');
+            const wrap = document.createElement('div');
+            wrap.id = id;
+            wrap.className = 'render-placeholder';
+            wrap.innerHTML = `
+                <div class="image-placeholder">
+                    <span class="section-tag">
+                        Rendering
+                        <span class="pixel-dot-pulse"><span></span><span></span><span></span></span>
+                    </span>
+                </div>
+                <div class="placeholder-meta">
+                    <span class="text-mono">${provider === 'cloud' ? 'cloud · klein' : 'local · comfyui'}</span>
+                </div>
+            `;
+            grid.insertBefore(wrap, grid.firstChild);
+        }
+        function removeRenderPlaceholder(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+        function replacePlaceholderWithError(id, msg) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.innerHTML = `
+                <div class="image-placeholder image-placeholder--error">
+                    <svg class="pixel-icon" style="width:32px;height:32px;color:var(--primary)"><use href="#cross"/></svg>
+                </div>
+                <div class="placeholder-meta">
+                    <span class="text-body" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(msg)}</span>
+                    <a class="btn-underline" href="javascript:submitWorkflow()" style="font-size:12px;">retry
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-right"/></svg>
+                    </a>
+                </div>
+            `;
+        }
+
+        function renderImageCard(data, isNew = false) {
+            const grid = document.getElementById('imageGrid');
+            const key  = 'h-' + (data.timestamp || Date.now());
+            if (renderedIds.has(key)) return;
+            renderedIds.add(key);
+            document.getElementById('emptyState').style.display = 'none';
+
+            const card = document.createElement('div');
+            card.id = key;
+            card.className = 'image-card';
+            card.style.cursor = 'zoom-in';
+            card.onclick = () => openLightbox(data);
+
+            const imgUrl = data.images[0];
+            const promptShort = data.prompt || 'Klein edit';
+            const ts = new Date((data.timestamp || Date.now() / 1000) * 1000);
+            if (isNaN(ts.getTime())) ts.setTime(Date.now());
+            const tsText = ts.getFullYear() + '-' + String(ts.getMonth()+1).padStart(2,'0') + '-' + String(ts.getDate()).padStart(2,'0')
+                + ' ' + String(ts.getHours()).padStart(2,'0') + ':' + String(ts.getMinutes()).padStart(2,'0');
+            const sourceLabel = data.model ? data.model.split('/').pop() : 'klein';
+
+            card.innerHTML = `
+                <img src="${imgUrl}" alt="klein edit" loading="lazy">
+                <div class="image-meta">
+                    <div class="meta-text">
+                        <div class="meta-prompt">${escapeHtml(promptShort)}</div>
+                        <div class="meta-info">${escapeHtml(sourceLabel)} · ${tsText}</div>
+                    </div>
+                    <div class="meta-actions">
+                        <button class="action-btn" title="Download"
+                            onclick="event.stopPropagation();window.open('${imgUrl}','_blank')">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#download"/></svg>
+                        </button>
+                        <button class="action-btn" title="Replicate prompt + slots"
+                            onclick="event.stopPropagation();replicateFromCard('${key}')">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#copy"/></svg>
+                        </button>
+                        <button class="action-btn" title="Delete"
+                            onclick="event.stopPropagation();deleteHistoryItem('${data.timestamp}', event)">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#trash"/></svg>
+                        </button>
+                    </div>
+                </div>
+            `;
+            card.__data = data;
+            if (isNew) grid.insertBefore(card, grid.firstChild); else grid.appendChild(card);
+            archiveCount += 1;
+            document.getElementById('archiveCountLabel').innerText = 'Recent edits (' + archiveCount + ')';
+        }
+
+        function replicateFromCard(key) {
+            const card = document.getElementById(key);
+            if (!card || !card.__data) return;
+            currentLightboxData = card.__data;
+            applySameStyle();
+        }
+
+        function escapeHtml(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        /* ============== Lightbox + Before/After compare（§16.5 + §15.4 handle） ============== */
+        const lightbox = document.getElementById('lightbox');
+        const compareStage     = document.getElementById('compareStage');
+        const compareGenerated = document.getElementById('compareGenerated');
+        const compareOriginal  = document.getElementById('compareOriginal');
+        const compareWrapper   = document.getElementById('compareOriginalWrapper');
+        const compareLine      = document.getElementById('compareSliderLine');
+        const compareHandle    = document.getElementById('compareSliderHandle');
+        const lightboxSingle   = document.getElementById('lightboxSingle');
+        const lightboxMeta     = document.getElementById('lightboxMeta');
+        const lightboxResText  = document.getElementById('lightboxResText');
+        const beforeTag = document.querySelector('.compare-tag--before');
+        const afterTag  = document.querySelector('.compare-tag--after');
+        let lightboxImageURL = '';
+
+        function openLightbox(data) {
             currentLightboxData = data;
-            promptEl.textContent = data.prompt || "No prompt metadata found";
-            resPill.style.opacity = '0';
+            lightboxImageURL = data.images[0];
+            const originalName = data.params && data.params["278"] && data.params["278"].image;
 
-            const updateRes = (target) => {
-                if (target.naturalWidth) {
-                    resPill.innerText = `${target.naturalWidth} x ${target.naturalHeight}`;
-                    resPill.style.opacity = '1';
+            if (originalName) {
+                // before/after compare 模式
+                compareStage.classList.add('is-compare');
+                compareGenerated.style.display = '';
+                compareWrapper.style.display = '';
+                compareLine.style.display = '';
+                beforeTag.style.display = '';
+                afterTag.style.display = '';
+                lightboxSingle.style.display = 'none';
+                compareGenerated.src = data.images[0];
+                compareOriginal.src  = '/api/view?filename=' + encodeURIComponent(originalName) + '&type=input';
+                compareWrapper.style.clipPath = 'inset(0 50% 0 0)';
+                compareLine.style.left = '50%';
+                compareGenerated.onload = () => {
+                    if (compareGenerated.naturalWidth) {
+                        lightboxResText.innerText = compareGenerated.naturalWidth + ' × ' + compareGenerated.naturalHeight;
+                        lightboxMeta.style.display = '';
+                    }
+                };
+                if (compareGenerated.complete && compareGenerated.naturalWidth) {
+                    lightboxResText.innerText = compareGenerated.naturalWidth + ' × ' + compareGenerated.naturalHeight;
+                    lightboxMeta.style.display = '';
                 }
-            };
-
-            if (data.params?.["278"]?.image) {
-                img.classList.add('hidden');
-                comp.classList.remove('hidden');
-                const genImg = document.getElementById('compareGenerated');
-                genImg.src = data.images[0];
-                document.getElementById('compareOriginal').src = `/api/view?filename=${encodeURIComponent(data.params["278"].image)}&type=input`;
-                document.getElementById('compareOriginalWrapper').style.clipPath = 'inset(0 50% 0 0)';
-                document.getElementById('compareSlider').style.left = '50%';
-                genImg.onload = () => updateRes(genImg);
-                if (genImg.complete) updateRes(genImg);
             } else {
-                comp.classList.add('hidden');
-                img.classList.remove('hidden');
-                img.src = data.images[0];
-                img.onload = () => updateRes(img);
-                if (img.complete) updateRes(img);
+                // 单图 fallback
+                compareStage.classList.remove('is-compare');
+                compareGenerated.style.display = 'none';
+                compareWrapper.style.display = 'none';
+                compareLine.style.display = 'none';
+                beforeTag.style.display = 'none';
+                afterTag.style.display = 'none';
+                lightboxSingle.style.display = '';
+                lightboxSingle.src = data.images[0];
+                lightboxSingle.onload = () => {
+                    if (lightboxSingle.naturalWidth) {
+                        lightboxResText.innerText = lightboxSingle.naturalWidth + ' × ' + lightboxSingle.naturalHeight;
+                        lightboxMeta.style.display = '';
+                    }
+                };
             }
-
-            sameStyleBtn.classList.toggle('hidden', !data.params);
-            lb.classList.replace('hidden', 'flex');
+            document.getElementById('sameStyleBtn').style.display = (data.params || data.prompt) ? 'inline-flex' : 'none';
+            lightbox.classList.add('is-open');
             document.body.style.overflow = 'hidden';
         }
 
         function closeLightbox() {
-            document.getElementById('lightbox').classList.replace('flex', 'hidden');
-            document.body.style.overflow = 'auto';
+            lightbox.classList.remove('is-open');
+            document.body.style.overflow = '';
+        }
+        function handleLightboxOutside(e) {
+            if (e.target === lightbox) closeLightbox();
+        }
+        document.addEventListener('keydown', (e) => {
+            if (!lightbox.classList.contains('is-open')) return;
+            if (e.key === 'Escape') closeLightbox();
+        });
+
+        function downloadLightbox() {
+            if (!lightboxImageURL) return;
+            const a = document.createElement('a');
+            a.href = lightboxImageURL;
+            a.download = 'Klein-' + Date.now() + '.png';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
         }
 
-        function handleOutsideClick(e) { if (e.target.id === 'lightbox') closeLightbox(); }
-
-        function renderImageCard(data, isNew = false) {
-            const masonry = document.getElementById('masonry');
-            if (document.getElementById(`history-${data.timestamp}`)) return;
-            const card = document.createElement('div');
-            card.id = `history-${data.timestamp}`;
-            card.className = 'masonry-item group relative cursor-zoom-in';
-            card.onclick = () => openLightbox(data);
-            card.innerHTML = `
-                <img src="${data.images[0]}" class="w-full h-full object-cover block transform group-hover:scale-105 transition-transform duration-1000" loading="lazy">
-                <button onclick="deleteHistoryItem('${data.timestamp}', event)" class="absolute top-4 right-4 text-white hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                    <i data-lucide="trash-2" class="w-4 h-4"></i>
-                </button>
-                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all p-6 flex flex-col justify-end">
-                    <p class="text-white text-[10px] font-medium line-clamp-2 uppercase tracking-wider">${data.prompt || "Klein Archive"}</p>
-                    ${data.model ? `<p class="text-white/50 text-[9px] mt-1">${data.model.split('/').pop()}</p>` : ''}
-                </div>
-            `;
-            isNew ? masonry.prepend(card) : masonry.appendChild(card);
-            lucide.createIcons();
+        /* —— compare 拖拽：14×14 像素方块 handle —— */
+        let compareDragging = false;
+        function updateCompare(clientX) {
+            const rect = compareStage.getBoundingClientRect();
+            let x = clientX - rect.left;
+            let pct = (x / rect.width) * 100;
+            pct = Math.max(0, Math.min(100, pct));
+            const pctInt = Math.round(pct * 10) / 10;
+            compareWrapper.style.clipPath = 'inset(0 ' + (100 - pctInt) + '% 0 0)';
+            compareLine.style.left = pctInt + '%';
         }
+        compareStage.addEventListener('mousedown', (e) => {
+            if (!compareStage.classList.contains('is-compare')) return;
+            compareDragging = true;
+            updateCompare(e.clientX);
+            e.preventDefault();
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (compareDragging) updateCompare(e.clientX);
+        });
+        window.addEventListener('mouseup', () => compareDragging = false);
+        compareStage.addEventListener('touchstart', (e) => {
+            if (!compareStage.classList.contains('is-compare')) return;
+            compareDragging = true;
+            if (e.touches[0]) updateCompare(e.touches[0].clientX);
+        }, { passive: true });
+        window.addEventListener('touchmove', (e) => {
+            if (compareDragging && e.touches[0]) updateCompare(e.touches[0].clientX);
+        }, { passive: true });
+        window.addEventListener('touchend', () => compareDragging = false);
 
-        async function applySameStyle() {
-            if (!currentLightboxData?.params) return;
-            document.getElementById('promptInput').value = currentLightboxData.prompt || "";
+        /* ============== Replicate（一键复用 prompt + 3 slot） ============== */
+        function applySameStyle() {
+            if (!currentLightboxData) return;
+            document.getElementById('promptInput').value = currentLightboxData.prompt || '';
             const params = currentLightboxData.params;
             const setSlot = (slotId, nodeId) => {
-                if (params[nodeId]?.image) {
+                if (params && params[nodeId] && params[nodeId].image) {
                     const fname = params[nodeId].image;
                     uploadedNames[slotId] = fname;
-                    const prev = document.getElementById(`prev${slotId}`);
-                    prev.src = `/api/view?filename=${encodeURIComponent(fname)}&type=input`;
-                    prev.classList.remove('hidden');
-                    document.getElementById(`del${slotId}`).classList.remove('hidden');
-                } else { clearSlot(slotId); }
+                    const prev = document.getElementById('prev' + slotId);
+                    const zone = document.getElementById('drop-zone-' + slotId);
+                    prev.src = '/api/view?filename=' + encodeURIComponent(fname) + '&type=input';
+                    zone.classList.add('has-file');
+                } else {
+                    clearSlot(slotId);
+                }
             };
-            setSlot(1, "278"); setSlot(2, "270"); setSlot(3, "292");
+            if (params) {
+                setSlot(1, "278"); setSlot(2, "270"); setSlot(3, "292");
+            }
             closeLightbox();
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
+        /* ============== 历史回填（保留 /api/history?type=klein） ============== */
+        let allHistory = [];
+        let currentIndex = 0;
+        const PAGE_SIZE = 24;
+        let isLoading = false;
         async function loadHistory(page = 0) {
             if (isLoading) return;
             const loader = document.getElementById('loadMoreTrigger');
             try {
                 isLoading = true;
                 if (page === 0) {
-                    loader.innerText = "Loading Archives...";
                     const res = await fetch('/api/history?type=klein');
                     allHistory = await res.json();
-                    document.getElementById('masonry').innerHTML = '';
                     currentIndex = 0;
-                } else {
-                    loader.innerText = "Loading...";
-                    await new Promise(r => setTimeout(r, 400));
+                    // 清掉所有非 emptyState 的卡
+                    [...document.getElementById('imageGrid').children].forEach(c => {
+                        if (c.id !== 'emptyState') c.remove();
+                    });
+                    renderedIds.clear();
+                    archiveCount = 0;
                 }
                 const nextData = allHistory.slice(currentIndex, currentIndex + PAGE_SIZE);
                 nextData.forEach(item => renderImageCard(item));
                 currentIndex += nextData.length;
                 if (currentIndex >= allHistory.length) {
-                    loader.classList.add('hidden');
+                    loader.style.display = 'none';
                 } else {
-                    loader.classList.remove('hidden');
-                    loader.innerText = "Load More Archive";
+                    loader.style.display = '';
+                    loader.innerText = 'Load more';
+                }
+                if (archiveCount > 0) {
+                    document.getElementById('emptyState').style.display = 'none';
                 }
             } catch (e) {
                 console.error(e);
-                loader.textContent = "Error loading history";
             } finally {
                 isLoading = false;
             }
         }
 
-        function zoomImage() { if (currentResult) openLightbox(currentResult); }
-
-        function downloadLightboxImage() {
-            const url = currentLightboxData?.images[0];
-            if (!url) return;
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `Klein-${Date.now()}.png`;
-            link.click();
-        }
-
         async function deleteHistoryItem(ts, ev) {
-            ev.stopPropagation();
-            if (!confirm("Delete this archive?")) return;
+            if (ev) ev.stopPropagation();
+            if (!confirm('Delete this edit?')) return;
             try {
                 const res = await fetch('/api/history/delete', {
                     method: 'POST',
@@ -779,21 +1246,37 @@
                     body: JSON.stringify({ timestamp: ts })
                 });
                 if ((await res.json()).success) {
-                    document.getElementById(`history-${ts}`).remove();
+                    const el = document.getElementById('h-' + ts);
+                    if (el) el.remove();
+                    archiveCount = Math.max(0, archiveCount - 1);
+                    document.getElementById('archiveCountLabel').innerText = 'Recent edits (' + archiveCount + ')';
                 }
-            } catch (e) { alert("Delete failed"); }
+            } catch (e) { alert('Delete failed'); }
         }
 
+        /* ============== 主题切换 postMessage 监听保留 ============== */
+        // theme.js 已自动监听 'studio-theme' 消息并切 class，
+        // 这里保留监听用于强制刷新本页 background。
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'studio-theme') {
+                document.body.offsetHeight; // 触发样式重计算
+            }
+        });
+
+        /* ============== Load More 滚动观察 ============== */
         const observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting && !isLoading && currentIndex < allHistory.length) loadHistory(1);
         }, { threshold: 0.1 });
 
-        window.onload = () => {
+        window.addEventListener('load', () => {
             loadHistory(0).then(() => {
                 const trigger = document.getElementById('loadMoreTrigger');
-                if (trigger) { observer.observe(trigger); trigger.onclick = () => loadHistory(1); }
+                if (trigger) {
+                    observer.observe(trigger);
+                    trigger.onclick = () => loadHistory(1);
+                }
             });
-        };
+        });
     </script>
 </body>
 
