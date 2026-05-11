@@ -176,8 +176,8 @@ body.studio-theme-dark .sunset-stripe {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: var(--ink);
-  color: #fff;
+  background: #0f0f0f;             /* 硬编码：dark mode 也保持纯黑标签 */
+  color: #ffffff;
   font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 500;
@@ -187,6 +187,11 @@ body.studio-theme-dark .sunset-stripe {
   user-select: none;
 }
 .section-tag .pixel-icon { color: var(--primary); }
+body.studio-theme-dark .section-tag {
+  background: #161618;
+  color: #ffffff;
+  border: 1px solid #2a2a2d;
+}
 
 
 /* ----------------------------------------------------------------------------
@@ -209,10 +214,10 @@ body.studio-theme-dark .sunset-stripe {
   user-select: none;
 }
 
-/* 7.1 Primary — 实心黑 CTA */
+/* 7.1 Primary — 实心黑 CTA（light）/ 实心白 CTA（dark，反相） */
 .btn-primary {
-  background: var(--ink);
-  color: #fff;
+  background: #0f0f0f;            /* 硬编码，避免 dark token 翻转 */
+  color: #ffffff;
   padding: 14px 22px;
 }
 .btn-primary:hover         { background: #000; }
@@ -220,6 +225,16 @@ body.studio-theme-dark .sunset-stripe {
 .btn-primary[disabled],
 .btn-primary.is-disabled   { background: #2a2a2a; color: #888; cursor: not-allowed; }
 .btn-primary .pixel-icon   { color: var(--primary); transition: transform 0s step-end; }
+
+body.studio-theme-dark .btn-primary {
+  background: #f5f5f5;
+  color: #0e0e10;
+}
+body.studio-theme-dark .btn-primary:hover { background: #ffffff; }
+body.studio-theme-dark .btn-primary[disabled],
+body.studio-theme-dark .btn-primary.is-disabled {
+  background: #3a3a3a; color: #6a6a6a;
+}
 
 /* 7.2 Secondary — Cream Pill */
 .btn-tonal {
