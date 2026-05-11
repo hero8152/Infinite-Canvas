@@ -1,292 +1,201 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
-    <title>Impact & Bound Square - Enhanced</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite-Canvas — Sign in</title>
+    <link rel="icon" href="/static/logo.png" type="image/png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/design-system.css?v=21">
+    <script src="/static/theme.js?v=20260509"></script>
     <style>
-        body { 
-            margin: 0; 
-            overflow: hidden; 
-            background-color: #000; 
-            font-family: 'Inter', -apple-system, sans-serif;
-        }
-        canvas { display: block; }
-        
-        #loginForm {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -40%);
-            opacity: 0;
-            visibility: hidden;
-            transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-            z-index: 10;
-            width: 280px;
-            padding: 45px;
-            background: rgba(255, 255, 255, 0.02);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-radius: 40px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-        }
-        
-        #loginForm.visible {
-            opacity: 1;
-            visibility: visible;
-            transform: translate(-50%, -50%);
-        }
-        
-        .label {
-            color: rgba(255, 255, 255, 0.3);
-            font-size: 10px;
-            letter-spacing: 4px;
-            margin-bottom: 8px;
-            text-transform: uppercase;
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: var(--font-sans);
+            color: var(--ink);
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right,  rgba(230, 213, 168, 0.55) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.55) 1px, transparent 1px);
+            background-size: 80px 80px;
+            display: flex;
+            flex-direction: column;
         }
 
-        .form-group {
-            position: relative;
-            margin-bottom: 35px;
-        }
-        
-        .form-group input {
-            width: 100%;
-            padding: 12px 0;
-            background: transparent;
-            border: none;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            color: #fff;
-            font-size: 14px;
-            outline: none;
+        body.studio-theme-dark {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right,  rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
-        .form-group::after {
-            content: '';
-            position: absolute;
-            bottom: 0; left: 0;
-            width: 0; height: 1px;
-            background: #fff;
-            transition: width 0.6s ease;
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 32px 48px;
+        }
+        .top-bar .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 18px;
+            font-weight: 500;
+        }
+        .top-bar .brand .pixel-icon { color: var(--primary); }
+        .top-bar .timestamp {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--muted);
         }
 
-        .form-group input:focus ~ ::after { width: 100%; }
-        
-        #loginButton {
-            width: 100%;
-            padding: 16px;
-            background: #fff;
-            border: none;
-            border-radius: 50px;
-            color: #000;
-            font-size: 11px;
-            font-weight: 800;
-            letter-spacing: 6px;
-            cursor: pointer;
-            transition: all 0.4s;
-            margin-top: 10px;
-        }
-        
-        #loginButton:hover {
-            transform: scale(1.05);
-            box-shadow: 0 0 40px rgba(255, 255, 255, 0.4);
+        .hero {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 0 clamp(24px, 8vw, 128px);
+            max-width: 1400px;
         }
 
-        .timestamp {
-            position: absolute;
-            top: 40px;
-            right: 40px;
-            color: rgba(255, 255, 255, 0.15);
-            font-size: 10px;
-            font-family: monospace;
+        .hero h1 {
+            margin: 0 0 24px 0;
+            font-size: clamp(56px, 9vw, 128px);
+            font-weight: 500;
+            line-height: 0.95;
+            letter-spacing: -0.02em;
+        }
+        .hero .subtitle {
+            font-size: 20px;
+            color: var(--muted);
+            max-width: 640px;
+            margin: 0 0 64px 0;
+            line-height: 1.4;
+        }
+
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            max-width: 480px;
+        }
+        .field-row {
+            display: flex;
+            gap: 0;
+        }
+        .field-row .input {
+            flex: 1;
+        }
+        .field-row .btn-primary {
+            border-left: none;
+        }
+
+        .footer-link-row {
+            display: flex;
+            gap: 32px;
+            align-items: center;
+        }
+
+        .bottom-bar {
+            display: flex;
+            justify-content: flex-end;
+            padding: 24px 48px 32px 48px;
+        }
+        .bottom-bar .text-mono {
+            color: var(--muted);
         }
     </style>
 </head>
+
 <body>
-<div class="timestamp" id="timer"></div>
-<canvas id="sandCanvas"></canvas>
 
-<div id="loginForm">
-    <div class="form-group">
-        <div class="label">Identity</div>
-        <input type="text" id="username" placeholder=" " autocomplete="off">
-    </div>
-    <div class="form-group">
-        <div class="label">Access Code</div>
-        <input type="password" id="password" placeholder=" " autocomplete="off">
-    </div>
-    <button id="loginButton">CONNECT</button>
-</div>
+    <header class="top-bar">
+        <div class="brand">
+            <svg class="pixel-icon pixel-icon--md" aria-hidden="true">
+                <use href="/static/icons/pixel.svg#ic-brand"/>
+            </svg>
+            <span>Infinite-Canvas</span>
+        </div>
+        <div class="timestamp" id="timer">—</div>
+    </header>
 
-<script>
-const canvas = document.getElementById('sandCanvas');
-const ctx = canvas.getContext('2d');
-const loginForm = document.getElementById('loginForm');
-const timerEl = document.getElementById('timer');
+    <main class="hero">
+        <h1>The next chapter of <br>generative AI is yours.</h1>
+        <p class="subtitle">Sign in with your access token to enter the editorial canvas, prompt to image, and chat with your model of choice.</p>
 
-let width, height, particles = [];
-const particleCount = 4500; 
-const mouseThreshold = 220;
-let isHovering = false;
-let noiseTimer = 0;
+        <form class="login-form" id="loginForm" onsubmit="return handleLogin(event)">
+            <label class="text-label" for="token">Access token</label>
+            <div class="field-row">
+                <input class="input" type="password" id="token" placeholder="paste your token here" autocomplete="off" required>
+                <button class="btn-primary" type="submit">
+                    Continue
+                    <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#chevron-right"/></svg>
+                </button>
+            </div>
+            <div id="error-msg" class="input-error-msg" style="display:none">
+                <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#cross"/></svg>
+                <span>Invalid token — try again.</span>
+            </div>
 
-function updateTimer() {
-    const now = new Date();
-    timerEl.innerText = now.toLocaleString('en-GB').toUpperCase();
-}
-setInterval(updateTimer, 1000);
+            <div class="footer-link-row">
+                <a class="btn-underline" href="https://ai.comfly.chat/token" target="_blank" rel="noopener">
+                    Need a token?
+                    <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#chevron-right"/></svg>
+                </a>
+                <a class="btn-underline" href="/" >
+                    Continue without token
+                    <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#chevron-right"/></svg>
+                </a>
+            </div>
+        </form>
+    </main>
 
-window.addEventListener('resize', init);
-window.addEventListener('mousemove', (e) => {
-    const dx = e.clientX - width / 2;
-    const dy = e.clientY - height / 2;
-    isHovering = Math.sqrt(dx*dx + dy*dy) < mouseThreshold;
-});
+    <footer class="bottom-bar">
+        <span class="text-mono" id="commit-line">build · v2.1 · editorial canvas</span>
+    </footer>
 
-function isInsideRoundedSquare(px, py, halfSide, radius) {
-    const dx = Math.abs(px - width / 2);
-    const dy = Math.abs(py - height / 2);
-    if (dx > halfSide || dy > halfSide) return false;
-    if (dx > halfSide - radius && dy > halfSide - radius) {
-        const cx = dx - (halfSide - radius);
-        const cy = dy - (halfSide - radius);
-        return (cx * cx + cy * cy <= radius * radius);
-    }
-    return true;
-}
+    <div class="sunset-stripe"></div>
 
-class Particle {
-    constructor() {
-        this.init();
-    }
-
-    init() {
-        const angle = Math.random() * Math.PI * 2;
-        // 重置时从中心稍外一点出生，避免堆在原点
-        const r = 5 + Math.random() * 15; 
-        this.x = width / 2 + Math.cos(angle) * r;
-        this.y = height / 2 + Math.sin(angle) * r;
-        this.vx = Math.cos(angle) * 2;
-        this.vy = Math.sin(angle) * 2;
-        this.size = Math.random() * 1.6;
-        this.alpha = Math.random() * 0.5 + 0.2;
-        this.isEscaping = false; 
-    }
-
-    update(breath) {
-        const dx = this.x - width / 2;
-        const dy = this.y - height / 2;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
-        if (isHovering) {
-            this.vx += (Math.random() - 0.5) * 4;
-            this.vy += (Math.random() - 0.5) * 4;
-        } else {
-            // 1. 中心核心斥力 (防止从中心穿过)
-            const repulsionRadius = 45; 
-            if (dist < repulsionRadius) {
-                const force = (repulsionRadius - dist) / repulsionRadius;
-                this.vx += (dx / dist) * force * 6; 
-                this.vy += (dy / dist) * force * 6;
-            }
-
-            // 2. 爆发力 (随呼吸曲线)
-            const pushBase = Math.pow(breath, 5) * 14;
-            const randomScatter = (Math.random() - 0.5) * pushBase * 0.5;
-            this.vx += (dx / dist) * pushBase + randomScatter;
-            this.vy += (dy / dist) * pushBase + randomScatter;
-
-            // 3. 抛飞逃逸逻辑：呼吸最强时极小概率触发
-            if (breath > 0.88 && Math.random() > 0.98) {
-                this.isEscaping = true;
-            }
-
-            // 4. 边界逻辑
-            const side = 180; 
-            const cornerR = 80; 
-
-            if (!this.isEscaping) {
-                if (!isInsideRoundedSquare(this.x + this.vx, this.y + this.vy, side, cornerR)) {
-                    this.vx *= -0.4; // 碰撞衰减
-                    this.vy *= -0.4;
-                    this.vx += (Math.random() - 0.5) * 2;
-                    this.vy += (Math.random() - 0.5) * 2;
-                }
-
-                // 5. 向心引力：回归到圆环
-                const targetR = 140;
-                const pull = (targetR - dist) * 0.012; 
-                this.vx += (dx / dist) * pull;
-                this.vy += (dy / dist) * pull;
-            }
+    <script>
+        function updateTimer() {
+            const now = new Date();
+            const el = document.getElementById('timer');
+            if (el) el.textContent = now.toLocaleString('en-GB').toUpperCase();
         }
+        setInterval(updateTimer, 1000);
+        updateTimer();
 
-        this.x += this.vx;
-        this.y += this.vy;
-        
-        // 摩擦力
-        const friction = this.isEscaping ? 0.98 : 0.86;
-        this.vx *= friction;
-        this.vy *= friction;
+        async function handleLogin(e) {
+            e.preventDefault();
+            const token = document.getElementById('token').value.trim();
+            const err = document.getElementById('error-msg');
+            err.style.display = 'none';
 
-        // 6. 重置：飞出界外或速度几乎停滞的逃逸粒子
-        if (dist > width * 0.6 || (this.isEscaping && Math.abs(this.vx) < 0.05)) {
-            this.init();
+            if (!token) {
+                err.style.display = 'flex';
+                return false;
+            }
+
+            try {
+                // 持久化到 localStorage，shell 内 fetch 调用时由前端注入
+                localStorage.setItem('comfly_token', token);
+                // 同步到服务端全局 token
+                await fetch('/api/config/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                });
+                window.location.href = '/';
+            } catch (e2) {
+                err.style.display = 'flex';
+                err.querySelector('span').textContent = 'Sync failed — saved locally.';
+                setTimeout(() => { window.location.href = '/'; }, 800);
+            }
+            return false;
         }
-    }
-
-    draw(breath) {
-        const b = 180 + breath * 75;
-        const finalAlpha = this.isEscaping ? this.alpha * 0.4 : this.alpha;
-        ctx.fillStyle = `rgba(${b}, ${b}, ${b}, ${finalAlpha})`;
-        ctx.fillRect(this.x, this.y, this.size, this.size);
-    }
-}
-
-function init() {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
-    particles = [];
-    for (let i = 0; i < particleCount; i++) particles.push(new Particle());
-}
-
-function drawCore(breath) {
-    if (isHovering) return;
-    const size = 10 + breath * 4;
-    ctx.save();
-    ctx.shadowBlur = 40 * breath;
-    ctx.shadowColor = '#fff';
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(width / 2, height / 2, size, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-}
-
-function animate() {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
-    ctx.fillRect(0, 0, width, height);
-
-    noiseTimer += 0.04;
-    const breath = Math.pow((Math.sin(noiseTimer) + 1) / 2, 2);
-
-    if (isHovering) {
-        loginForm.classList.add('visible');
-    } else {
-        loginForm.classList.remove('visible');
-    }
-
-    particles.forEach(p => {
-        p.update(breath);
-        p.draw(breath);
-    });
-
-    drawCore(breath);
-    requestAnimationFrame(animate);
-}
-
-init();
-updateTimer();
-animate();
-</script>
+    </script>
 </body>
+
 </html>

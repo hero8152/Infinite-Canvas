@@ -11,230 +11,223 @@
     <link rel="stylesheet" href="/static/design-system.css?v=21">
     <script src="/static/theme.js?v=20260509"></script>
     <style>
-        :root {
-            /* Mistral Color Palette - Light */
-            --primary: #fa520f;
-            --primary-deep: #cc3a05;
-            --cream: #fff8e0;
-            --cream-soft: #fffaeb;
-            --beige-deep: #e6d5a8;
-            --ink: #1f1f1f;
-            --steel: #6a6a6a;
-            --canvas: #ffffff;
-            
-            --bg: var(--cream-soft);
-            --sidebar-bg: var(--cream-soft);
-            --stage-bg: var(--canvas);
-            --border: var(--beige-deep);
-            --stage-border: var(--beige-deep);
-            --text: var(--ink);
-            --muted: var(--steel);
-            --nav-hover-bg: var(--cream);
-            --monitor-bg: rgba(255, 248, 224, 0.85);
-            --monitor-border: var(--beige-deep);
-            --monitor-shadow: rgba(0, 0, 0, 0.04);
-            --divider: var(--beige-deep);
-            --scrollbar: #d8d8d8;
-            --scrollbar-hover: #c0c0c0;
-
-            --fluid-ease: cubic-bezier(0.3, 0, 0, 1);
-            --font-sans: 'Inter', sans-serif;
-            --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
-        }
-
-        body.theme-dark {
-            /* Mistral Color Palette - Dark */
-            --bg: #1f1f1f;
-            --sidebar-bg: #1f1f1f;
-            --stage-bg: #1c1c1e;
-            --border: #3d3d3d;
-            --stage-border: rgba(255,255,255,0.08);
-            --text: #ffffff;
-            --muted: #a8a8a8;
-            --nav-hover-bg: #2c2c2c;
-            --monitor-bg: rgba(28, 28, 30, 0.85);
-            --monitor-border: rgba(255,255,255,0.08);
-            --monitor-shadow: rgba(0, 0, 0, 0.12);
-            --divider: #3d3d3d;
-            --scrollbar: #334155;
-            --scrollbar-hover: #475569;
-        }
-
-        *::-webkit-scrollbar { width: 6px !important; height: 6px !important; background: transparent !important; }
-        *::-webkit-scrollbar-track { background: transparent !important; border: none !important; }
-        *::-webkit-scrollbar-thumb { background-color: var(--scrollbar) !important; border-radius: 8px !important; }
+        /* ===== 项目级 shell 特化（设计 token 全部来自 design-system.css） ===== */
 
         body {
-            background: var(--bg);
-            font-family: var(--font-sans);
+            margin: 0;
             overflow: hidden;
             height: 100vh;
-            color: var(--text);
-            transition: background 0.3s, color 0.3s;
-            margin: 0;
+            font-family: var(--font-sans);
+            color: var(--ink);
         }
 
         .app-shell {
             display: flex;
             width: 100%;
             height: 100vh;
-            background: var(--bg);
             position: relative;
             padding-bottom: 4px;
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.55) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.55) 1px, transparent 1px);
+            background-size: 80px 80px;
         }
 
-        /* 侧边栏折叠逻辑 */
+        body.studio-theme-dark .app-shell {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
+
+        /* ----- Sidebar：默认 72px，hover 展开到 240px ----- */
         .sidebar {
             width: 72px;
             min-width: 72px;
-            background: var(--sidebar-bg);
+            background: transparent;
             display: flex;
             flex-direction: column;
             border-right: 1px solid var(--border);
-            padding: 32px 12px;
-            transition: width 0.4s var(--fluid-ease), background 0.3s;
+            padding: 24px 12px;
+            transition: width 0.3s ease;
             z-index: 50;
             overflow: hidden;
         }
-
-        .sidebar:hover {
-            width: 240px;
-        }
+        .sidebar:hover { width: 240px; }
 
         .logo-area {
             display: flex;
             align-items: center;
             gap: 12px;
-            margin-bottom: 40px;
-            padding-left: 8px;
+            margin-bottom: 32px;
+            padding-left: 4px;
             white-space: nowrap;
         }
-
-        .logo-text {
-            font-family: var(--font-serif);
-            font-size: 22px;
-            font-weight: 600;
-            letter-spacing: -0.5px;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-        .sidebar:hover .logo-text { opacity: 1; }
-
         .logo-icon {
-            width: 24px;
-            height: 24px;
-            border: 2px solid var(--primary);
-            border-radius: 6px;
+            width: 28px;
+            height: 28px;
+            color: var(--primary);
             flex-shrink: 0;
         }
+        .logo-text {
+            font-family: var(--font-sans);
+            font-size: 18px;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            color: var(--ink);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .sidebar:hover .logo-text { opacity: 1; }
 
         nav {
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 2px;
             flex: 1;
         }
 
         .nav-item {
-            width: 100%;
-            height: 44px;
             display: flex;
             align-items: center;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+            gap: 14px;
+            height: 40px;
+            padding: 0 12px;
+            background: transparent;
             color: var(--muted);
-            padding: 0 14px;
             font-size: 14px;
             font-weight: 500;
+            border: none;
+            border-radius: 0;
+            cursor: pointer;
             white-space: nowrap;
+            text-align: left;
+            transition: none;
         }
-
-        .nav-item:hover { background: var(--nav-hover-bg); color: var(--text); }
-        .nav-item.active { background: var(--primary); color: #ffffff; }
-
-        .nav-icon { width: 20px; height: 20px; margin-right: 16px; flex-shrink: 0; }
-
-        .nav-text {
+        .nav-item:hover {
+            background: var(--bg-2);
+            color: var(--ink);
+        }
+        .nav-item.active {
+            background: var(--bg-2);
+            color: var(--ink);
+        }
+        .nav-item .nav-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            color: currentColor;
+        }
+        .nav-item.active .nav-icon { color: var(--primary); }
+        .nav-item .nav-text {
             opacity: 0;
             transition: opacity 0.2s;
         }
-        .sidebar:hover .nav-text { opacity: 1; }
+        .sidebar:hover .nav-item .nav-text { opacity: 1; }
 
-        /* 侧边栏底部控制区域 */
+        .nav-divider {
+            width: 100%;
+            height: 1px;
+            background: var(--border);
+            margin: 8px 0;
+        }
+
+        /* ----- Sidebar 底部：nano monitor + theme toggle ----- */
         .sidebar-footer {
             margin-top: auto;
             display: flex;
             flex-direction: column;
-            gap: 12px;
-            padding: 12px 4px 0 4px;
+            gap: 8px;
+            padding-top: 12px;
             border-top: 1px solid var(--border);
-        }
-
-        .sidebar:not(:hover) .nano-monitor {
-            padding: 8px 0;
-            justify-content: center;
-        }
-        .sidebar:not(:hover) .nano-monitor .label-nano,
-        .sidebar:not(:hover) .nano-monitor .divider,
-        .sidebar:not(:hover) .nano-monitor .val-nano:first-of-type {
-            display: none;
         }
 
         .nano-monitor {
             display: flex;
             align-items: center;
             gap: 8px;
-            background: var(--monitor-bg);
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 1px solid var(--monitor-border);
-            transition: all 0.3s ease;
+            padding: 6px 10px;
+            background: var(--ink);
+            color: #fff;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            border-radius: 0;
         }
-        .nano-monitor.is-busy { background: var(--ink); color: #ffffff; border-color: var(--ink); }
+        .sidebar:not(:hover) .nano-monitor {
+            justify-content: center;
+            padding: 8px 0;
+        }
+        .sidebar:not(:hover) .nano-monitor .nano-label,
+        .sidebar:not(:hover) .nano-monitor .nano-divider,
+        .sidebar:not(:hover) .nano-monitor #queue-val {
+            display: none;
+        }
 
-        .stat-group { display: flex; align-items: center; gap: 4px; color: var(--text); }
-        .is-busy .stat-group { color: #ffffff; }
-        .label-nano { text-transform: uppercase; font-size: 9px; font-weight: 700; opacity: 0.5; }
-        .val-nano { font-size: 12px; font-weight: 600; }
-
-        .divider { width: 1px; height: 10px; background: var(--divider); }
-
-        .theme-toggle {
-            width: 100%;
-            height: 40px;
-            border-radius: 8px;
-            background: var(--monitor-bg);
-            border: 1px solid var(--monitor-border);
-            color: var(--muted);
+        .nano-monitor .nano-group {
             display: flex;
             align-items: center;
-            padding-left: 14px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+            gap: 6px;
         }
-        .theme-toggle:hover { background: var(--nav-hover-bg); color: var(--text); }
-        .theme-toggle-text { margin-left: 16px; font-size: 13px; font-weight: 500; opacity: 0; transition: opacity 0.2s; }
+        .nano-monitor .nano-label {
+            color: rgba(255, 255, 255, 0.55);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .nano-monitor .nano-value { font-weight: 500; }
+        .nano-monitor .nano-divider {
+            width: 1px;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .nano-monitor.is-busy { background: var(--primary-deep); }
+
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            height: 36px;
+            padding: 0 12px;
+            background: var(--bg-2);
+            color: var(--ink);
+            border: none;
+            border-radius: 0;
+            font-family: var(--font-sans);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: none;
+        }
+        .theme-toggle:hover { background: var(--bg); }
+        body.studio-theme-dark .theme-toggle { background: var(--dark-elev); color: var(--dark-text); }
+        body.studio-theme-dark .theme-toggle:hover { background: var(--dark-surface); }
+        .theme-toggle .nav-icon { width: 16px; height: 16px; color: var(--primary); flex-shrink: 0; }
+        .theme-toggle-text {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
         .sidebar:hover .theme-toggle-text { opacity: 1; }
 
-        /* 主舞台区 */
+        /* ----- Stage（主舞台 iframe 容器） ----- */
         .stage-wrapper {
             flex: 1;
-            padding: 20px;
+            padding: 16px;
             display: flex;
             flex-direction: column;
             position: relative;
+            min-width: 0;
         }
-
         .stage {
             flex: 1;
-            background: var(--stage-bg);
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid var(--stage-border);
             position: relative;
-            box-shadow: 0 4px 12px var(--monitor-shadow);
+            background: var(--stage-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;     /* §8.1 唯一允许 8px 圆角的容器 */
+            overflow: hidden;
+            box-shadow: none;
         }
+        body.studio-theme-dark .stage { border-color: var(--dark-border); }
 
         iframe {
             position: absolute;
@@ -243,30 +236,36 @@
             height: 100%;
             border: none;
             opacity: 0;
-            transform: scale(0.995);
-            transition: all 0.4s var(--fluid-ease);
+            visibility: hidden;
+            transition: none;
         }
-        iframe.active { opacity: 1; transform: scale(1); }
+        iframe.active {
+            opacity: 1;
+            visibility: visible;
+        }
 
-        /* 底部日落条 */
+        /* ----- 底部 Sunset Stripe ----- */
         .sunset-stripe {
             position: absolute;
             bottom: 0;
             left: 0;
             width: 100%;
             height: 4px;
-            background: linear-gradient(90deg, var(--primary), #ffa110, #ffb83e, #ffd900, var(--cream));
+            background: linear-gradient(90deg,
+                var(--sunset-1) 0%,
+                var(--sunset-2) 18%,
+                var(--sunset-3) 38%,
+                var(--sunset-4) 58%,
+                var(--sunset-5) 78%,
+                var(--sunset-6) 100%);
             z-index: 1000;
         }
-        body.theme-dark .sunset-stripe {
-            background: linear-gradient(90deg, var(--primary), #cc3a05, #ffa110, #ffb83e, #1f1f1f);
+        body.studio-theme-dark .sunset-stripe {
+            background: linear-gradient(90deg,
+                var(--sunset-2) 0%,
+                var(--sunset-1) 50%,
+                var(--ink-2) 100%);
         }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .spinner-nano { width: 10px; height: 10px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; display: none; }
-        .is-busy .spinner-nano { display: block; }
-        .is-busy .pulse-dot { display: none; }
-        .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
     </style>
 </head>
 
@@ -275,94 +274,63 @@
     <div class="app-shell">
         <aside class="sidebar">
             <div class="logo-area">
-                <div class="logo-icon"></div>
-                <span class="logo-text">Editorial Canvas</span>
+                <svg class="logo-icon pixel-icon" aria-hidden="true">
+                    <use href="/static/icons/pixel.svg#ic-brand"/>
+                </svg>
+                <span class="logo-text">Infinite Canvas</span>
             </div>
 
             <nav>
-                <div class="nav-item active" onclick="switchUI(this, 'zimage')">
-                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.587-1.587a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>
-                    <span class="nav-text">文生图 (Generate)</span>
-                </div>
-                <div class="nav-item" onclick="switchUI(this, 'enhance')">
-                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>
-                    <span class="nav-text">细节增强 (Enhance)</span>
-                </div>
-                <div class="nav-item" onclick="switchUI(this, 'klein')">
-                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>
-                    <span class="nav-text">图片编辑 (Edit)</span>
-                </div>
-                <div class="nav-item" onclick="switchUI(this, 'angle')">
-                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                        <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                    </svg>
-                    <span class="nav-text">角度控制 (Angle)</span>
-                </div>
+                <button class="nav-item active" onclick="switchUI(this, 'zimage')">
+                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-zimage"/></svg>
+                    <span class="nav-text">Text to image</span>
+                </button>
+                <button class="nav-item" onclick="switchUI(this, 'enhance')">
+                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-enhance"/></svg>
+                    <span class="nav-text">Detail enhance</span>
+                </button>
+                <button class="nav-item" onclick="switchUI(this, 'klein')">
+                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-klein"/></svg>
+                    <span class="nav-text">Image edit</span>
+                </button>
+                <button class="nav-item" onclick="switchUI(this, 'angle')">
+                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-angle"/></svg>
+                    <span class="nav-text">Angle control</span>
+                </button>
 
-                <div style="width:100%;height:1px;background:var(--border);margin:8px 0;"></div>
+                <div class="nav-divider"></div>
 
-                <div class="nav-item" onclick="switchUI(this, 'online')">
-                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"></path>
-                        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                    </svg>
-                    <span class="nav-text">在线生图 (Online)</span>
-                </div>
-                <div class="nav-item" onclick="switchUI(this, 'gpt-chat')">
-                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                    </svg>
-                    <span class="nav-text">GPT 对话 (Chat)</span>
-                </div>
-                <div class="nav-item" onclick="switchUI(this, 'canvas')">
-                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="3" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="14" width="7" height="7"></rect>
-                        <rect x="3" y="14" width="7" height="7"></rect>
-                    </svg>
-                    <span class="nav-text">无限画布 (Canvas)</span>
-                </div>
+                <button class="nav-item" onclick="switchUI(this, 'online')">
+                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-online"/></svg>
+                    <span class="nav-text">Online generate</span>
+                </button>
+                <button class="nav-item" onclick="switchUI(this, 'gpt-chat')">
+                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-chat"/></svg>
+                    <span class="nav-text">Chat</span>
+                </button>
+                <button class="nav-item" onclick="switchUI(this, 'canvas')">
+                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-canvas"/></svg>
+                    <span class="nav-text">Canvas</span>
+                </button>
             </nav>
 
             <div class="sidebar-footer">
                 <div class="nano-monitor" id="nano-monitor">
-                    <div class="stat-group">
-                        <div class="pulse-dot animate-pulse"></div>
-                        <div class="spinner-nano"></div>
-                        <span class="label-nano">Users</span>
-                        <span id="online-val" class="val-nano">1</span>
+                    <div class="nano-group">
+                        <span class="pixel-dot-pulse" aria-hidden="true"><span></span><span></span><span></span></span>
+                        <span class="nano-label">Users</span>
+                        <span class="nano-value" id="online-val">1</span>
                     </div>
-                    <div class="divider"></div>
-                    <div class="stat-group">
-                        <span class="label-nano">Queue</span>
-                        <span id="queue-val" class="val-nano">0</span>
+                    <span class="nano-divider"></span>
+                    <div class="nano-group">
+                        <span class="nano-label">Queue</span>
+                        <span class="nano-value" id="queue-val">0</span>
                     </div>
                 </div>
 
                 <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn">
-                    <svg id="icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                    </svg>
-                    <svg id="icon-sun" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0">
-                        <circle cx="12" cy="12" r="5"></circle>
-                        <line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                        <line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
+                    <svg id="icon-moon" class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-moon"/></svg>
+                    <svg id="icon-sun" class="nav-icon pixel-icon" style="display:none"><use href="/static/icons/pixel.svg#nav-sun"/></svg>
                     <span class="theme-toggle-text">Appearance</span>
                 </button>
             </div>
@@ -379,7 +347,7 @@
                 <iframe id="frame-canvas" data-src="/static/canvas.html?v=1"></iframe>
             </div>
         </main>
-        
+
         <div class="sunset-stripe"></div>
     </div>
 
@@ -443,12 +411,12 @@
         }
 
         function syncThemeToFrame(iframe) {
-            const theme = (window.StudioTheme || {get: () => 'light'}).get();
+            const theme = (window.StudioTheme || { get: () => 'light' }).get();
             try {
                 if (iframe && iframe.contentWindow) {
                     iframe.contentWindow.postMessage({ type: 'studio-theme', theme }, '*');
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
 
         function broadcastTheme(theme) {
@@ -488,4 +456,5 @@
         });
     </script>
 </body>
+
 </html>
