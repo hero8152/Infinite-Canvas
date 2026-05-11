@@ -1598,3 +1598,119 @@ body.studio-theme-dark .ios-switch input:checked + .ios-slider:before {
     background: #10141d !important;
     box-shadow: 0 2px 7px rgba(16,20,29,.22) !important;
 }
+
+/* ========================================= */
+/* Editorial Canvas Overrides (Mistral Style) */
+/* ========================================= */
+
+:root {
+    --mistral-orange: #fa520f;
+    --mistral-orange-deep: #cc3a05;
+    --mistral-cream: #fff8e0;
+    --mistral-cream-soft: #fffaeb;
+    --mistral-canvas: #ffffff;
+    --mistral-ink: #1f1f1f;
+    --mistral-steel: #6a6a6a;
+}
+
+body {
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* --- Global Elements --- */
+* {
+    border-radius: inherit;
+}
+
+/* --- Light Mode Fixes --- */
+html:not(.studio-theme-dark) body {
+    background-color: var(--mistral-cream-soft) !important;
+    color: var(--mistral-ink) !important;
+}
+
+html:not(.studio-theme-dark) .shell,
+html:not(.studio-theme-dark) .board,
+html:not(.studio-theme-dark) .layout-container,
+html:not(.studio-theme-dark) .container-box {
+    background-color: var(--mistral-cream-soft) !important;
+}
+
+html:not(.studio-theme-dark) .console-card,
+html:not(.studio-theme-dark) .panel,
+html:not(.studio-theme-dark) .work-panel,
+html:not(.studio-theme-dark) .node,
+html:not(.studio-theme-dark) .card,
+html:not(.studio-theme-dark) .bubble.assistant {
+    background-color: var(--mistral-canvas) !important;
+    border-color: #e6d5a8 !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.04) !important;
+}
+
+html:not(.studio-theme-dark) .nav-item.active {
+    background: var(--mistral-orange) !important;
+}
+
+/* --- Dark Mode Fixes --- */
+html.studio-theme-dark,
+html.studio-theme-dark body,
+body.studio-theme-dark {
+    background: #1f1f1f !important;
+}
+
+html.studio-theme-dark .shell,
+html.studio-theme-dark .board,
+html.studio-theme-dark .layout-container,
+html.studio-theme-dark .container-box {
+    background-color: #1f1f1f !important;
+}
+
+html.studio-theme-dark .console-card,
+html.studio-theme-dark .panel,
+html.studio-theme-dark .work-panel,
+html.studio-theme-dark .node,
+html.studio-theme-dark .card,
+html.studio-theme-dark .bubble.assistant,
+html.studio-theme-dark .composer,
+html.studio-theme-dark .history-popover {
+    background-color: #1c1c1e !important;
+    border-color: rgba(255,255,255,0.08) !important;
+}
+
+/* --- Shared Component Overrides (Buttons) --- */
+.glass-btn,
+.btn-render,
+.primary-btn,
+.send-btn,
+.gen-btn,
+.comfy-run,
+.llm-run,
+.action-btn,
+.create-confirm,
+.canvas-confirm-btn,
+.bg-black {
+    background-color: var(--mistral-orange) !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 2px 8px rgba(250, 82, 15, 0.2) !important;
+}
+
+.glass-btn:hover,
+.btn-render:hover,
+.send-btn:hover,
+.gen-btn:hover,
+.primary-btn:hover {
+    background-color: var(--mistral-orange-deep) !important;
+    box-shadow: 0 4px 12px rgba(250, 82, 15, 0.4) !important;
+    transform: translateY(-1px);
+}
+
+/* --- Scrollbar --- */
+::-webkit-scrollbar-thumb {
+    background-color: #d8d8d8 !important;
+}
+html.studio-theme-dark ::-webkit-scrollbar-thumb {
+    background-color: #334155 !important;
+}

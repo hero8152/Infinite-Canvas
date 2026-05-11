@@ -5,92 +5,72 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>AI Studio</title>
+    <title>Infinite Canvas</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
     <script src="/static/theme.js?v=20260509"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&display=swap');
-
         :root {
-            --accent: #000000;
-            --fluid-ease: cubic-bezier(0.3, 0, 0, 1);
-            --bg: #ffffff;
-            --sidebar-bg: #ffffff;
-            --stage-bg: #fcfcfc;
-            --border: #f2f2f2;
-            --stage-border: #f0f0f0;
-            --text: #121212;
-            --muted: #999;
-            --nav-hover-bg: #fafafa;
-            --monitor-bg: rgba(255, 255, 255, 0.7);
-            --monitor-border: rgba(0, 0, 0, 0.05);
+            /* Mistral Color Palette - Light */
+            --primary: #fa520f;
+            --primary-deep: #cc3a05;
+            --cream: #fff8e0;
+            --cream-soft: #fffaeb;
+            --beige-deep: #e6d5a8;
+            --ink: #1f1f1f;
+            --steel: #6a6a6a;
+            --canvas: #ffffff;
+            
+            --bg: var(--cream-soft);
+            --sidebar-bg: var(--cream-soft);
+            --stage-bg: var(--canvas);
+            --border: var(--beige-deep);
+            --stage-border: var(--beige-deep);
+            --text: var(--ink);
+            --muted: var(--steel);
+            --nav-hover-bg: var(--cream);
+            --monitor-bg: rgba(255, 248, 224, 0.85);
+            --monitor-border: var(--beige-deep);
             --monitor-shadow: rgba(0, 0, 0, 0.04);
-            --divider: rgba(0, 0, 0, 0.1);
+            --divider: var(--beige-deep);
             --scrollbar: #d8d8d8;
             --scrollbar-hover: #c0c0c0;
-            --author-name: #000;
-            --social-icon: #ccc;
+
+            --fluid-ease: cubic-bezier(0.3, 0, 0, 1);
+            --font-sans: 'Inter', sans-serif;
+            --font-serif: 'Playfair Display', serif;
         }
 
         body.theme-dark {
-            --bg: #0f141d;
-            --sidebar-bg: #0f141d;
-            --stage-bg: #111722;
-            --border: #242d3b;
-            --stage-border: #2a3444;
-            --text: #e5e9f0;
-            --muted: #8f9aab;
-            --nav-hover-bg: #171d29;
-            --monitor-bg: rgba(23, 29, 41, 0.82);
-            --monitor-border: rgba(255, 255, 255, 0.08);
-            --monitor-shadow: rgba(0, 0, 0, 0.3);
-            --divider: rgba(255, 255, 255, 0.15);
+            /* Mistral Color Palette - Dark */
+            --bg: #1f1f1f;
+            --sidebar-bg: #1f1f1f;
+            --stage-bg: #1c1c1e;
+            --border: #3d3d3d;
+            --stage-border: rgba(255,255,255,0.08);
+            --text: #ffffff;
+            --muted: #a8a8a8;
+            --nav-hover-bg: #2c2c2c;
+            --monitor-bg: rgba(28, 28, 30, 0.85);
+            --monitor-border: rgba(255,255,255,0.08);
+            --monitor-shadow: rgba(0, 0, 0, 0.12);
+            --divider: #3d3d3d;
             --scrollbar: #334155;
             --scrollbar-hover: #475569;
-            --author-name: #e5e9f0;
-            --social-icon: #64748b;
         }
 
-        /* 极简滚动条 */
-        *::-webkit-scrollbar {
-            width: 10px !important;
-            height: 10px !important;
-            background: transparent !important;
-        }
-
-        *::-webkit-scrollbar-track {
-            background: transparent !important;
-            border: none !important;
-        }
-
-        *::-webkit-scrollbar-thumb {
-            background-color: var(--scrollbar) !important;
-            border: 3px solid transparent !important;
-            border-right-width: 5px !important;
-            background-clip: padding-box !important;
-            border-radius: 10px !important;
-        }
-
-        *::-webkit-scrollbar-thumb:hover {
-            background-color: var(--scrollbar-hover) !important;
-        }
-
-        *::-webkit-scrollbar-corner {
-            background: transparent !important;
-        }
-
-        * {
-            scrollbar-width: thin !important;
-            scrollbar-color: var(--scrollbar) transparent !important;
-        }
+        *::-webkit-scrollbar { width: 6px !important; height: 6px !important; background: transparent !important; }
+        *::-webkit-scrollbar-track { background: transparent !important; border: none !important; }
+        *::-webkit-scrollbar-thumb { background-color: var(--scrollbar) !important; border-radius: 8px !important; }
 
         body {
             background: var(--bg);
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: var(--font-sans);
             overflow: hidden;
             height: 100vh;
             color: var(--text);
             transition: background 0.3s, color 0.3s;
+            margin: 0;
         }
 
         .app-shell {
@@ -99,106 +79,160 @@
             height: 100vh;
             background: var(--bg);
             position: relative;
-            transition: background 0.3s;
+            padding-bottom: 4px;
         }
 
-        /* 侧边栏 */
+        /* 侧边栏折叠逻辑 */
         .sidebar {
-            width: 80px;
-            min-width: 80px;
+            width: 72px;
+            min-width: 72px;
             background: var(--sidebar-bg);
             display: flex;
             flex-direction: column;
-            align-items: center;
             border-right: 1px solid var(--border);
-            padding: 40px 0;
-            transition: width 0.5s var(--fluid-ease) 0.5s, background 0.3s, border-color 0.3s;
+            padding: 32px 12px;
+            transition: width 0.4s var(--fluid-ease), background 0.3s;
             z-index: 50;
+            overflow: hidden;
         }
 
         .sidebar:hover {
-            width: 220px;
-            transition-delay: 0s;
+            width: 240px;
         }
 
-        .logo-ring {
-            width: 36px;
-            height: 36px;
-            border: 2px solid var(--text);
-            border-radius: 12px;
+        .logo-area {
             display: flex;
             align-items: center;
-            justify-content: center;
-            transition: all 0.6s var(--fluid-ease) 0.5s, border-color 0.3s;
+            gap: 12px;
+            margin-bottom: 40px;
+            padding-left: 8px;
+            white-space: nowrap;
         }
 
-        .sidebar:hover .logo-ring {
-            transform: rotate(90deg);
-            border-radius: 50%;
-            transition-delay: 0s;
+        .logo-text {
+            font-family: var(--font-serif);
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .sidebar:hover .logo-text { opacity: 1; }
+
+        .logo-icon {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--primary);
+            border-radius: 6px;
+            flex-shrink: 0;
         }
 
-        /* 导航项 */
+        nav {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+        }
+
         .nav-item {
-            position: relative;
-            width: 48px;
-            height: 48px;
-            margin: 10px 0;
+            width: 100%;
+            height: 44px;
             display: flex;
             align-items: center;
-            justify-content: flex-start;
-            border-radius: 18px;
+            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.3s var(--fluid-ease) 0.5s;
+            transition: all 0.2s ease;
             color: var(--muted);
-            overflow: hidden;
-            padding-left: 14px;
+            padding: 0 14px;
+            font-size: 14px;
+            font-weight: 500;
+            white-space: nowrap;
         }
 
-        .sidebar:hover .nav-item {
-            width: 190px;
-            transition-delay: 0s;
-        }
+        .nav-item:hover { background: var(--nav-hover-bg); color: var(--text); }
+        .nav-item.active { background: var(--primary); color: #ffffff; }
 
-        .nav-item:hover {
-            background: var(--nav-hover-bg);
-            color: var(--text);
-        }
-
-        .nav-item.active {
-            background: var(--accent);
-            color: #fff;
-        }
-
-        body.theme-dark .nav-item.active {
-            background: #f1f5f9;
-            color: #0f172a;
-        }
+        .nav-icon { width: 20px; height: 20px; margin-right: 16px; flex-shrink: 0; }
 
         .nav-text {
             opacity: 0;
-            margin-left: 16px;
-            font-weight: 600;
-            font-size: 14px;
-            white-space: nowrap;
-            transition: opacity 0.3s 0.5s;
+            transition: opacity 0.2s;
+        }
+        .sidebar:hover .nav-text { opacity: 1; }
+
+        /* 侧边栏底部控制区域 */
+        .sidebar-footer {
+            margin-top: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 12px 4px 0 4px;
+            border-top: 1px solid var(--border);
         }
 
-        .sidebar:hover .nav-text {
-            opacity: 1;
-            transition-delay: 0.1s;
+        .sidebar:not(:hover) .nano-monitor {
+            padding: 8px 0;
+            justify-content: center;
         }
+        .sidebar:not(:hover) .nano-monitor .label-nano,
+        .sidebar:not(:hover) .nano-monitor .divider,
+        .sidebar:not(:hover) .nano-monitor .val-nano:first-of-type {
+            display: none;
+        }
+
+        .nano-monitor {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--monitor-bg);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--monitor-border);
+            transition: all 0.3s ease;
+        }
+        .nano-monitor.is-busy { background: var(--ink); color: #ffffff; border-color: var(--ink); }
+
+        .stat-group { display: flex; align-items: center; gap: 4px; color: var(--text); }
+        .is-busy .stat-group { color: #ffffff; }
+        .label-nano { text-transform: uppercase; font-size: 9px; font-weight: 700; opacity: 0.5; }
+        .val-nano { font-size: 12px; font-weight: 600; }
+
+        .divider { width: 1px; height: 10px; background: var(--divider); }
+
+        .theme-toggle {
+            width: 100%;
+            height: 40px;
+            border-radius: 8px;
+            background: var(--monitor-bg);
+            border: 1px solid var(--monitor-border);
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            padding-left: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .theme-toggle:hover { background: var(--nav-hover-bg); color: var(--text); }
+        .theme-toggle-text { margin-left: 16px; font-size: 13px; font-weight: 500; opacity: 0; transition: opacity 0.2s; }
+        .sidebar:hover .theme-toggle-text { opacity: 1; }
 
         /* 主舞台区 */
+        .stage-wrapper {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
         .stage {
             flex: 1;
             background: var(--stage-bg);
-            margin: 16px;
-            border-radius: 32px;
+            border-radius: 12px;
             overflow: hidden;
             border: 1px solid var(--stage-border);
             position: relative;
-            transition: background 0.3s, border-color 0.3s;
+            box-shadow: 0 4px 12px var(--monitor-shadow);
         }
 
         iframe {
@@ -208,198 +242,30 @@
             height: 100%;
             border: none;
             opacity: 0;
-            transform: scale(1.02);
-            filter: blur(4px);
-            transition: all 0.5s var(--fluid-ease);
-            pointer-events: none;
-        }
-
-        iframe.active {
-            opacity: 1;
-            transform: scale(1);
-            filter: blur(0);
-            pointer-events: auto;
-        }
-
-        /* 左下角监视器 */
-        .nano-monitor {
-            position: absolute;
-            bottom: 24px;
-            left: 24px;
-            z-index: 100;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: var(--monitor-bg);
-            backdrop-filter: blur(12px);
-            padding: 6px 14px;
-            border-radius: 16px;
-            border: 1px solid var(--monitor-border);
-            box-shadow: 0 4px 20px var(--monitor-shadow);
-            font-family: monospace;
+            transform: scale(0.995);
             transition: all 0.4s var(--fluid-ease);
         }
+        iframe.active { opacity: 1; transform: scale(1); }
 
-        .nano-monitor.is-busy {
-            background: #000;
-            color: #fff;
-            border-color: rgba(255, 255, 255, 0.1);
-            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+        /* 底部日落条 */
+        .sunset-stripe {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), #ffa110, #ffb83e, #ffd900, var(--cream));
+            z-index: 1000;
+        }
+        body.theme-dark .sunset-stripe {
+            background: linear-gradient(90deg, var(--primary), #cc3a05, #ffa110, #ffb83e, #1f1f1f);
         }
 
-        .stat-group {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--text);
-        }
-
-        .nano-monitor.is-busy .stat-group {
-            color: #fff;
-        }
-
-        .divider {
-            width: 1px;
-            height: 12px;
-            background: var(--divider);
-        }
-
-        .is-busy .divider {
-            background: rgba(255, 255, 255, 0.2);
-        }
-
-        .pulse-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #10b981;
-        }
-
-        .spinner-nano {
-            width: 10px;
-            height: 10px;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            border-top-color: #fff;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            display: none;
-        }
-
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner-nano { width: 10px; height: 10px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; display: none; }
         .is-busy .spinner-nano { display: block; }
         .is-busy .pulse-dot { display: none; }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .label-nano {
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            opacity: 0.5;
-            font-size: 9px;
-        }
-
-        /* 作者组件 */
-        .author-box {
-            width: 100%;
-            height: 60px;
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-        }
-
-        .dx-letter {
-            position: absolute;
-            font-size: 14px;
-            font-weight: 800;
-            color: var(--text);
-            transition: all 0.5s var(--fluid-ease) 0.4s;
-            z-index: 10;
-        }
-
-        .letter-d { transform: translateX(-8px); }
-        .letter-x { transform: translateX(8px); }
-
-        .sidebar:hover .letter-d {
-            transform: translateX(-120px);
-            opacity: 0;
-            transition-delay: 0s;
-        }
-
-        .sidebar:hover .letter-x {
-            transform: translateX(120px);
-            opacity: 0;
-            transition-delay: 0s;
-        }
-
-        .author-content-wrap {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            opacity: 0;
-            transform: scale(0.9);
-            transition: all 0.4s var(--fluid-ease) 0s;
-            pointer-events: none;
-        }
-
-        .sidebar:hover .author-content-wrap {
-            opacity: 1;
-            transform: scale(1);
-            transition-delay: 0.2s;
-            pointer-events: auto;
-        }
-
-        .author-name-lite {
-            font-size: 12px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: var(--author-name);
-        }
-
-        .social-row-lite { display: flex; gap: 12px; }
-
-        .social-icon-lite {
-            color: var(--social-icon);
-            transition: color 0.2s, transform 0.2s;
-        }
-
-        .social-icon-lite:hover {
-            color: var(--text);
-            transform: translateY(-1px);
-        }
-
-        /* 主题切换按钮 */
-        .theme-toggle {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: transparent;
-            border: 1px solid var(--border);
-            color: var(--muted);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s var(--fluid-ease);
-            margin: 8px 0;
-            flex-shrink: 0;
-        }
-
-        .theme-toggle:hover {
-            background: var(--nav-hover-bg);
-            color: var(--text);
-            border-color: var(--stage-border);
-        }
-
-        .theme-toggle svg { width: 16px; height: 16px; }
-
-        .sidebar:hover .theme-toggle {
-            /* Expand to match nav item width */
-        }
+        .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
     </style>
 </head>
 
@@ -407,72 +273,85 @@
 
     <div class="app-shell">
         <aside class="sidebar">
-            <div class="logo-ring mb-12">
-                <div class="w-1.5 h-1.5 rounded-full transition-colors" id="logo-dot" style="background:var(--text)"></div>
+            <div class="logo-area">
+                <div class="logo-icon"></div>
+                <span class="logo-text">Editorial Canvas</span>
             </div>
 
             <nav>
                 <div class="nav-item active" onclick="switchUI(this, 'zimage')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.587-1.587a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                     </svg>
-                    <span class="nav-text">文生图</span>
+                    <span class="nav-text">文生图 (Generate)</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'enhance')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                     </svg>
-                    <span class="nav-text">细节增强</span>
+                    <span class="nav-text">细节增强 (Enhance)</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'klein')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                     </svg>
-                    <span class="nav-text">图片编辑</span>
+                    <span class="nav-text">图片编辑 (Edit)</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'angle')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
                         <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
                         <line x1="12" y1="22.08" x2="12" y2="12"></line>
                     </svg>
-                    <span class="nav-text">角度控制</span>
+                    <span class="nav-text">角度控制 (Angle)</span>
                 </div>
 
-                <!-- 分隔线 -->
-                <div style="width:32px;height:1px;background:var(--border);margin:8px auto;transition:background 0.3s;"></div>
+                <div style="width:100%;height:1px;background:var(--border);margin:8px 0;"></div>
 
                 <div class="nav-item" onclick="switchUI(this, 'online')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"></path>
                         <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
                     </svg>
-                    <span class="nav-text">在线生图</span>
+                    <span class="nav-text">在线生图 (Online)</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'gpt-chat')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                     </svg>
-                    <span class="nav-text">GPT 对话</span>
+                    <span class="nav-text">GPT 对话 (Chat)</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'canvas')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="3" width="7" height="7"></rect>
                         <rect x="14" y="3" width="7" height="7"></rect>
                         <rect x="14" y="14" width="7" height="7"></rect>
                         <rect x="3" y="14" width="7" height="7"></rect>
                     </svg>
-                    <span class="nav-text">无限画布</span>
+                    <span class="nav-text">无限画布 (Canvas)</span>
                 </div>
             </nav>
 
-            <!-- 主题切换 -->
-            <div style="margin-top:auto;margin-bottom:8px;display:flex;align-items:center;justify-content:center;width:100%;">
-                <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn" title="切换夜间模式">
-                    <svg id="icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <div class="sidebar-footer">
+                <div class="nano-monitor" id="nano-monitor">
+                    <div class="stat-group">
+                        <div class="pulse-dot animate-pulse"></div>
+                        <div class="spinner-nano"></div>
+                        <span class="label-nano">Users</span>
+                        <span id="online-val" class="val-nano">1</span>
+                    </div>
+                    <div class="divider"></div>
+                    <div class="stat-group">
+                        <span class="label-nano">Queue</span>
+                        <span id="queue-val" class="val-nano">0</span>
+                    </div>
+                </div>
+
+                <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn">
+                    <svg id="icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0">
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                     </svg>
-                    <svg id="icon-sun" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg id="icon-sun" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0">
                         <circle cx="12" cy="12" r="5"></circle>
                         <line x1="12" y1="1" x2="12" y2="3"></line>
                         <line x1="12" y1="21" x2="12" y2="23"></line>
@@ -483,64 +362,24 @@
                         <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
                         <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
                     </svg>
+                    <span class="theme-toggle-text">Appearance</span>
                 </button>
-            </div>
-
-            <div class="author-box">
-                <span class="dx-letter letter-d">D</span>
-                <span class="dx-letter letter-x">X</span>
-
-                <div class="author-content-wrap">
-                    <div class="author-name-lite">wuli大雄</div>
-                    <div class="social-row-lite">
-                        <a href="https://space.bilibili.com/78652351" target="_blank" class="social-icon-lite">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M17.813 4.653h-.854L15.66 3.053a1.147 1.147 0 00-1.63 0l-1.3 1.6h-1.46L9.97 3.053a1.147 1.147 0 00-1.63 0L7.043 4.653h-.854a3.946 3.946 0 00-3.93 3.934v8.117a3.946 3.946 0 003.93 3.934h11.624a3.946 3.946 0 003.93-3.934V8.587a3.946 3.946 0 00-3.93-3.934zM7.152 13.9a1.465 1.465 0 111.47-1.462 1.465 1.465 0 01-1.47 1.462zm7.696 0a1.465 1.465 0 111.47-1.462 1.465 1.465 0 01-1.47 1.462z" />
-                            </svg>
-                        </a>
-                        <a href="https://www.xiaohongshu.com/user/profile/6433c34c000000001a023538" target="_blank" class="social-icon-lite">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z" />
-                            </svg>
-                        </a>
-                        <a href="https://www.youtube.com/@%E5%A4%A7%E9%9B%84dx" target="_blank" class="social-icon-lite">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                            </svg>
-                        </a>
-                        <a href="https://x.com/dx8152?s=21" target="_blank" class="social-icon-lite">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                            </svg>
-                        </a>
-                    </div>
-                </div>
             </div>
         </aside>
 
-        <main class="stage">
-            <iframe id="frame-zimage" src="/static/zimage.html?v=31" class="active"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=31"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=31"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=31"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=1"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas.html?v=1"></iframe>
-
-            <div class="nano-monitor" id="nano-monitor">
-                <div class="stat-group">
-                    <div class="pulse-dot animate-pulse"></div>
-                    <div class="spinner-nano"></div>
-                    <span class="label-nano">ONLINE</span>
-                    <span id="online-val">1</span>
-                </div>
-                <div class="divider"></div>
-                <div class="stat-group">
-                    <span class="label-nano">QUEUE</span>
-                    <span id="queue-val">0</span>
-                </div>
+        <main class="stage-wrapper">
+            <div class="stage">
+                <iframe id="frame-zimage" src="/static/zimage.html?v=31" class="active"></iframe>
+                <iframe id="frame-enhance" data-src="/static/enhance.html?v=31"></iframe>
+                <iframe id="frame-klein" data-src="/static/klein.html?v=31"></iframe>
+                <iframe id="frame-angle" data-src="/static/angle.html?v=31"></iframe>
+                <iframe id="frame-online" data-src="/static/online.html?v=1"></iframe>
+                <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1"></iframe>
+                <iframe id="frame-canvas" data-src="/static/canvas.html?v=1"></iframe>
             </div>
         </main>
+        
+        <div class="sunset-stripe"></div>
     </div>
 
     <script>
@@ -563,7 +402,6 @@
             const target = document.getElementById('frame-' + id);
             target.classList.add('active');
             if (!target.src) target.src = target.dataset.src;
-            // sync theme to newly activated iframe
             syncThemeToFrame(target);
         }
 
@@ -573,17 +411,14 @@
                 const data = await res.json();
                 const monitor = document.getElementById('nano-monitor');
                 const queueVal = document.getElementById('queue-val');
-                const logoDot = document.getElementById('logo-dot');
                 const total = data.total || 0;
                 const pos = data.position || 0;
                 if (pos > 0) {
                     monitor.classList.add('is-busy');
                     queueVal.innerText = `${pos}/${total}`;
-                    logoDot.style.backgroundColor = '#3b82f6';
                 } else {
                     monitor.classList.remove('is-busy');
                     queueVal.innerText = total > 0 ? total : '0';
-                    logoDot.style.backgroundColor = 'var(--text)';
                 }
             } catch (e) { }
         }
@@ -606,8 +441,6 @@
             setInterval(syncStatus, 2000);
         }
 
-        // --- 夜间模式 ---
-
         function syncThemeToFrame(iframe) {
             const theme = (window.StudioTheme || {get: () => 'light'}).get();
             try {
@@ -618,9 +451,7 @@
         }
 
         function broadcastTheme(theme) {
-            if (window.StudioTheme) {
-                window.StudioTheme.set(theme);
-            }
+            if (window.StudioTheme) { window.StudioTheme.set(theme); }
             document.querySelectorAll('iframe').forEach(f => syncThemeToFrame(f));
             updateThemeIcon(theme);
         }
@@ -642,22 +473,18 @@
             broadcastTheme(current === 'dark' ? 'light' : 'dark');
         }
 
-        // listen for theme changes triggered by theme.js
         window.addEventListener('studio-theme-change', (e) => {
             updateThemeIcon(e.detail.theme);
         });
 
-        // init icon state on load
         window.addEventListener('DOMContentLoaded', () => {
             const theme = window.StudioTheme ? window.StudioTheme.get() : 'light';
             updateThemeIcon(theme);
         });
 
-        // sync theme when iframe loads
         document.querySelectorAll('iframe').forEach(f => {
             f.addEventListener('load', () => syncThemeToFrame(f));
         });
     </script>
 </body>
-
 </html>

@@ -1,0 +1,31 @@
+# 运行时产物
+output/
+data/
+history.json
+global_config.json
+
+# 配置 / 凭据
+API/.env
+API/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 其它 AI 工具
+GEMINI.md
+
+# 截图归档（按需开启）
+# docs/v2.1-redesign/screenshots/
