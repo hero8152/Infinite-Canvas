@@ -77,4 +77,110 @@
     } else {
         document.addEventListener('DOMContentLoaded', injectSprite);
     }
+
+    /* ----------------------------------------------------------------------
+       Lucide → Pixel sprite 转换器
+       ----------------------------------------------------------------------
+       canvas.html / 老页面里残留的 <i data-lucide="X"> 全部映射到现有的像素 sprite。
+       未在映射表中的（用户自选的图标）回退到 "diamond" 默认形状，保持 0 圆角和橙色。
+    */
+    const LUCIDE_TO_PIXEL = {
+        'arrow-left':         { id: 'chevron-right', flip: true },
+        'chevron-left':       { id: 'chevron-right', flip: true },
+        'chevron-right':      { id: 'chevron-right' },
+        'chevron-up':         { id: 'chevron-up' },
+        'chevron-down':       { id: 'chevron-down' },
+        'check':              { id: 'check' },
+        'x':                  { id: 'cross' },
+        'plus':               { id: 'plus' },
+        'minus':              { id: 'minus' },
+        'send':               { id: 'send' },
+        'download':           { id: 'download' },
+        'upload':             { id: 'upload' },
+        'save':               { id: 'download' },
+        'copy':               { id: 'copy' },
+        'trash-2':            { id: 'trash' },
+        'trash':              { id: 'trash' },
+        'circle-dot':         { id: 'diamond' },
+        'cloud-lightning':    { id: 'nav-online' },
+        'cloud':              { id: 'nav-online' },
+        'crop':               { id: 'diamond' },
+        'grip-vertical':      { id: 'minus' },
+        'image':              { id: 'nav-zimage' },
+        'image-plus':         { id: 'plus' },
+        'info':               { id: 'person' },
+        'layers':             { id: 'nav-canvas' },
+        'layout-grid':        { id: 'nav-canvas' },
+        'message-square-text':{ id: 'nav-chat' },
+        'move-horizontal':    { id: 'chevron-right' },
+        'pencil':             { id: 'nav-klein' },
+        'play':               { id: 'chevron-right' },
+        'refresh-cw':         { id: 'chevron-down' },
+        'rotate-ccw':         { id: 'chevron-down', flip: true },
+        'text-cursor-input':  { id: 'nav-chat' },
+        'text':               { id: 'nav-chat' },
+        'wand-sparkles':      { id: 'flame' },
+        'workflow':           { id: 'nav-canvas' },
+        'zap':                { id: 'flame' },
+        'search':             { id: 'search' }
+    };
+
+    function lucideToPixel(name) {
+        if (!name) return { id: 'diamond' };
+        return LUCIDE_TO_PIXEL[name] || { id: 'diamond' };
+    }
+
+    function replaceLucideIcons(scope) {
+        scope = scope || document;
+        const nodes = scope.querySelectorAll ? scope.querySelectorAll('[data-lucide]') : [];
+        nodes.forEach(el => {
+            if (el.dataset.pixelReplaced === '1') return;
+            const name = el.getAttribute('data-lucide');
+            const map = lucideToPixel(name);
+            const flip = map.flip ? ' style="transform:scaleX(-1)"' : '';
+            // 沿用原 class + 添加 pixel-icon 类
+            const className = (el.className || '').toString().replace(/lucide[-\w]*/g, '').trim();
+            const sizeMatch = (el.getAttribute('style') || '').match(/width:\s*(\d+)px/);
+            const widthAttr = sizeMatch ? ` style="width:${sizeMatch[1]}px;height:${sizeMatch[1]}px"` : '';
+            const wrap = document.createElement('svg');
+            wrap.setAttribute('class', `pixel-icon ${className}`.trim());
+            wrap.setAttribute('aria-hidden', 'true');
+            if (flip) wrap.setAttribute('style', 'transform:scaleX(-1)');
+            if (sizeMatch) wrap.style.width = wrap.style.height = `${sizeMatch[1]}px`;
+            wrap.innerHTML = `<use href="#${map.id}"/>`;
+            wrap.dataset.pixelReplaced = '1';
+            el.replaceWith(wrap);
+        });
+    }
+
+    // 暴露给 canvas.html / 其它历史调用方
+    window.replaceLucideIcons = replaceLucideIcons;
+    // 兜底：若代码里有 lucide.createIcons() 调用，无害地映射到我们的转换器
+    if (!window.lucide) {
+        window.lucide = { createIcons: () => replaceLucideIcons(document) };
+    }
+
+    // 启动后立即扫一遍（异步以等 DOM）
+    if (document.body) {
+        setTimeout(() => replaceLucideIcons(document), 0);
+    } else {
+        document.addEventListener('DOMContentLoaded', () => replaceLucideIcons(document));
+    }
+
+    // 用 MutationObserver 捕获后续动态插入的 lucide 节点（canvas 节点系统会频繁生成）
+    if (typeof MutationObserver !== 'undefined') {
+        const mo = new MutationObserver(mutations => {
+            for (const m of mutations) {
+                if (m.addedNodes.length) {
+                    replaceLucideIcons(document);
+                    break;
+                }
+            }
+        });
+        if (document.body) {
+            mo.observe(document.body, { childList: true, subtree: true });
+        } else {
+            document.addEventListener('DOMContentLoaded', () => mo.observe(document.body, { childList: true, subtree: true }));
+        }
+    }
 })();

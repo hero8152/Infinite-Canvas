@@ -6,9 +6,34 @@
     <link rel="icon" href="/static/logo.png" type="image/png">
     <title>无限画布</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="/static/theme.js?v=20260509-global-theme-output-drag"></script>
+    <!-- lucide CDN 已移除：theme.js 提供 window.lucide.createIcons 兜底转换为 pixel sprite -->
+    <script>window.lucide = window.lucide || { createIcons: () => window.replaceLucideIcons && window.replaceLucideIcons(document) };</script>
+    <script src="/static/theme.js?v=20260511b"></script>
     <link rel="stylesheet" href="/static/design-system.css?v=21">
+    <style>
+        /* v2.1 canvas legacy 圆角覆盖 — 将 v1.0 时期的 .canvas-* / .node / .gen-settings 等
+           legacy class 强制改为 0 圆角，对齐 §12 反例规则。彻底重写见 Phase 2 Wave D（未来）。 */
+        .canvas-item, .canvas-open, .canvas-card-title-input, .canvas-card-meta,
+        .canvas-delete-box, .canvas-confirm-btn, .canvas-cancel-btn,
+        .canvas-preview-mark, .canvas-card-edit, .canvas-delete, .canvas-delete-confirm,
+        .emoji-picker, .emoji-option, .link-delete,
+        .node, .node::before, .node-head,
+        .image-node img, .blank-image,
+        .prompt-node textarea,
+        .gen-settings, .setting-input, .setting-check,
+        .mode-tabs, .mode-tabs button, .ms-model-tabs, .ms-model-tabs button,
+        .preview-icon-btn, .primary-btn, .secondary-btn,
+        .gate-card, .gate-card *, .modal-card, .modal-card *,
+        .image-edit-btn, .output-compare-handle,
+        .gate-back-link {
+            border-radius: 0 !important;
+            box-shadow: none !important;
+        }
+        /* check-dot 是节点内部状态点，保留 4px 圆角的 §8.3 chip-dark 例外 */
+        .check-dot { border-radius: 2px !important; }
+        /* canvas-card-meta-dot 是装饰圆点，保留 */
+        .canvas-card-meta-dot { border-radius: 50% !important; }
+    </style>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&display=swap');
         :root { --ease:cubic-bezier(.4,0,.2,1); --page:#f8fafc; --grid:#d9e1ea; --panel:rgba(255,255,255,.92); --card:rgba(255,255,255,.96); --card-solid:#fff; --soft:#f8fafc; --soft-2:#f1f5f9; --line:#e8edf3; --line-2:#cbd5e1; --text:#111827; --muted:#64748b; --faint:#94a3b8; --shadow:rgba(15,23,42,.08); --strong:#111827; --strong-text:#fff; }
@@ -2447,7 +2472,7 @@
         }
         function renderPromptPreview(container, promptInputs){
             if(!container) return;
-            container.innerHTML = promptInputs.length ? `<div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prompts</div>${promptInputs.map(src => `<div class="text-[11px] text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 line-clamp-2">${escapeHtml(src.label)}</div>`).join('')}` : '';
+            container.innerHTML = promptInputs.length ? `<div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prompts</div>${promptInputs.map(src => `<div class="text-[11px] text-slate-500 bg-slate-50 border border-slate-100 px-3 py-2 line-clamp-2">${escapeHtml(src.label)}</div>`).join('')}` : '';
         }
         function renderComfyBody(node){
             const wrap = document.createElement('div');
