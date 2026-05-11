@@ -4,411 +4,867 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>在线生图</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="/static/theme.js?v=20260509-global-theme-output-drag"></script>
+    <title>Online generate · Infinite-Canvas</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/design-system.css?v=21">
+    <script src="/static/theme.js?v=20260511a"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&display=swap');
-        :root { --accent:#111827; --bg:#f9fafb; --card:#fff; --easing:cubic-bezier(0.4,0,0.2,1); }
-        body { background:var(--bg); font-family:'Inter',-apple-system,sans-serif; color:var(--accent); -webkit-font-smoothing:antialiased; }
-        .container-box { max-width:1280px; margin:0 auto; padding:0 40px; margin-top:50px; }
-        .nano-input { background:var(--card); border:1px solid #eef0f2; transition:all .3s var(--easing); }
-        .nano-input:focus { border-color:#000; box-shadow:0 0 0 1px #000; }
-        .upload-item { background:var(--card); border:1px dashed #e2e8f0; transition:all .4s var(--easing); position:relative; overflow:hidden; }
-        .upload-item:hover,.upload-item.drag-over { border-color:#000; transform:translateY(-2px); }
-        .preview-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; animation:fadeIn .5s var(--easing); }
-        .glass-btn { background:#111827; transition:all .3s var(--easing); }
-        .glass-btn:hover { background:#000; transform:translateY(-1px); box-shadow:0 12px 24px rgba(0,0,0,.1); }
-        .result-frame { background:#fff; border-radius:32px; border:1px solid #f1f5f9; box-shadow:0 2px 15px rgba(0,0,0,.02); }
-        .tool-panel { background:#fff; border:1px solid #edf0f3; border-radius:24px; padding:12px; display:flex; flex-direction:column; gap:10px; }
-        .model-pill { background:#f8fafc; border:1px solid #edf2f7; border-radius:999px; padding:3px; display:grid; grid-template-columns:1fr 1fr; gap:2px; }
-        .model-option { border-radius:999px; height:34px; display:flex; align-items:center; justify-content:center; gap:6px; color:#64748b; font-size:10px; font-weight:600; letter-spacing:.02em; transition:all .25s var(--easing); }
-        .model-option.active { background:#fff; color:#111827; box-shadow:0 1px 3px rgba(15,23,42,.08); }
-        .control-panel { background:#fff; border:1px solid #edf0f3; border-radius:24px; padding:12px; display:flex; flex-direction:column; gap:10px; }
-        .control-label { display:flex; align-items:center; gap:6px; color:#94a3b8; font-size:10px; font-weight:600; letter-spacing:.04em; }
-        .size-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; align-items:start; }
-        .size-field { min-width:0; display:flex; flex-direction:column; gap:6px; }
-        .size-select,.size-custom { width:100%; height:34px; border:1px solid #edf2f7; border-radius:14px; background:#f8fafc; color:#111827; outline:none; padding:0 10px; font-size:11px; font-weight:700; }
-        .size-select:disabled { opacity:.55; cursor:not-allowed; }
-        .size-custom { display:none; background:#fff; }
-        .size-field.custom .size-custom { display:block; }
-        .size-pair { display:none; grid-template-columns:1fr 1fr; gap:6px; }
-        .size-field.custom .size-pair { display:grid; }
-        .size-pair .size-custom { display:block; }
-        .masonry-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:20px; }
-        @media (min-width:768px){ .masonry-grid{ grid-template-columns:repeat(4,1fr); } }
-        @media (max-width:640px){ .size-row{ grid-template-columns:1fr; } }
-        .masonry-item { aspect-ratio:1/1; border-radius:24px; overflow:hidden; background:#fff; border:1px solid #f1f5f9; transition:all .5s var(--easing); }
-        .masonry-item:hover { transform:translateY(-6px); box-shadow:0 20px 40px rgba(0,0,0,.08); }
-        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+        /* 页面级布局：左 380px 参数面板 + 右侧 grid 主区，参照 DESIGN.md §17.2 统一模板 */
+        body {
+            min-height: 100vh;
+            font-family: var(--font-sans);
+            color: var(--ink);
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right,  rgba(230, 213, 168, 0.55) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.55) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+        body.studio-theme-dark {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right,  rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
+
+        /* 双栏 shell：左 380 固定参数面板，右侧 flex:1 */
+        .page-shell {
+            display: flex;
+            min-height: 100vh;
+            align-items: stretch;
+        }
+        .params-panel {
+            width: 380px;
+            flex-shrink: 0;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            border-right: 1px solid var(--border);
+            background: var(--bg);
+        }
+        body.studio-theme-dark .params-panel {
+            border-right-color: var(--dark-border);
+            background: var(--dark-bg);
+        }
+        .stage-panel {
+            flex: 1;
+            min-width: 0;
+            padding: 24px 32px 48px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* 表单字段组 */
+        .field-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .field-group > label {
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+            color: var(--ink);
+        }
+        .field-row-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        /* select 原生外观重写：保持方角、橙色 chevron */
+        select.select {
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: none;
+            padding-right: 36px;
+        }
+        .select-wrap {
+            position: relative;
+        }
+        .select-wrap .pixel-chevron-down {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            color: var(--primary);
+        }
+
+        /* number input 行：左右 24×24 黑色像素方块 */
+        .num-row {
+            display: flex;
+            align-items: stretch;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+        }
+        body.studio-theme-dark .num-row {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
+        }
+        .num-row.is-hidden { display: none; }
+        .num-row input {
+            flex: 1;
+            min-width: 0;
+            height: 32px;
+            background: transparent;
+            border: none;
+            outline: none;
+            text-align: center;
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--ink);
+            -moz-appearance: textfield;
+        }
+        body.studio-theme-dark .num-row input { color: var(--dark-text); }
+        .num-row input::-webkit-outer-spin-button,
+        .num-row input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .num-row .num-btn {
+            width: 32px;
+            background: var(--ink);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 14px;
+        }
+        .num-row .num-btn:hover { background: #000; }
+
+        /* 模型 select 与分辨率 select 共用 select 组件 */
+
+        /* dropzone 内嵌部分 */
+        .dropzone-mini {
+            padding: 16px;
+            min-height: 96px;
+        }
+        .dropzone-mini .dz-icon {
+            color: var(--primary);
+        }
+        .dropzone-mini .dz-hint {
+            font-size: 13px;
+            color: var(--muted);
+        }
+        .dropzone-mini.is-over {
+            border-color: var(--ink);
+            background: var(--bg);
+            border-style: solid;
+        }
+        /* 隐藏原生 file input */
+        .file-hidden { display: none; }
+
+        /* 参考图 chip 行 */
+        .ref-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .ref-chip-row:empty { display: none; }
+
+        /* generate 按钮全宽 */
+        .btn-primary.btn-block {
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        /* 右侧 grid 区 */
+        .grid-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .grid-header .h-line {
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+        body.studio-theme-dark .grid-header .h-line { background: var(--dark-border); }
+
+        /* image card 在网格中保持方角 */
+        .image-card {
+            cursor: zoom-in;
+        }
+        .image-card .img-wrap {
+            background: var(--bg-2);
+        }
+        .image-card .img-wrap img {
+            width: 100%;
+            display: block;
+        }
+
+        /* 棋盘加载占位：在 image-grid 内复用 .image-placeholder */
+        .image-placeholder .placeholder-tag {
+            background: var(--ink);
+            color: #fff;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .image-placeholder .placeholder-tag .pixel-dot-pulse { color: var(--primary); }
+
+        /* Lightbox：纯黑遮罩，不允许 backdrop-blur */
+        .lightbox {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            background: rgba(15, 15, 15, 0.92);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 32px;
+        }
+        .lightbox.is-open { display: flex; }
+        .lightbox .lb-stage {
+            max-width: 1100px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            align-items: center;
+        }
+        .lightbox .lb-img {
+            max-height: 75vh;
+            object-fit: contain;
+        }
+        .lightbox .lb-meta {
+            width: 100%;
+            background: var(--stage-bg);
+            border: 1px solid var(--border);
+            padding: 16px 20px;
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+        .lightbox .lb-meta .lb-prompt {
+            flex: 1;
+            font-size: 14px;
+            color: var(--ink);
+        }
+        .lightbox .lb-meta .lb-prompt span {
+            display: block;
+            font-size: 12px;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            margin-bottom: 4px;
+        }
+        .lightbox .lb-close {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            width: 32px;
+            height: 32px;
+            background: transparent;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* delete 按钮（image-card 内浮在 meta 条上） */
+        .image-meta .action-btn .pixel-icon { color: var(--ink); }
+        body.studio-theme-dark .image-meta { background: var(--dark-elev); }
+        body.studio-theme-dark .image-meta .action-btn { background: var(--dark-elev); color: var(--dark-text); }
+        body.studio-theme-dark .image-meta .meta-prompt { color: var(--dark-text); }
+        body.studio-theme-dark .image-meta .meta-info { color: var(--dark-muted); }
+        body.studio-theme-dark .image-card { background: var(--dark-elev); border-color: var(--dark-border); }
+
+        @media (max-width: 1024px) {
+            .page-shell { flex-direction: column; }
+            .params-panel { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+        }
     </style>
-    <link rel="stylesheet" href="/static/theme.css?v=20260510-studio-pages-blue-dark10">
 </head>
 <body>
-    <div class="container-box min-h-screen flex flex-col">
-        <header class="flex justify-between items-end mb-16">
-            <div class="space-y-1">
-                <h1 class="text-4xl font-extrabold tracking-tighter italic">在线生图</h1>
-                <p class="text-[10px] font-bold uppercase tracking-[0.4em] text-gray-400">GPT / NANO BANANA IMAGE STUDIO</p>
+    <div class="page-shell">
+        <!-- ============================================================
+             左侧：380px 参数面板（DESIGN.md §17.2）
+             ============================================================ -->
+        <aside class="params-panel">
+            <!-- §6 黑色 section-tag 作为页面标题 -->
+            <div class="section-tag">
+                <span>Online generate</span>
+                <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-down"/></svg>
             </div>
-            <nav class="hidden md:flex gap-8 text-[11px] font-bold uppercase tracking-widest text-gray-400">
-                <span class="text-black border-b-2 border-black pb-1">Create</span>
-            </nav>
-        </header>
 
-        <main class="grid grid-cols-1 lg:grid-cols-12 gap-12">
-            <div class="lg:col-span-5 space-y-8">
-                <section class="space-y-4">
-                    <div class="flex items-center gap-2 text-gray-400">
-                        <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
-                        <span class="text-[10px] font-black uppercase tracking-widest">Prompt</span>
-                    </div>
-                    <textarea id="promptInput" rows="5" class="nano-input w-full p-6 rounded-3xl text-sm outline-none resize-none placeholder-gray-300" placeholder="输入想生成或编辑的画面..."></textarea>
-                </section>
+            <!-- Prompt 输入：§15.2 textarea -->
+            <div class="field-group">
+                <label for="promptInput">Prompt</label>
+                <textarea id="promptInput" class="textarea" rows="6" placeholder="Describe what you want to generate..."></textarea>
+            </div>
 
-                <section class="space-y-4">
-                    <div class="flex items-center gap-2 text-gray-400">
-                        <i data-lucide="images" class="w-3.5 h-3.5"></i>
-                        <span class="text-[10px] font-black uppercase tracking-widest">Reference Images</span>
-                    </div>
-                    <div class="grid grid-cols-3 gap-4">
-                        <div id="drop-zone-1" onclick="document.getElementById('file1').click()" class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file1" accept="image/*" class="hidden" onchange="handleFile(this.files[0],1)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Main</span>
-                            <img id="prev1" class="preview-img hidden"><button id="del1" onclick="clearSlot(1,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
-                        </div>
-                        <div id="drop-zone-2" onclick="document.getElementById('file2').click()" class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file2" accept="image/*" class="hidden" onchange="handleFile(this.files[0],2)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Aux A</span>
-                            <img id="prev2" class="preview-img hidden"><button id="del2" onclick="clearSlot(2,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
-                        </div>
-                        <div id="drop-zone-3" onclick="document.getElementById('file3').click()" class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file3" accept="image/*" class="hidden" onchange="handleFile(this.files[0],3)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Aux B</span>
-                            <img id="prev3" class="preview-img hidden"><button id="del3" onclick="clearSlot(3,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
-                        </div>
-                    </div>
-                </section>
+            <!-- 模型选择：§15.3 select（保留 provider 切换 nano/gpt 的逻辑） -->
+            <div class="field-group">
+                <label for="providerSelect">Model</label>
+                <div class="select-wrap">
+                    <select id="providerSelect" class="select" onchange="setProvider(this.value)">
+                        <option value="gpt">GPT image</option>
+                        <option value="nano">Nano banana pro</option>
+                    </select>
+                    <svg class="pixel-icon pixel-icon--sm pixel-chevron-down"><use href="#chevron-down"/></svg>
+                </div>
+            </div>
 
-                <div class="tool-panel">
-                    <div class="control-label">
-                        <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>
-                        <span>Model</span>
+            <!-- 比例 + 分辨率 select 双栏 -->
+            <div class="field-group">
+                <label>Aspect &amp; resolution</label>
+                <div class="field-row-2">
+                    <div class="select-wrap">
+                        <select id="ratioSelect" class="select" onchange="setRatio(this.value)">
+                            <option value="square" selected>1:1 square</option>
+                            <option value="portrait">2:3 portrait</option>
+                            <option value="landscape">3:2 landscape</option>
+                            <option value="story">9:16 story</option>
+                            <option value="wide">16:9 wide</option>
+                            <option value="custom">Custom ratio</option>
+                        </select>
+                        <svg class="pixel-icon pixel-icon--sm pixel-chevron-down"><use href="#chevron-down"/></svg>
                     </div>
-                    <div class="model-pill">
-                        <button id="gptOpt" class="model-option active" onclick="setProvider('gpt')"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i>GPT</button>
-                        <button id="nanoOpt" class="model-option" onclick="setProvider('nano')"><i data-lucide="bot" class="w-3.5 h-3.5"></i>Nano</button>
-                    </div>
-                    <div class="control-label mt-1">
-                        <i data-lucide="ruler" class="w-3.5 h-3.5"></i>
-                        <span>Size</span>
-                    </div>
-                    <div class="size-row">
-                        <label id="resolutionField" class="size-field">
-                            <select id="resolutionSelect" class="size-select" onchange="setResolution(this.value)">
-                                <option value="1k" selected>1K</option>
-                                <option value="2k">2K</option>
-                                <option value="4k">4K</option>
-                                <option value="custom">自定义尺寸</option>
-                            </select>
-                            <span class="size-pair">
-                                <input id="sizeCustomWidth" class="size-custom" type="number" min="64" step="64" placeholder="宽度" oninput="setCustomSize()">
-                                <input id="sizeCustomHeight" class="size-custom" type="number" min="64" step="64" placeholder="高度" oninput="setCustomSize()">
-                            </span>
-                        </label>
-                        <label id="ratioField" class="size-field">
-                            <select id="ratioSelect" class="size-select" onchange="setRatio(this.value)">
-                                <option value="">比例为空</option>
-                                <option value="square" selected>1:1 方图</option>
-                                <option value="portrait">2:3 竖图</option>
-                                <option value="landscape">3:2 横图</option>
-                                <option value="story">9:16 竖屏</option>
-                                <option value="wide">16:9 宽屏</option>
-                                <option value="custom">自定义比例</option>
-                            </select>
-                            <span class="size-pair">
-                                <input id="ratioCustomWidth" class="size-custom" type="number" min="1" step="1" placeholder="宽" oninput="setCustomRatio()">
-                                <input id="ratioCustomHeight" class="size-custom" type="number" min="1" step="1" placeholder="高" oninput="setCustomRatio()">
-                            </span>
-                        </label>
+                    <div class="select-wrap">
+                        <select id="resolutionSelect" class="select" onchange="setResolution(this.value)">
+                            <option value="1k" selected>1K</option>
+                            <option value="2k">2K</option>
+                            <option value="4k">4K</option>
+                            <option value="custom">Custom size</option>
+                        </select>
+                        <svg class="pixel-icon pixel-icon--sm pixel-chevron-down"><use href="#chevron-down"/></svg>
                     </div>
                 </div>
+                <!-- 自定义比例：宽 / 高 输入 -->
+                <div id="ratioCustomRow" class="num-row is-hidden">
+                    <button class="num-btn" type="button" onclick="bumpRatio('w', -1)">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#minus"/></svg>
+                    </button>
+                    <input id="ratioCustomWidth" type="number" min="1" step="1" placeholder="w" oninput="setCustomRatio()">
+                    <button class="num-btn" type="button" onclick="bumpRatio('w', 1)">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#plus"/></svg>
+                    </button>
+                    <button class="num-btn" type="button" onclick="bumpRatio('h', -1)">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#minus"/></svg>
+                    </button>
+                    <input id="ratioCustomHeight" type="number" min="1" step="1" placeholder="h" oninput="setCustomRatio()">
+                    <button class="num-btn" type="button" onclick="bumpRatio('h', 1)">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#plus"/></svg>
+                    </button>
+                </div>
+                <!-- 自定义尺寸：宽 / 高（§15.5 number-input 风格） -->
+                <div id="sizeCustomRow" class="num-row is-hidden">
+                    <button class="num-btn" type="button" onclick="bumpSize('w', -64)">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#minus"/></svg>
+                    </button>
+                    <input id="sizeCustomWidth" type="number" min="64" step="64" placeholder="width" oninput="setCustomSize()">
+                    <button class="num-btn" type="button" onclick="bumpSize('w', 64)">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#plus"/></svg>
+                    </button>
+                    <button class="num-btn" type="button" onclick="bumpSize('h', -64)">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#minus"/></svg>
+                    </button>
+                    <input id="sizeCustomHeight" type="number" min="64" step="64" placeholder="height" oninput="setCustomSize()">
+                    <button class="num-btn" type="button" onclick="bumpSize('h', 64)">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#plus"/></svg>
+                    </button>
+                </div>
+            </div>
 
-                <button id="genBtn" onclick="submitImage()" class="glass-btn w-full py-5 text-white rounded-3xl font-bold flex items-center justify-center gap-3 shadow-lg">
-                    <i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i>
-                    <span class="tracking-[0.3em] text-[11px] uppercase">Generate</span>
+            <!-- 参考图：§15.8 dropzone + §16.7 ref-chip -->
+            <div class="field-group">
+                <label>Reference images</label>
+                <!-- 已上传参考图列表 -->
+                <div id="refChipRow" class="ref-chip-row"></div>
+                <!-- dropzone -->
+                <div id="dropZone" class="dropzone dropzone-mini" onclick="document.getElementById('refFile').click()">
+                    <svg class="pixel-icon pixel-icon--lg dz-icon"><use href="#upload"/></svg>
+                    <span class="dz-hint">Drop image or click · up to 3</span>
+                    <input id="refFile" class="file-hidden" type="file" accept="image/*" multiple onchange="handleFiles(this.files)">
+                </div>
+            </div>
+
+            <!-- §7.1 primary CTA -->
+            <button id="genBtn" class="btn-primary btn-block" onclick="submitImage()">
+                <span>Generate</span>
+                <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-right"/></svg>
+            </button>
+        </aside>
+
+        <!-- ============================================================
+             右侧：主舞台 image grid（DESIGN.md §16）
+             ============================================================ -->
+        <main class="stage-panel">
+            <!-- §6 段标签 + 计数 -->
+            <div class="grid-header">
+                <div class="section-tag">
+                    <span id="historyTag">Online history (0)</span>
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-down"/></svg>
+                </div>
+                <div class="h-line"></div>
+            </div>
+
+            <!-- §16.2 image-grid -->
+            <div id="imageGrid" class="image-grid"></div>
+
+            <!-- Load more 按钮：§7.3 下划线文字链 -->
+            <div style="display:flex; justify-content:center; padding:24px 0;">
+                <button id="loadMoreBtn" class="btn-underline" type="button" onclick="loadHistory(1)">
+                    Load more
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-right"/></svg>
                 </button>
             </div>
-
-            <div class="lg:col-span-7">
-                <div id="resultBox" class="result-frame min-h-[500px] lg:h-full flex items-center justify-center relative overflow-hidden">
-                    <div id="placeholder" class="text-center space-y-4 opacity-20"><i data-lucide="layout" class="w-12 h-12 mx-auto stroke-[1px]"></i><p class="text-[10px] font-black tracking-[0.5em] uppercase">Canvas Ready</p></div>
-                    <div id="loader" class="hidden text-center space-y-4"><div class="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto"></div><p class="text-[10px] font-black tracking-[0.5em] uppercase">Generating</p></div>
-                    <img id="outputImg" class="hidden w-full h-full object-contain p-8 cursor-zoom-in" onclick="zoomImage()">
-                    <a id="downloadBtn" href="#" download class="hidden absolute top-8 right-8 w-12 h-12 bg-white/90 shadow-2xl rounded-2xl flex items-center justify-center hover:bg-black hover:text-white"><i data-lucide="download" class="w-4 h-4"></i></a>
-                </div>
-            </div>
         </main>
-
-        <section class="mt-32">
-            <div class="flex items-center gap-6 mb-12"><h2 class="text-[11px] font-black uppercase tracking-[0.5em]">Archives</h2><div class="h-px flex-1 bg-gray-100"></div></div>
-            <div id="masonry" class="masonry-grid"></div>
-            <div id="loadMoreTrigger" class="py-20 text-center text-gray-300 text-[10px] font-bold uppercase tracking-widest cursor-pointer hover:text-black">Load More Archive</div>
-        </section>
     </div>
 
-    <div id="lightbox" onclick="handleOutsideClick(event)" class="hidden fixed inset-0 z-50 flex items-center justify-center p-6 bg-white/95 backdrop-blur-3xl">
-        <div class="max-w-6xl w-full flex flex-col items-center relative">
-            <img id="lightboxImg" class="max-h-[75vh] rounded-[2.5rem] shadow-2xl object-contain">
-            <div class="w-full bg-white border border-gray-100 rounded-[2rem] p-8 mt-8 shadow-sm flex justify-between items-center gap-8">
-                <div class="flex-1"><span class="text-[9px] font-black text-gray-300 uppercase tracking-widest block mb-2">Prompt</span><p id="lightboxPrompt" class="text-gray-700 text-sm leading-relaxed"></p></div>
-                <button id="sameStyleBtn" onclick="applySameStyle()" class="bg-black text-white px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2"><i data-lucide="copy" class="w-4 h-4"></i>Reuse</button>
+    <!-- Lightbox -->
+    <div id="lightbox" class="lightbox" onclick="handleOutsideClick(event)">
+        <div class="lb-stage">
+            <img id="lightboxImg" class="lb-img" alt="">
+            <div class="lb-meta">
+                <div class="lb-prompt">
+                    <span>Prompt</span>
+                    <div id="lightboxPrompt"></div>
+                </div>
+                <button class="btn-primary" type="button" onclick="applySameStyle()">
+                    <span>Reuse</span>
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#copy"/></svg>
+                </button>
             </div>
-            <button onclick="closeLightbox()" class="absolute -top-12 -right-12 p-4 text-gray-400 hover:text-black"><i data-lucide="x" class="w-8 h-8"></i></button>
         </div>
+        <button class="lb-close" type="button" onclick="closeLightbox()" aria-label="Close">
+            <svg class="pixel-icon pixel-icon--md"><use href="#cross"/></svg>
+        </button>
     </div>
 
     <script>
-        lucide.createIcons();
-        let refs = {1:null,2:null,3:null};
-        let provider = 'gpt';
-        let ratio = 'square';
-        let resolution = '1k';
-        let customRatioWidth = '';
-        let customRatioHeight = '';
-        let customWidth = '';
-        let customHeight = '';
-        let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
-        let allHistory = [], currentIndex = 0, currentResult = null, currentLightboxData = null, isLoading = false;
+        // ====================================================================
+        // 数据态：与原实现保持一致（不改 API 调用 schema）
+        // ====================================================================
+        let refs = [];                          // 已上传参考图，最多 3 张
+        let provider = 'gpt';                   // 当前模型 provider
+        let ratio = 'square';                   // 当前比例
+        let resolution = '1k';                  // 当前分辨率档
+        let customRatioWidth = '', customRatioHeight = '';
+        let customWidth = '', customHeight = '';
+        // provider -> model 名称（动态从 /api/config 拉取，保持原行为）
+        let models = { gpt: 'gpt-image-2', nano: 'nano-banana-pro' };
+
+        // 历史列表分页
+        let allHistory = [], currentIndex = 0, isLoading = false;
+        let currentResult = null;               // 最近一次生成结果
+        let currentLightboxData = null;         // lightbox 当前数据
+        let pendingPlaceholderId = null;        // 生成中占位卡 id
         const PAGE_SIZE = 24;
+
+        // 比例 → 尺寸预设
         const SIZE_OPTIONS = {
-            square: [
-                ['1024x1024', '1k'],
-                ['1536x1536', '2k'],
-                ['4096x4096', '4k']
-            ],
-            portrait: [
-                ['720x1080', '1k'],
-                ['1024x1536', '2k'],
-                ['2160x3240', '4k']
-            ],
-            landscape: [
-                ['1080x720', '1k'],
-                ['1536x1024', '2k'],
-                ['3240x2160', '4k']
-            ],
-            story: [
-                ['720x1280', '1k'],
-                ['1080x1920', '2k'],
-                ['2160x3840', '4k']
-            ],
-            wide: [
-                ['1280x720', '1k'],
-                ['1920x1080', '2k'],
-                ['3840x2160', '4k']
-            ]
+            square:    [['1024x1024', '1k'], ['1536x1536', '2k'], ['4096x4096', '4k']],
+            portrait:  [['720x1080', '1k'],  ['1024x1536', '2k'], ['2160x3240', '4k']],
+            landscape: [['1080x720', '1k'],  ['1536x1024', '2k'], ['3240x2160', '4k']],
+            story:     [['720x1280', '1k'],  ['1080x1920', '2k'], ['2160x3840', '4k']],
+            wide:      [['1280x720', '1k'],  ['1920x1080', '2k'], ['3840x2160', '4k']]
         };
         const RES_LONG_SIDE = { '1k': 1024, '2k': 1536, '4k': 4096 };
 
-        async function initModels(){
+        // ====================================================================
+        // 模型 / provider 切换
+        // ====================================================================
+        async function initModels() {
             try {
-                const cfg = await fetch('/api/config').then(r=>r.json());
+                const cfg = await fetch('/api/config').then(r => r.json());
                 const imageModels = cfg.image_models || [];
                 models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
                 models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
-            } catch(e) {}
+            } catch (e) { /* ignore */ }
         }
 
-        function setProvider(next){
+        function setProvider(next) {
             provider = next;
-            document.getElementById('gptOpt').classList.toggle('active', next === 'gpt');
-            document.getElementById('nanoOpt').classList.toggle('active', next === 'nano');
+            const el = document.getElementById('providerSelect');
+            if (el) el.value = next;
         }
 
-        function parseSizeValue(value){
-            const match = String(value || '').trim().match(/^(\d+)\s*[xX*]\s*(\d+)$/);
-            return match ? {width:match[1], height:match[2]} : null;
+        // ====================================================================
+        // 比例 / 分辨率 select 联动
+        // ====================================================================
+        function parseSizeValue(value) {
+            const m = String(value || '').trim().match(/^(\d+)\s*[xX*]\s*(\d+)$/);
+            return m ? { width: m[1], height: m[2] } : null;
         }
-        function customRatioValue(){
-            const w = Number(customRatioWidth);
-            const h = Number(customRatioHeight);
+        function customRatioValue() {
+            const w = Number(customRatioWidth), h = Number(customRatioHeight);
             return w > 0 && h > 0 ? w / h : null;
         }
-        function customSizeValue(){
-            const w = Number(customWidth);
-            const h = Number(customHeight);
+        function customSizeValue() {
+            const w = Number(customWidth), h = Number(customHeight);
             return w > 0 && h > 0 ? `${Math.round(w)}x${Math.round(h)}` : '';
         }
-
-        function setRatio(next, preferredSize = ''){
+        function setRatio(next, preferredSize = '') {
             ratio = next;
             if (preferredSize) {
-                const match = SIZE_OPTIONS[next]?.find(([value]) => value === preferredSize);
+                const match = SIZE_OPTIONS[next]?.find(([v]) => v === preferredSize);
                 if (match) resolution = match[1];
             }
-            if(next !== 'custom') {
+            if (next !== 'custom') {
                 customRatioWidth = '';
                 customRatioHeight = '';
             }
             updateSizeUI();
         }
-
-        function setCustomRatio(){
+        function setCustomRatio() {
             customRatioWidth = document.getElementById('ratioCustomWidth').value;
             customRatioHeight = document.getElementById('ratioCustomHeight').value;
             ratio = 'custom';
             updateSizeUI();
         }
-
-        function setCustomSize(){
+        function setCustomSize() {
             customWidth = document.getElementById('sizeCustomWidth').value;
             customHeight = document.getElementById('sizeCustomHeight').value;
             resolution = 'custom';
             ratio = '';
             updateSizeUI();
         }
-
-        function setResolution(next){
+        function setResolution(next) {
             resolution = next;
-            if(next === 'custom'){
+            if (next === 'custom') {
                 ratio = '';
             } else {
                 customWidth = '';
                 customHeight = '';
-                if(ratio === '') ratio = 'square';
+                if (ratio === '') ratio = 'square';
             }
             updateSizeUI();
         }
-
-        function updateSizeUI(){
+        function bumpRatio(axis, delta) {
+            const id = axis === 'w' ? 'ratioCustomWidth' : 'ratioCustomHeight';
+            const el = document.getElementById(id);
+            const n = Math.max(1, (Number(el.value) || 0) + delta);
+            el.value = n;
+            setCustomRatio();
+        }
+        function bumpSize(axis, delta) {
+            const id = axis === 'w' ? 'sizeCustomWidth' : 'sizeCustomHeight';
+            const el = document.getElementById(id);
+            const n = Math.max(64, (Number(el.value) || 0) + delta);
+            el.value = n;
+            setCustomSize();
+        }
+        function updateSizeUI() {
             const ratioSelect = document.getElementById('ratioSelect');
-            const ratioField = document.getElementById('ratioField');
-            const ratioCustomWidthInput = document.getElementById('ratioCustomWidth');
-            const ratioCustomHeightInput = document.getElementById('ratioCustomHeight');
             const resolutionSelect = document.getElementById('resolutionSelect');
-            const resolutionField = document.getElementById('resolutionField');
-            const sizeCustomWidthInput = document.getElementById('sizeCustomWidth');
-            const sizeCustomHeightInput = document.getElementById('sizeCustomHeight');
+            const ratioCustomRow = document.getElementById('ratioCustomRow');
+            const sizeCustomRow = document.getElementById('sizeCustomRow');
             ratioSelect.value = ratio;
             ratioSelect.disabled = resolution === 'custom';
-            ratioField.classList.toggle('custom', ratio === 'custom');
-            ratioCustomWidthInput.value = customRatioWidth;
-            ratioCustomHeightInput.value = customRatioHeight;
+            ratioCustomRow.classList.toggle('is-hidden', ratio !== 'custom');
+            document.getElementById('ratioCustomWidth').value = customRatioWidth;
+            document.getElementById('ratioCustomHeight').value = customRatioHeight;
             resolutionSelect.value = resolution;
-            resolutionField.classList.toggle('custom', resolution === 'custom');
-            sizeCustomWidthInput.value = customWidth;
-            sizeCustomHeightInput.value = customHeight;
-            updateResolutionUI();
+            sizeCustomRow.classList.toggle('is-hidden', resolution !== 'custom');
+            document.getElementById('sizeCustomWidth').value = customWidth;
+            document.getElementById('sizeCustomHeight').value = customHeight;
         }
-
-        function updateResolutionUI(){}
-
-        function currentSize(){
-            if(resolution === 'custom') return customSizeValue();
+        function currentSize() {
+            if (resolution === 'custom') return customSizeValue();
             const options = SIZE_OPTIONS[ratio] || SIZE_OPTIONS.square;
-            if(ratio === 'custom'){
+            if (ratio === 'custom') {
                 const parsed = customRatioValue();
                 const longSide = RES_LONG_SIDE[resolution] || 1024;
-                if(parsed){
+                if (parsed) {
                     const width = parsed >= 1 ? longSide : Math.round(longSide * parsed);
                     const height = parsed >= 1 ? Math.round(longSide / parsed) : longSide;
                     return `${Math.max(64, width)}x${Math.max(64, height)}`;
                 }
             }
-            const match = options.find(([, label]) => label === resolution) || SIZE_OPTIONS.square.find(([, label]) => label === resolution) || SIZE_OPTIONS.square[0];
+            const match = options.find(([, label]) => label === resolution)
+                || SIZE_OPTIONS.square.find(([, label]) => label === resolution)
+                || SIZE_OPTIONS.square[0];
             return match[0];
         }
 
-        [1,2,3].forEach(id => {
-            const zone = document.getElementById(`drop-zone-${id}`);
-            zone.ondragover = e => { e.preventDefault(); zone.classList.add('drag-over'); };
-            zone.ondragleave = () => zone.classList.remove('drag-over');
-            zone.ondrop = e => { e.preventDefault(); zone.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0], id); };
-        });
-        window.addEventListener('paste', e => {
-            const item = [...(e.clipboardData?.items || [])].find(x => x.kind === 'file' && x.type.startsWith('image/'));
-            if (item) handleFile(item.getAsFile(), firstEmptySlot());
-        });
-        function firstEmptySlot(){ return [1,2,3].find(id => !refs[id]) || 1; }
-
-        async function handleFile(file, index){
-            if(!file) return;
-            const reader = new FileReader();
-            reader.onload = e => {
-                const prev = document.getElementById(`prev${index}`);
-                prev.src = e.target.result; prev.classList.remove('hidden');
-                document.getElementById(`del${index}`).classList.remove('hidden');
-            };
-            reader.readAsDataURL(file);
+        // ====================================================================
+        // 参考图：上传 + chip 渲染
+        // ====================================================================
+        async function handleFiles(fileList) {
+            const files = Array.from(fileList || []);
+            for (const f of files) {
+                if (refs.length >= 3) break;
+                await uploadOne(f);
+            }
+            document.getElementById('refFile').value = '';
+        }
+        async function uploadOne(file) {
+            if (!file) return;
             const form = new FormData();
             form.append('files', file);
-            const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
-            refs[index] = data.files[0];
+            // 复用原有 /api/ai/upload 接口，schema 不动
+            const data = await fetch('/api/ai/upload', { method: 'POST', body: form }).then(r => r.json());
+            const ref = data.files[0];
+            refs.push(ref);
+            renderRefChips();
         }
-        function clearSlot(index, ev){
-            if(ev) ev.stopPropagation();
-            refs[index] = null;
-            document.getElementById(`prev${index}`).src = '';
-            document.getElementById(`prev${index}`).classList.add('hidden');
-            document.getElementById(`del${index}`).classList.add('hidden');
+        function removeRef(idx) {
+            refs.splice(idx, 1);
+            renderRefChips();
+        }
+        function renderRefChips() {
+            const row = document.getElementById('refChipRow');
+            row.innerHTML = '';
+            refs.forEach((ref, idx) => {
+                const wrap = document.createElement('div');
+                wrap.className = 'ref-chip';
+                wrap.innerHTML = `
+                    <img src="${ref.url}" alt="reference">
+                    <button class="ref-remove" type="button" aria-label="Remove">
+                        <svg class="pixel-icon pixel-icon--xs"><use href="#cross"/></svg>
+                    </button>`;
+                wrap.querySelector('.ref-remove').onclick = (e) => {
+                    e.stopPropagation();
+                    removeRef(idx);
+                };
+                row.appendChild(wrap);
+            });
         }
 
-        async function submitImage(){
+        // dropzone 拖拽
+        (function initDropZone() {
+            const zone = document.getElementById('dropZone');
+            if (!zone) return;
+            zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('is-over'); });
+            zone.addEventListener('dragleave', () => zone.classList.remove('is-over'));
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('is-over');
+                handleFiles(e.dataTransfer.files);
+            });
+        })();
+
+        // 全局粘贴上传
+        window.addEventListener('paste', (e) => {
+            const item = [...(e.clipboardData?.items || [])].find(x => x.kind === 'file' && x.type.startsWith('image/'));
+            if (item) handleFiles([item.getAsFile()]);
+        });
+
+        // ====================================================================
+        // 生成调用：POST /api/online-image（请求体字段保持原样）
+        // ====================================================================
+        async function submitImage() {
             const prompt = document.getElementById('promptInput').value.trim();
-            if(!prompt){ alert('请输入提示词'); return; }
-            const btn = document.getElementById('genBtn'), loader = document.getElementById('loader'), placeholder = document.getElementById('placeholder'), out = document.getElementById('outputImg'), dl = document.getElementById('downloadBtn');
-            btn.disabled = true; placeholder.classList.add('hidden'); out.classList.add('hidden'); dl.classList.add('hidden'); loader.classList.remove('hidden');
+            if (!prompt) { alert('请输入提示词'); return; }
+            const btn = document.getElementById('genBtn');
+            btn.disabled = true;
+            btn.classList.add('is-disabled');
+
+            // 在 grid 顶部插入棋盘占位卡（§16.3）
+            const placeholderId = `ph-${Date.now()}`;
+            pendingPlaceholderId = placeholderId;
+            insertPlaceholder(placeholderId);
+
             try {
                 const result = await fetch('/api/online-image', {
-                    method:'POST', headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({ prompt, model:models[provider], size:currentSize(), reference_images:Object.values(refs).filter(Boolean) })
-                }).then(async r => { if(!r.ok) throw new Error((await r.json()).detail || '生成失败'); return r.json(); });
-                currentResult = result; out.src = result.images[0]; out.classList.remove('hidden'); dl.href = result.images[0]; dl.classList.remove('hidden'); renderImageCard(result, true);
-            } catch(err) {
-                alert(err.message || 'Generation failed'); placeholder.classList.remove('hidden');
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt,
+                        model: models[provider],
+                        size: currentSize(),
+                        reference_images: refs
+                    })
+                }).then(async r => {
+                    if (!r.ok) throw new Error((await r.json()).detail || '生成失败');
+                    return r.json();
+                });
+                currentResult = result;
+                // 移除占位，插入正式 image-card
+                removePlaceholder(placeholderId);
+                renderImageCard(result, true);
+                allHistory.unshift(result);
+                updateHistoryCount();
+            } catch (err) {
+                removePlaceholder(placeholderId);
+                alert(err.message || 'Generation failed');
             } finally {
-                loader.classList.add('hidden'); btn.disabled = false;
+                btn.disabled = false;
+                btn.classList.remove('is-disabled');
+                pendingPlaceholderId = null;
             }
         }
 
-        function renderImageCard(data, isNew=false){
-            if(!data.images?.[0] || document.getElementById(`history-${data.timestamp}`)) return;
+        // ====================================================================
+        // 占位（生成中）+ image card 渲染
+        // ====================================================================
+        function insertPlaceholder(id) {
+            const grid = document.getElementById('imageGrid');
             const card = document.createElement('div');
-            card.id = `history-${data.timestamp}`;
-            card.className = 'masonry-item group relative cursor-zoom-in';
-            card.onclick = () => openLightbox(data);
-            card.innerHTML = `<img src="${data.images[0]}" class="w-full h-full object-cover block group-hover:scale-105 transition-transform duration-1000" loading="lazy">
-                <button onclick="deleteHistoryItem('${data.timestamp}',event)" class="absolute top-4 right-4 text-white hover:text-red-400 opacity-0 group-hover:opacity-100 z-10"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 p-6 flex flex-col justify-end"><p class="text-white text-[10px] font-medium line-clamp-2 uppercase tracking-wider">${data.prompt || 'Online Image'}</p></div>`;
-            isNew ? document.getElementById('masonry').prepend(card) : document.getElementById('masonry').appendChild(card);
-            lucide.createIcons();
+            card.id = id;
+            card.className = 'image-card';
+            card.innerHTML = `
+                <div class="image-placeholder">
+                    <span class="placeholder-tag">
+                        <span>Rendering</span>
+                        <span class="pixel-dot-pulse"><span></span><span></span><span></span></span>
+                    </span>
+                </div>
+                <div class="image-meta">
+                    <div class="meta-text">
+                        <div class="meta-prompt">In progress…</div>
+                        <div class="meta-info">${currentSize()} · ${models[provider] || ''}</div>
+                    </div>
+                </div>`;
+            grid.prepend(card);
         }
-        async function loadHistory(page=0){
-            if(isLoading) return; isLoading = true;
-            const loader = document.getElementById('loadMoreTrigger');
-            if(page === 0){ loader.innerText = 'Loading Archives...'; allHistory = await fetch('/api/history?type=online').then(r=>r.json()); document.getElementById('masonry').innerHTML=''; currentIndex=0; }
+        function removePlaceholder(id) {
+            document.getElementById(id)?.remove();
+        }
+
+        function formatMeta(data) {
+            const size = data?.params?.size || '';
+            const seed = data?.params?.seed != null ? `seed ${data.params.seed}` : '';
+            const model = data?.params?.model || data?.model || '';
+            const t = data?.timestamp ? new Date(Number(data.timestamp) * (String(data.timestamp).length <= 10 ? 1000 : 1)) : null;
+            const ts = t ? t.toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+            return [size, seed, model, ts].filter(Boolean).join(' · ');
+        }
+
+        function renderImageCard(data, isNew = false) {
+            if (!data.images?.[0]) return;
+            const cardId = `history-${data.timestamp}`;
+            if (document.getElementById(cardId)) return;
+            const grid = document.getElementById('imageGrid');
+            const card = document.createElement('article');
+            card.id = cardId;
+            card.className = 'image-card';
+            card.onclick = (e) => {
+                // 点击删除按钮时不开 lightbox
+                if (e.target.closest('.action-btn')) return;
+                openLightbox(data);
+            };
+            const promptText = data.prompt ? escapeHtml(data.prompt) : 'Online image';
+            card.innerHTML = `
+                <div class="img-wrap">
+                    <img src="${data.images[0]}" alt="${promptText}" loading="lazy">
+                </div>
+                <div class="image-meta">
+                    <div class="meta-text">
+                        <div class="meta-prompt">${promptText}</div>
+                        <div class="meta-info">${escapeHtml(formatMeta(data))}</div>
+                    </div>
+                    <div class="meta-actions">
+                        <button class="action-btn" type="button" title="Download"
+                                onclick="event.stopPropagation(); downloadImage('${data.images[0]}')">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#download"/></svg>
+                        </button>
+                        <button class="action-btn" type="button" title="Reuse prompt"
+                                onclick="event.stopPropagation(); reuseFrom(${JSON.stringify(JSON.stringify(data)).slice(1, -1)})">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#copy"/></svg>
+                        </button>
+                        <button class="action-btn" type="button" title="Delete"
+                                onclick="event.stopPropagation(); deleteHistoryItem('${data.timestamp}')">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#trash"/></svg>
+                        </button>
+                    </div>
+                </div>`;
+            isNew ? grid.prepend(card) : grid.appendChild(card);
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function downloadImage(url) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        }
+
+        function reuseFrom(jsonStr) {
+            try {
+                const data = JSON.parse(jsonStr);
+                currentLightboxData = data;
+                applySameStyle();
+            } catch (e) { /* ignore */ }
+        }
+
+        // ====================================================================
+        // 历史列表
+        // ====================================================================
+        async function loadHistory(page = 0) {
+            if (isLoading) return;
+            isLoading = true;
+            const more = document.getElementById('loadMoreBtn');
+            if (page === 0) {
+                more.querySelector('span').textContent = 'Loading…';
+                allHistory = await fetch('/api/history?type=online').then(r => r.json());
+                document.getElementById('imageGrid').innerHTML = '';
+                currentIndex = 0;
+            }
             const next = allHistory.slice(currentIndex, currentIndex + PAGE_SIZE);
-            next.forEach(item => renderImageCard(item)); currentIndex += next.length;
-            loader.classList.toggle('hidden', currentIndex >= allHistory.length);
-            loader.innerText = 'Load More Archive'; isLoading = false;
+            next.forEach(item => renderImageCard(item));
+            currentIndex += next.length;
+            more.style.display = currentIndex >= allHistory.length ? 'none' : 'inline-flex';
+            more.querySelector('span').textContent = 'Load more';
+            updateHistoryCount();
+            isLoading = false;
         }
-        function openLightbox(data){ currentLightboxData = data; document.getElementById('lightboxImg').src = data.images[0]; document.getElementById('lightboxPrompt').textContent = data.prompt || ''; document.getElementById('lightbox').classList.replace('hidden','flex'); document.body.style.overflow='hidden'; }
-        function closeLightbox(){ document.getElementById('lightbox').classList.replace('flex','hidden'); document.body.style.overflow='auto'; }
-        function handleOutsideClick(e){ if(e.target.id === 'lightbox') closeLightbox(); }
-        function zoomImage(){ if(currentResult) openLightbox(currentResult); }
-        function applySameStyle(){
-            if(!currentLightboxData) return;
+        function updateHistoryCount() {
+            const tag = document.getElementById('historyTag');
+            if (tag) tag.textContent = `Online history (${allHistory.length})`;
+        }
+        async function deleteHistoryItem(ts) {
+            if (!confirm('删除这条记录？')) return;
+            const res = await fetch('/api/history/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ timestamp: ts })
+            }).then(r => r.json());
+            if (res.success) {
+                document.getElementById(`history-${ts}`)?.remove();
+                allHistory = allHistory.filter(x => String(x.timestamp) !== String(ts));
+                updateHistoryCount();
+            }
+        }
+
+        // ====================================================================
+        // Lightbox
+        // ====================================================================
+        function openLightbox(data) {
+            currentLightboxData = data;
+            document.getElementById('lightboxImg').src = data.images[0];
+            document.getElementById('lightboxPrompt').textContent = data.prompt || '';
+            document.getElementById('lightbox').classList.add('is-open');
+            document.body.style.overflow = 'hidden';
+        }
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.remove('is-open');
+            document.body.style.overflow = '';
+        }
+        function handleOutsideClick(e) {
+            if (e.target.id === 'lightbox') closeLightbox();
+        }
+        function applySameStyle() {
+            if (!currentLightboxData) return;
             document.getElementById('promptInput').value = currentLightboxData.prompt || '';
-            [1,2,3].forEach(id => clearSlot(id));
-            (currentLightboxData.params?.reference_images || []).slice(0,3).forEach((ref,i) => {
-                refs[i+1] = ref; const prev = document.getElementById(`prev${i+1}`);
-                prev.src = ref.url; prev.classList.remove('hidden'); document.getElementById(`del${i+1}`).classList.remove('hidden');
-            });
+            refs = [];
+            (currentLightboxData.params?.reference_images || []).slice(0, 3).forEach(r => refs.push(r));
+            renderRefChips();
             const size = currentLightboxData.params?.size || '1024x1024';
-            const matchedRatio = Object.keys(SIZE_OPTIONS).find(key => SIZE_OPTIONS[key].some(([value]) => value === size)) || 'square';
-            const matchedRes = SIZE_OPTIONS[matchedRatio]?.find(([value]) => value === size)?.[1];
-            if(matchedRes) {
+            const matchedRatio = Object.keys(SIZE_OPTIONS).find(k =>
+                SIZE_OPTIONS[k].some(([v]) => v === size)) || 'square';
+            const matchedRes = SIZE_OPTIONS[matchedRatio]?.find(([v]) => v === size)?.[1];
+            if (matchedRes) {
                 setRatio(matchedRatio, size);
                 setResolution(matchedRes);
             } else {
@@ -418,16 +874,34 @@
                 customHeight = parsed?.height || '';
                 updateSizeUI();
             }
-            closeLightbox(); window.scrollTo({top:0, behavior:'smooth'});
+            closeLightbox();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
-        async function deleteHistoryItem(ts, ev){
-            ev.stopPropagation();
-            if(!confirm('删除这条记录？')) return;
-            const res = await fetch('/api/history/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({timestamp:ts})}).then(r=>r.json());
-            if(res.success) document.getElementById(`history-${ts}`)?.remove();
-        }
-        const observer = new IntersectionObserver(entries => { if(entries[0].isIntersecting && currentIndex < allHistory.length) loadHistory(1); }, {threshold:.1});
-        window.onload = async () => { setRatio('square'); setResolution('1k'); await initModels(); await loadHistory(0); observer.observe(document.getElementById('loadMoreTrigger')); document.getElementById('loadMoreTrigger').onclick = () => loadHistory(1); };
+
+        // Esc 关闭 lightbox
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeLightbox();
+        });
+
+        // ====================================================================
+        // 主题切换 postMessage 监听（theme.js 已自动处理 studio-theme 消息，
+        // 这里保留监听用于本页自定义响应；不重复切 class，避免与 theme.js 冲突）
+        // ====================================================================
+        window.addEventListener('message', (event) => {
+            if (event.data?.type === 'studio-theme') {
+                // theme.js 已经处理 class 切换，此处无需额外动作
+            }
+        });
+
+        // ====================================================================
+        // 启动
+        // ====================================================================
+        window.addEventListener('load', async () => {
+            setRatio('square');
+            setResolution('1k');
+            await initModels();
+            await loadHistory(0);
+        });
     </script>
 </body>
 </html>
