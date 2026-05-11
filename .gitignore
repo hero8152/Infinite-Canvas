@@ -29,3 +29,6 @@ GEMINI.md
 
 # 截图归档（按需开启）
 # docs/v2.1-redesign/screenshots/
+
+# Playwright 临时输出
+.playwright-mcp/

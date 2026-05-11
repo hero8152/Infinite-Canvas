@@ -9,7 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/design-system.css?v=21">
-    <script src="/static/theme.js?v=20260509"></script>
+    <script src="/static/theme.js?v=20260511a"></script>
     <style>
         /* ===== 项目级 shell 特化（设计 token 全部来自 design-system.css） ===== */
 
@@ -275,41 +275,41 @@
         <aside class="sidebar">
             <div class="logo-area">
                 <svg class="logo-icon pixel-icon" aria-hidden="true">
-                    <use href="/static/icons/pixel.svg#ic-brand"/>
+                    <use href="#ic-brand"/>
                 </svg>
                 <span class="logo-text">Infinite Canvas</span>
             </div>
 
             <nav>
                 <button class="nav-item active" onclick="switchUI(this, 'zimage')">
-                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-zimage"/></svg>
+                    <svg class="nav-icon pixel-icon"><use href="#nav-zimage"/></svg>
                     <span class="nav-text">Text to image</span>
                 </button>
                 <button class="nav-item" onclick="switchUI(this, 'enhance')">
-                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-enhance"/></svg>
+                    <svg class="nav-icon pixel-icon"><use href="#nav-enhance"/></svg>
                     <span class="nav-text">Detail enhance</span>
                 </button>
                 <button class="nav-item" onclick="switchUI(this, 'klein')">
-                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-klein"/></svg>
+                    <svg class="nav-icon pixel-icon"><use href="#nav-klein"/></svg>
                     <span class="nav-text">Image edit</span>
                 </button>
                 <button class="nav-item" onclick="switchUI(this, 'angle')">
-                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-angle"/></svg>
+                    <svg class="nav-icon pixel-icon"><use href="#nav-angle"/></svg>
                     <span class="nav-text">Angle control</span>
                 </button>
 
                 <div class="nav-divider"></div>
 
                 <button class="nav-item" onclick="switchUI(this, 'online')">
-                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-online"/></svg>
+                    <svg class="nav-icon pixel-icon"><use href="#nav-online"/></svg>
                     <span class="nav-text">Online generate</span>
                 </button>
                 <button class="nav-item" onclick="switchUI(this, 'gpt-chat')">
-                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-chat"/></svg>
+                    <svg class="nav-icon pixel-icon"><use href="#nav-chat"/></svg>
                     <span class="nav-text">Chat</span>
                 </button>
                 <button class="nav-item" onclick="switchUI(this, 'canvas')">
-                    <svg class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-canvas"/></svg>
+                    <svg class="nav-icon pixel-icon"><use href="#nav-canvas"/></svg>
                     <span class="nav-text">Canvas</span>
                 </button>
             </nav>
@@ -329,8 +329,8 @@
                 </div>
 
                 <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn">
-                    <svg id="icon-moon" class="nav-icon pixel-icon"><use href="/static/icons/pixel.svg#nav-moon"/></svg>
-                    <svg id="icon-sun" class="nav-icon pixel-icon" style="display:none"><use href="/static/icons/pixel.svg#nav-sun"/></svg>
+                    <svg id="icon-moon" class="nav-icon pixel-icon"><use href="#nav-moon"/></svg>
+                    <svg id="icon-sun" class="nav-icon pixel-icon" style="display:none"><use href="#nav-sun"/></svg>
                     <span class="theme-toggle-text">Appearance</span>
                 </button>
             </div>
