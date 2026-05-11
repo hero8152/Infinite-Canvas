@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Infinite-Canvas pixel icon sprite — DESIGN.md §4 像素艺术图标系统
+  规则:
+    - 所有 glyph 用 <symbol> 包裹，外部 <use href="#id"/> 引用
+    - shape-rendering="crispEdges" + 整数像素 <rect>
+    - fill="currentColor"，颜色由调用方 CSS 决定（一般是 var(--primary)）
+    - 命名: 主语义 glyph + nav-* 前缀的 sidebar 导航图标
+-->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+
+  <!-- ====================================================================
+       §4.2 必备 Glyph
+       ==================================================================== -->
+
+  <!-- chevron-right: 12×8 像素阶梯右箭头 -->
+  <symbol id="chevron-right" viewBox="0 0 12 8" shape-rendering="crispEdges">
+    <rect x="3" y="1" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="5" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="4" width="2" height="2" fill="currentColor"/>
+    <rect x="3" y="5" width="2" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- chevron-down: 8×6 像素阶梯下箭头（Mistral 黑色 CTA 尾标） -->
+  <symbol id="chevron-down" viewBox="0 0 8 6" shape-rendering="crispEdges">
+    <rect x="0" y="1" width="2" height="2" fill="currentColor"/>
+    <rect x="2" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="6" y="1" width="2" height="2" fill="currentColor"/>
+    <rect x="3" y="3" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- chevron-up: 8×6 -->
+  <symbol id="chevron-up" viewBox="0 0 8 6" shape-rendering="crispEdges">
+    <rect x="0" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="2" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="6" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="3" y="1" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- check: 12×12 像素勾 -->
+  <symbol id="check" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="1" y="6" width="2" height="2" fill="currentColor"/>
+    <rect x="3" y="7" width="2" height="2" fill="currentColor"/>
+    <rect x="5" y="6" width="2" height="2" fill="currentColor"/>
+    <rect x="6" y="4" width="2" height="2" fill="currentColor"/>
+    <rect x="7" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="8" y="1" width="2" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- cross: 12×12 像素 X -->
+  <symbol id="cross" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="2" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="4" width="2" height="2" fill="currentColor"/>
+    <rect x="5" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="6" y="6" width="2" height="2" fill="currentColor"/>
+    <rect x="8" y="8" width="2" height="2" fill="currentColor"/>
+    <rect x="8" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="6" y="4" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="6" width="2" height="2" fill="currentColor"/>
+    <rect x="2" y="8" width="2" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- flame: 12×12 像素火苗 -->
+  <symbol id="flame" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="5" y="1" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="6" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="3" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="5" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="7" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="2" y="7" width="3" height="3" fill="currentColor"/>
+    <rect x="5" y="7" width="3" height="3" fill="currentColor"/>
+    <rect x="7" y="7" width="3" height="3" fill="currentColor"/>
+    <rect x="3" y="10" width="6" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- diamond: 12×12 钻石 -->
+  <symbol id="diamond" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="4" y="2" width="4" height="2" fill="currentColor"/>
+    <rect x="2" y="4" width="2" height="2" fill="currentColor"/>
+    <rect x="8" y="4" width="2" height="2" fill="currentColor"/>
+    <rect x="3" y="6" width="6" height="1" fill="currentColor"/>
+    <rect x="4" y="7" width="4" height="1" fill="currentColor"/>
+    <rect x="5" y="8" width="2" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- person: 12×12 简笔人形（Human-in-the-loop 徽章） -->
+  <symbol id="person" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="5" y="2" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="4" width="4" height="2" fill="currentColor"/>
+    <rect x="3" y="6" width="6" height="1" fill="currentColor"/>
+    <rect x="3" y="7" width="2" height="3" fill="currentColor"/>
+    <rect x="7" y="7" width="2" height="3" fill="currentColor"/>
+  </symbol>
+
+  <!-- upload: 12×12 上传箭头 -->
+  <symbol id="upload" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="5" y="1" width="2" height="6" fill="currentColor"/>
+    <rect x="3" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="7" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="2" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="8" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="1" y="9" width="10" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- download: 12×12 下载箭头 -->
+  <symbol id="download" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="5" y="1" width="2" height="6" fill="currentColor"/>
+    <rect x="3" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="7" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="2" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="8" y="3" width="2" height="2" fill="currentColor"/>
+    <rect x="1" y="9" width="10" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- plus: 12×12 加号 -->
+  <symbol id="plus" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="5" y="2" width="2" height="8" fill="currentColor"/>
+    <rect x="2" y="5" width="8" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- minus: 12×12 减号 -->
+  <symbol id="minus" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="2" y="5" width="8" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- search: 12×12 搜索（放大镜像素） -->
+  <symbol id="search" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="2" y="1" width="4" height="1" fill="currentColor"/>
+    <rect x="1" y="2" width="1" height="4" fill="currentColor"/>
+    <rect x="6" y="2" width="1" height="4" fill="currentColor"/>
+    <rect x="2" y="6" width="4" height="1" fill="currentColor"/>
+    <rect x="7" y="7" width="1" height="1" fill="currentColor"/>
+    <rect x="8" y="8" width="1" height="1" fill="currentColor"/>
+    <rect x="9" y="9" width="2" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- trash: 12×12 回收站 -->
+  <symbol id="trash" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="4" y="1" width="4" height="1" fill="currentColor"/>
+    <rect x="2" y="2" width="8" height="1" fill="currentColor"/>
+    <rect x="3" y="4" width="1" height="6" fill="currentColor"/>
+    <rect x="5" y="4" width="1" height="6" fill="currentColor"/>
+    <rect x="7" y="4" width="1" height="6" fill="currentColor"/>
+    <rect x="9" y="4" width="1" height="6" fill="currentColor"/>
+    <rect x="3" y="10" width="6" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- copy: 12×12 复制 -->
+  <symbol id="copy" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="2" y="2" width="6" height="1" fill="currentColor"/>
+    <rect x="2" y="3" width="1" height="6" fill="currentColor"/>
+    <rect x="7" y="3" width="1" height="6" fill="currentColor"/>
+    <rect x="2" y="8" width="6" height="1" fill="currentColor"/>
+    <rect x="4" y="4" width="6" height="1" fill="currentColor"/>
+    <rect x="4" y="5" width="1" height="6" fill="currentColor"/>
+    <rect x="9" y="5" width="1" height="6" fill="currentColor"/>
+    <rect x="4" y="10" width="6" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- send: 12×12 飞机 -->
+  <symbol id="send" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="1" y="2" width="10" height="1" fill="currentColor"/>
+    <rect x="1" y="2" width="1" height="2" fill="currentColor"/>
+    <rect x="2" y="4" width="1" height="2" fill="currentColor"/>
+    <rect x="3" y="6" width="1" height="2" fill="currentColor"/>
+    <rect x="4" y="8" width="1" height="2" fill="currentColor"/>
+    <rect x="10" y="3" width="1" height="2" fill="currentColor"/>
+    <rect x="9" y="5" width="1" height="2" fill="currentColor"/>
+    <rect x="8" y="7" width="1" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- ====================================================================
+       项目品牌字 — "IC" 像素 logo（替换 Mistral 的 "M"）
+       ==================================================================== -->
+  <symbol id="ic-brand" viewBox="0 0 48 48" shape-rendering="crispEdges">
+    <!-- I -->
+    <rect x="6"  y="8"  width="14" height="4" fill="currentColor"/>
+    <rect x="10" y="12" width="6"  height="24" fill="currentColor"/>
+    <rect x="6"  y="36" width="14" height="4" fill="currentColor"/>
+    <!-- C -->
+    <rect x="28" y="8"  width="14" height="4" fill="currentColor"/>
+    <rect x="24" y="12" width="4"  height="24" fill="currentColor"/>
+    <rect x="28" y="36" width="14" height="4" fill="currentColor"/>
+    <rect x="40" y="12" width="2"  height="4" fill="currentColor"/>
+    <rect x="40" y="32" width="2"  height="4" fill="currentColor"/>
+  </symbol>
+
+  <!-- ====================================================================
+       Sidebar 导航图标（§17.1 — 16×16）
+       ==================================================================== -->
+
+  <!-- nav-zimage: 文字到图（T2I）— 文字方块 + 箭头 + 图片框 -->
+  <symbol id="nav-zimage" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="1" y="3" width="5" height="1" fill="currentColor"/>
+    <rect x="1" y="6" width="5" height="1" fill="currentColor"/>
+    <rect x="1" y="9" width="3" height="1" fill="currentColor"/>
+    <rect x="7" y="6" width="1" height="1" fill="currentColor"/>
+    <rect x="8" y="6" width="1" height="1" fill="currentColor"/>
+    <rect x="9" y="6" width="1" height="1" fill="currentColor"/>
+    <rect x="10" y="2" width="5" height="1" fill="currentColor"/>
+    <rect x="10" y="13" width="5" height="1" fill="currentColor"/>
+    <rect x="10" y="2" width="1" height="11" fill="currentColor"/>
+    <rect x="14" y="2" width="1" height="11" fill="currentColor"/>
+    <rect x="11" y="10" width="3" height="1" fill="currentColor"/>
+    <rect x="12" y="7" width="2" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- nav-enhance: 细节增强 — 4 角加号扩张 -->
+  <symbol id="nav-enhance" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="2" width="3" height="1" fill="currentColor"/>
+    <rect x="2" y="2" width="1" height="3" fill="currentColor"/>
+    <rect x="11" y="2" width="3" height="1" fill="currentColor"/>
+    <rect x="13" y="2" width="1" height="3" fill="currentColor"/>
+    <rect x="2" y="11" width="1" height="3" fill="currentColor"/>
+    <rect x="2" y="13" width="3" height="1" fill="currentColor"/>
+    <rect x="11" y="13" width="3" height="1" fill="currentColor"/>
+    <rect x="13" y="11" width="1" height="3" fill="currentColor"/>
+    <rect x="7" y="6" width="2" height="1" fill="currentColor"/>
+    <rect x="6" y="7" width="4" height="2" fill="currentColor"/>
+    <rect x="7" y="9" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- nav-klein: 图片编辑 — 画笔加修补 -->
+  <symbol id="nav-klein" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="2" width="9" height="1" fill="currentColor"/>
+    <rect x="2" y="2" width="1" height="9" fill="currentColor"/>
+    <rect x="2" y="10" width="6" height="1" fill="currentColor"/>
+    <rect x="10" y="2" width="1" height="4" fill="currentColor"/>
+    <rect x="5" y="5" width="2" height="2" fill="currentColor"/>
+    <rect x="9" y="9" width="2" height="1" fill="currentColor"/>
+    <rect x="10" y="10" width="2" height="1" fill="currentColor"/>
+    <rect x="11" y="11" width="2" height="1" fill="currentColor"/>
+    <rect x="12" y="12" width="2" height="1" fill="currentColor"/>
+    <rect x="13" y="13" width="1" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- nav-angle: 角度控制 — 3D 立方体 -->
+  <symbol id="nav-angle" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="6" y="2" width="6" height="1" fill="currentColor"/>
+    <rect x="3" y="4" width="6" height="1" fill="currentColor"/>
+    <rect x="3" y="4" width="1" height="6" fill="currentColor"/>
+    <rect x="8" y="4" width="1" height="6" fill="currentColor"/>
+    <rect x="3" y="10" width="6" height="1" fill="currentColor"/>
+    <rect x="5" y="3" width="1" height="1" fill="currentColor"/>
+    <rect x="6" y="2" width="1" height="1" fill="currentColor"/>
+    <rect x="12" y="2" width="1" height="6" fill="currentColor"/>
+    <rect x="11" y="3" width="1" height="1" fill="currentColor"/>
+    <rect x="9" y="5" width="1" height="1" fill="currentColor"/>
+    <rect x="10" y="4" width="1" height="1" fill="currentColor"/>
+    <rect x="9" y="8" width="3" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- nav-online: 在线生图 — 云 -->
+  <symbol id="nav-online" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="5" y="4" width="4" height="1" fill="currentColor"/>
+    <rect x="4" y="5" width="1" height="3" fill="currentColor"/>
+    <rect x="9" y="5" width="1" height="1" fill="currentColor"/>
+    <rect x="10" y="6" width="3" height="1" fill="currentColor"/>
+    <rect x="13" y="7" width="1" height="3" fill="currentColor"/>
+    <rect x="2" y="9" width="1" height="2" fill="currentColor"/>
+    <rect x="3" y="8" width="1" height="3" fill="currentColor"/>
+    <rect x="3" y="11" width="11" height="1" fill="currentColor"/>
+    <rect x="12" y="10" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- nav-chat: GPT 对话 — 气泡 -->
+  <symbol id="nav-chat" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="3" width="12" height="1" fill="currentColor"/>
+    <rect x="2" y="3" width="1" height="7" fill="currentColor"/>
+    <rect x="13" y="3" width="1" height="7" fill="currentColor"/>
+    <rect x="2" y="10" width="12" height="1" fill="currentColor"/>
+    <rect x="4" y="11" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="6" width="2" height="1" fill="currentColor"/>
+    <rect x="7" y="6" width="2" height="1" fill="currentColor"/>
+    <rect x="10" y="6" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- nav-canvas: 无限画布 — 2×2 网格 -->
+  <symbol id="nav-canvas" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="2" width="5" height="5" fill="currentColor"/>
+    <rect x="9" y="2" width="5" height="5" fill="currentColor"/>
+    <rect x="2" y="9" width="5" height="5" fill="currentColor"/>
+    <rect x="9" y="9" width="5" height="5" fill="currentColor"/>
+  </symbol>
+
+  <!-- 主题切换：太阳 / 月亮 -->
+  <symbol id="nav-sun" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="6" y="6" width="4" height="4" fill="currentColor"/>
+    <rect x="7" y="2" width="2" height="1" fill="currentColor"/>
+    <rect x="7" y="13" width="2" height="1" fill="currentColor"/>
+    <rect x="2" y="7" width="1" height="2" fill="currentColor"/>
+    <rect x="13" y="7" width="1" height="2" fill="currentColor"/>
+    <rect x="3" y="3" width="1" height="1" fill="currentColor"/>
+    <rect x="12" y="3" width="1" height="1" fill="currentColor"/>
+    <rect x="3" y="12" width="1" height="1" fill="currentColor"/>
+    <rect x="12" y="12" width="1" height="1" fill="currentColor"/>
+  </symbol>
+
+  <symbol id="nav-moon" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="5" y="2" width="4" height="1" fill="currentColor"/>
+    <rect x="4" y="3" width="2" height="1" fill="currentColor"/>
+    <rect x="3" y="4" width="2" height="2" fill="currentColor"/>
+    <rect x="2" y="6" width="2" height="4" fill="currentColor"/>
+    <rect x="3" y="10" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="12" width="2" height="1" fill="currentColor"/>
+    <rect x="5" y="13" width="4" height="1" fill="currentColor"/>
+    <rect x="9" y="12" width="2" height="1" fill="currentColor"/>
+    <rect x="11" y="11" width="1" height="1" fill="currentColor"/>
+  </symbol>
+
+</svg>

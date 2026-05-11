@@ -1,0 +1,912 @@
+/* ============================================================================
+   Infinite-Canvas Design System v2.1 — Mistral-faithful
+   规范来源: /DESIGN.md（v2.1，17 章节）
+   组织顺序: tokens → typography → layout → components → media → override layer
+   引入方式: <link rel="stylesheet" href="/static/design-system.css">
+   ============================================================================ */
+
+
+/* ----------------------------------------------------------------------------
+   1. Tokens（§3.1 / §3.2 / §3.3）
+   ---------------------------------------------------------------------------- */
+:root {
+  /* 核心色（Light，§3.1） */
+  --bg:           #fffaeb;
+  --bg-2:         #fff4d6;
+  --stage-bg:     #ffffff;
+  --ink:          #0f0f0f;
+  --ink-2:        #1f1f1f;
+  --muted:        #6a6a6a;
+  --border:       #e6d5a8;
+  --border-2:     #d9c489;
+  --primary:      #fa520f;
+  --primary-deep: #cc3a05;
+  --accent-amber: #ffa110;
+  --accent-honey: #ffb83e;
+  --accent-sun:   #ffd900;
+  --accent-pale:  #fff8e0;
+
+  /* Sunset Spectrum 12 档（§3.2） */
+  --sunset-1:  #cc3a05;
+  --sunset-2:  #fa520f;
+  --sunset-3:  #ff7a1f;
+  --sunset-4:  #ff9a2c;
+  --sunset-5:  #ffb83e;
+  --sunset-6:  #ffd086;
+  --sunset-7:  #f0dc7c;
+  --sunset-8:  #d9d164;
+  --sunset-9:  #a8c25a;
+  --sunset-10: #6fa84a;
+  --sunset-11: #3f7f2a;
+
+  /* Dark 表面（§3.3） */
+  --dark-bg:      #0e0e10;
+  --dark-surface: #161618;
+  --dark-elev:    #1c1c1e;
+  --dark-border:  #2a2a2d;
+  --dark-text:    #f5f5f5;
+  --dark-muted:   #9a9a9a;
+  --dark-orange:  #fa520f;
+
+  /* 8px 整数倍间距（栅格） */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+  --space-9:  96px;
+  --space-10: 128px;
+
+  /* 字体族（§2） */
+  --font-sans: 'Inter', 'Helvetica Neue', Arial, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+}
+
+/* Dark 主题：仅交换核心 token，其它组件靠语义级 var() 跟随 */
+body.studio-theme-dark,
+html.studio-theme-dark body {
+  --bg:           var(--dark-bg);
+  --bg-2:         var(--dark-surface);
+  --stage-bg:     var(--dark-elev);
+  --ink:          var(--dark-text);
+  --muted:        var(--dark-muted);
+  --border:       var(--dark-border);
+  --border-2:     var(--dark-border);
+}
+
+
+/* ----------------------------------------------------------------------------
+   2. 基础排版（§2）
+   ---------------------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.text-hero {
+  font-size: clamp(64px, 9vw, 128px);
+  font-weight: 500;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+}
+.text-display {
+  font-size: clamp(48px, 6vw, 72px);
+  font-weight: 500;
+  line-height: 1.0;
+  letter-spacing: -0.015em;
+}
+.text-h1     { font-size: 32px; font-weight: 500; line-height: 1.1; letter-spacing: -0.01em; }
+.text-h2     { font-size: 20px; font-weight: 500; line-height: 1.2; }
+.text-body   { font-size: 16px; font-weight: 400; line-height: 1.5; }
+.text-label  { font-size: 14px; font-weight: 500; line-height: 1.3; letter-spacing: 0.01em; }
+.text-mono   { font-family: var(--font-mono); font-size: 13px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+.text-muted  { color: var(--muted); }
+.text-primary{ color: var(--primary); }
+
+::selection { background: var(--primary); color: #fff; }
+
+
+/* ----------------------------------------------------------------------------
+   3. Shell 网格纸背景（§5）
+   ---------------------------------------------------------------------------- */
+.shell-grid {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(to right,  rgba(230, 213, 168, 0.55) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(230, 213, 168, 0.55) 1px, transparent 1px);
+  background-size: 80px 80px;
+}
+
+body.studio-theme-dark .shell-grid,
+html.studio-theme-dark body.shell-grid {
+  background-color: var(--dark-bg);
+  background-image:
+    linear-gradient(to right,  rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* 子格（仅 design canvas 模式启用） */
+.shell-grid--fine {
+  background-image:
+    linear-gradient(to right,  rgba(230, 213, 168, 0.55) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(230, 213, 168, 0.55) 1px, transparent 1px),
+    linear-gradient(to right,  rgba(230, 213, 168, 0.22) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(230, 213, 168, 0.22) 1px, transparent 1px);
+  background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
+}
+
+
+/* ----------------------------------------------------------------------------
+   4. Sunset Stripe（§11）
+   ---------------------------------------------------------------------------- */
+.sunset-stripe {
+  height: 4px;
+  width: 100%;
+  background: linear-gradient(90deg,
+    var(--sunset-1)  0%,
+    var(--sunset-2) 18%,
+    var(--sunset-3) 38%,
+    var(--sunset-4) 58%,
+    var(--sunset-5) 78%,
+    var(--sunset-6) 100%);
+}
+body.studio-theme-dark .sunset-stripe {
+  background: linear-gradient(90deg,
+    var(--sunset-2) 0%,
+    var(--sunset-1) 50%,
+    var(--ink-2) 100%);
+}
+
+
+/* ----------------------------------------------------------------------------
+   5. Section Tag（§6）
+   ---------------------------------------------------------------------------- */
+.section-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  border-radius: 0;
+  user-select: none;
+}
+.section-tag .pixel-icon { color: var(--primary); }
+
+
+/* ----------------------------------------------------------------------------
+   6. 按钮三态（§7）
+   ---------------------------------------------------------------------------- */
+.btn-primary,
+.btn-tonal,
+.btn-underline {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  border-radius: 0;
+  text-decoration: none;
+  transition: none;
+  user-select: none;
+}
+
+/* 7.1 Primary — 实心黑 CTA */
+.btn-primary {
+  background: var(--ink);
+  color: #fff;
+  padding: 14px 22px;
+}
+.btn-primary:hover         { background: #000; }
+.btn-primary:hover .pixel-icon { transform: translateX(2px); }
+.btn-primary[disabled],
+.btn-primary.is-disabled   { background: #2a2a2a; color: #888; cursor: not-allowed; }
+.btn-primary .pixel-icon   { color: var(--primary); transition: transform 0s step-end; }
+
+/* 7.2 Secondary — Cream Pill */
+.btn-tonal {
+  background: var(--bg-2);
+  color: var(--ink);
+  padding: 12px 20px;
+}
+.btn-tonal:hover         { background: #ffe9b3; }
+.btn-tonal .pixel-icon   { color: var(--primary); }
+
+body.studio-theme-dark .btn-tonal {
+  background: var(--dark-surface);
+  color: var(--dark-text);
+}
+body.studio-theme-dark .btn-tonal:hover {
+  background: var(--dark-elev);
+}
+
+/* 7.3 Tertiary — 下划线文字链 */
+.btn-underline {
+  background: transparent;
+  color: var(--ink);
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 6px;
+  text-decoration-thickness: 1px;
+}
+.btn-underline:hover       { text-decoration-color: var(--primary); }
+.btn-underline .pixel-icon { color: var(--primary); }
+
+
+/* ----------------------------------------------------------------------------
+   7. 卡片三态（§8）
+   ---------------------------------------------------------------------------- */
+
+/* 8.1 White Stage Card — 唯一允许 8px 圆角的容器 */
+.card-stage {
+  background: var(--stage-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+}
+
+/* 8.2 Cream Tonal Card */
+.card-tonal {
+  background: var(--bg-2);
+  border: none;
+  border-radius: 0;
+  padding: 16px 20px;
+}
+
+/* 8.3 Dark Glass Card */
+.card-glass {
+  background: var(--dark-elev);
+  color: var(--dark-text);
+  border: 1px solid var(--dark-border);
+  border-radius: 0;
+  padding: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.card-glass--blur {
+  background: rgba(28, 28, 30, 0.92);
+  backdrop-filter: blur(8px);
+}
+.card-glass .text-muted { color: var(--dark-muted); }
+
+/* dark card 内嵌 chip（dark 模式唯一允许 4px 圆角的特例） */
+.chip-dark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #26262a;
+  color: var(--dark-text);
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+
+/* ----------------------------------------------------------------------------
+   8. 表单组件（§15）
+   ---------------------------------------------------------------------------- */
+
+/* 15.2 Text Input / Textarea */
+.input,
+.textarea {
+  display: block;
+  width: 100%;
+  background: var(--stage-bg);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 10px 14px;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.4;
+  outline: none;
+  transition: none;
+  box-shadow: none;
+}
+.input      { height: 40px; }
+.textarea   { min-height: 96px; resize: vertical; }
+.input:hover, .textarea:hover  { border-color: var(--border-2); }
+.input:focus, .textarea:focus  { border-color: var(--ink); }
+.input.is-error, .textarea.is-error { border-color: var(--primary-deep); }
+.input::placeholder, .textarea::placeholder { color: var(--muted); }
+
+body.studio-theme-dark .input,
+body.studio-theme-dark .textarea {
+  background: var(--dark-elev);
+  border-color: var(--dark-border);
+  color: var(--dark-text);
+}
+
+.input-error-msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--primary-deep);
+}
+.input-error-msg .pixel-icon { color: var(--primary-deep); }
+
+/* 15.3 Select */
+.select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  background: var(--stage-bg);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0 14px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.select:hover    { border-color: var(--border-2); }
+.select.is-open  { border-color: var(--ink); }
+.select .pixel-icon { color: var(--primary); }
+
+body.studio-theme-dark .select {
+  background: var(--dark-elev);
+  border-color: var(--dark-border);
+  color: var(--dark-text);
+}
+
+.select-menu {
+  position: absolute;
+  top: calc(100% + 0px); left: -1px; right: -1px;
+  background: var(--stage-bg);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  padding: 4px 0;
+  z-index: 100;
+  display: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.select.is-open .select-menu { display: block; }
+.select-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.select-menu .menu-item:hover,
+.select-menu .menu-item.is-selected { background: var(--bg-2); }
+.select-menu .menu-item.is-selected .pixel-icon { color: var(--primary); }
+
+/* 15.4 Slider */
+.slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.slider-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 0;
+  cursor: pointer;
+}
+.slider-track .slider-fill {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  background: var(--ink);
+}
+.slider-track .slider-handle {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  background: var(--primary);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  transition: none;
+}
+.slider-track .slider-handle:active { cursor: grabbing; }
+.slider-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px; height: 24px;
+  padding: 0 8px;
+  background: var(--bg-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  border-radius: 0;
+}
+
+/* 15.5 Number Input */
+.number-input {
+  display: inline-flex;
+  align-items: stretch;
+  height: 24px;
+  border-radius: 0;
+}
+.number-input .num-btn {
+  width: 24px; height: 24px;
+  background: var(--ink);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1;
+}
+.number-input .num-btn:hover { background: #000; }
+.number-input input {
+  width: 64px; height: 24px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: var(--stage-bg);
+  border: 1px solid var(--border);
+  border-left: none; border-right: none;
+  border-radius: 0;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.number-input input::-webkit-outer-spin-button,
+.number-input input::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+
+/* 15.6 Checkbox */
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+}
+.checkbox-row input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.checkbox-row .check-box {
+  width: 14px; height: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.checkbox-row input[type="checkbox"]:checked + .check-box {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.checkbox-row input[type="checkbox"]:checked + .check-box::after {
+  content: '';
+  width: 8px;
+  height: 6px;
+  /* 像素勾：左短右长两段折线，用 box-shadow 拼像素 */
+  background: transparent;
+  box-shadow:
+    -3px 2px 0 0 #fff,
+    -1px 4px 0 0 #fff,
+    1px 2px 0 0 #fff,
+    3px 0 0 0 #fff;
+}
+
+body.studio-theme-dark .checkbox-row .check-box {
+  background: var(--dark-elev);
+  border-color: var(--dark-border);
+}
+
+/* 15.7 Radio — 方形 */
+.radio-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+}
+.radio-row input[type="radio"] {
+  position: absolute; opacity: 0; pointer-events: none;
+}
+.radio-row .radio-box {
+  width: 14px; height: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.radio-row input[type="radio"]:checked + .radio-box::after {
+  content: '';
+  width: 10px; height: 10px;
+  background: var(--primary);
+}
+
+/* 15.8 Dropzone */
+.dropzone {
+  border: 1px dashed var(--border-2);
+  background: var(--bg-2);
+  border-radius: 0;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  color: var(--muted);
+  padding: 24px;
+  cursor: pointer;
+  transition: none;
+}
+.dropzone.is-over {
+  border-color: var(--ink);
+  background: var(--bg);
+  border-style: solid;
+}
+.dropzone.has-file {
+  background: var(--stage-bg);
+  border-style: solid;
+  border-color: var(--border);
+}
+
+/* 15.9 Chip */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-2);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 0;
+  border: none;
+}
+.chip .chip-close {
+  width: 8px; height: 8px;
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.chip .chip-close:hover { color: var(--primary-deep); }
+
+
+/* ----------------------------------------------------------------------------
+   9. 图片与媒体（§16）
+   ---------------------------------------------------------------------------- */
+
+/* 16.1 Image Card */
+.image-card {
+  display: block;
+  background: var(--stage-bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  overflow: hidden;
+}
+.image-card.is-selected { border-color: var(--primary); }
+.image-card img         { display: block; width: 100%; height: auto; }
+
+.image-meta {
+  background: var(--bg-2);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.image-meta .meta-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+.image-meta .meta-text {
+  flex: 1;
+  min-width: 0;
+}
+.image-meta .meta-prompt {
+  font-size: 16px;
+  color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.image-meta .meta-info {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.image-meta .action-btn {
+  width: 24px; height: 24px;
+  background: var(--bg-2);
+  border: none;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 0;
+  color: var(--ink);
+}
+.image-meta .action-btn:hover { background: var(--bg); }
+
+/* 16.2 Grid */
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+@media (max-width: 1280px) {
+  .image-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .image-grid { grid-template-columns: 1fr; }
+}
+
+/* 16.3 Pixel Checkerboard Placeholder */
+.image-placeholder {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background-image:
+    linear-gradient(45deg,  var(--border) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border) 25%, transparent 25%),
+    linear-gradient(45deg,  transparent 75%, var(--border) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-color: var(--bg-2);
+  image-rendering: pixelated;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-placeholder--error {
+  background-image:
+    linear-gradient(45deg,  var(--primary-deep) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--primary-deep) 25%, transparent 25%),
+    linear-gradient(45deg,  transparent 75%, var(--primary-deep) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--primary-deep) 75%);
+}
+
+/* Pixel dot pulse 用于 §16.3 加载占位 + §17.1 在线指示 */
+.pixel-dot-pulse {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+.pixel-dot-pulse > span {
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  animation: pixel-pulse 0.75s step-end infinite;
+}
+.pixel-dot-pulse > span:nth-child(2) { animation-delay: 0.25s; }
+.pixel-dot-pulse > span:nth-child(3) { animation-delay: 0.5s; }
+@keyframes pixel-pulse {
+  0%, 49.99%   { opacity: 1; }
+  50%, 100%    { opacity: 0.25; }
+}
+
+/* 16.4 Terminal-style 进度卡 */
+.terminal-card {
+  background: var(--dark-elev);
+  color: var(--dark-text);
+  border: 1px solid var(--dark-border);
+  border-radius: 0;
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.terminal-card .term-prompt { color: var(--primary); }
+.terminal-card .term-bar    { white-space: pre; letter-spacing: 0; margin: 8px 0; }
+.terminal-card .term-bar .bar-fill  { color: var(--primary); }
+.terminal-card .term-bar .bar-empty { color: var(--dark-muted); }
+.terminal-card .term-info   { color: var(--dark-muted); }
+
+/* 16.7 参考图 Chip */
+.ref-chip {
+  position: relative;
+  display: inline-block;
+  width: 48px; height: 48px;
+  margin-right: 8px;
+}
+.ref-chip img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: 0;
+  display: block;
+}
+.ref-chip .ref-remove {
+  position: absolute;
+  top: 0; right: 0;
+  width: 16px; height: 16px;
+  background: var(--ink);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 0;
+}
+.ref-chip .ref-remove:hover { background: var(--primary-deep); }
+
+
+/* ----------------------------------------------------------------------------
+   10. 像素图标 helper（§4）
+   ---------------------------------------------------------------------------- */
+.pixel-icon {
+  display: inline-block;
+  shape-rendering: crispEdges;
+  vertical-align: middle;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+.pixel-icon--xs { width: 8px;  height: 8px;  }
+.pixel-icon--sm { width: 12px; height: 12px; }
+.pixel-icon--md { width: 16px; height: 16px; }
+.pixel-icon--lg { width: 24px; height: 24px; }
+.pixel-icon--xl { width: 48px; height: 48px; }
+
+
+/* ----------------------------------------------------------------------------
+   11. Sidebar / Shell（§11 / §17.1）
+   ---------------------------------------------------------------------------- */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sidebar .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: none;
+}
+.sidebar .nav-item:hover     { background: var(--bg-2); }
+.sidebar .nav-item.is-active { background: var(--bg-2); }
+.sidebar .nav-item .pixel-icon { color: var(--ink); }
+.sidebar .nav-item.is-active .pixel-icon { color: var(--primary); }
+
+.stage {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--stage-bg);
+  border-left: 1px solid var(--border);
+}
+
+/* Nano Monitor — 黑色矩形右上角 */
+.nano-monitor {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-radius: 0;
+}
+.nano-monitor .pixel-dot-pulse { color: var(--primary); }
+
+
+/* ----------------------------------------------------------------------------
+   12. 滚动条
+   ---------------------------------------------------------------------------- */
+::-webkit-scrollbar         { width: 8px; height: 8px; }
+::-webkit-scrollbar-track   { background: transparent; }
+::-webkit-scrollbar-thumb   { background: var(--border-2); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+body.studio-theme-dark ::-webkit-scrollbar-thumb { background: var(--dark-border); }
+body.studio-theme-dark ::-webkit-scrollbar-thumb:hover { background: var(--dark-muted); }
+
+
+/* ============================================================================
+   END OF DESIGN SYSTEM RULES — Anti-Slop Override Layer 跟在最后
+   §12 反例规则在此整体压制 Tailwind utility。!important 是有意为之。
+   ============================================================================ */
+
+/* 12.A — 强制 0 圆角（覆盖 Tailwind rounded-*） */
+.rounded,
+.rounded-none, .rounded-sm, .rounded-md, .rounded-lg,
+.rounded-xl, .rounded-2xl, .rounded-3xl, .rounded-full,
+[class*="rounded-t-"], [class*="rounded-b-"],
+[class*="rounded-l-"], [class*="rounded-r-"],
+[class*="rounded-tl-"], [class*="rounded-tr-"],
+[class*="rounded-bl-"], [class*="rounded-br-"] {
+  border-radius: 0 !important;
+}
+
+/* 12.B — 强制 0 阴影（柔光阴影是 AI slop） */
+.shadow, .shadow-sm, .shadow-md, .shadow-lg,
+.shadow-xl, .shadow-2xl, .shadow-inner, .shadow-none,
+[class*="shadow-["] {
+  box-shadow: none !important;
+}
+
+/* 12.C — 禁用 backdrop-blur（保留 .card-glass--blur 是有意外白名单） */
+.backdrop-blur, .backdrop-blur-none, .backdrop-blur-sm,
+.backdrop-blur-md, .backdrop-blur-lg, .backdrop-blur-xl,
+.backdrop-blur-2xl, .backdrop-blur-3xl {
+  backdrop-filter: none !important;
+}
+
+/* 12.D — 禁用 hover scale 弹跳 */
+[class*="hover:scale-"]:hover,
+[class*="group-hover:scale-"]:hover,
+.transition,
+[class*="transition-"]:not(.allow-transition) {
+  /* transform: none !important;  -- 仅对 hover scale 生效，不影响布局 transform */
+}
+.hover\:scale-100:hover, .hover\:scale-105:hover, .hover\:scale-110:hover,
+.group:hover .group-hover\:scale-100, .group:hover .group-hover\:scale-105,
+.group:hover .group-hover\:scale-110 {
+  transform: none !important;
+}
+
+/* 12.E — 紫蓝青重音色禁用（§12 #5） */
+[class*="from-purple-"], [class*="to-purple-"],
+[class*="from-blue-"],   [class*="to-blue-"],
+[class*="from-cyan-"],   [class*="to-cyan-"],
+[class*="from-indigo-"], [class*="to-indigo-"],
+[class*="from-violet-"], [class*="to-violet-"],
+[class*="from-sky-"],    [class*="to-sky-"],
+[class*="from-teal-"],   [class*="to-teal-"] {
+  --tw-gradient-from: var(--primary) !important;
+  --tw-gradient-to:   var(--accent-honey) !important;
+}
+
+/* 12.F — 移除 Tailwind 默认 ring */
+[class*="ring-"], [class*="focus:ring-"]:focus {
+  --tw-ring-shadow: 0 0 #0000 !important;
+  box-shadow: none !important;
+}
