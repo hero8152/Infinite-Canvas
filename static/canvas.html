@@ -8,8 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- lucide CDN 已移除：theme.js 提供 window.lucide.createIcons 兜底转换为 pixel sprite -->
     <script>window.lucide = window.lucide || { createIcons: () => window.replaceLucideIcons && window.replaceLucideIcons(document) };</script>
-    <script src="/static/theme.js?v=20260512b"></script>
-    <link rel="stylesheet" href="/static/design-system.css?v=22">
+    <script src="/static/theme.js?v=20260512c"></script>
+    <link rel="stylesheet" href="/static/design-system.css?v=23">
     <style>
         /* v2.1 canvas legacy 圆角覆盖 — 将 v1.0 时期的 .canvas-* / .node / .gen-settings 等
            legacy class 强制改为 0 圆角，对齐 §12 反例规则。彻底重写见 Phase 2 Wave D（未来）。 */
@@ -202,6 +202,23 @@
         .theme-dark .compact-select {
             background: #3a3a3d !important;
             border-color: #4a4a4d !important;
+            color: #f5f5f5 !important;
+        }
+        /* LLM 节点 textarea / system prompt / output — 硬编码 slate-950 navy */
+        body.studio-theme-dark .llm-system,
+        html.studio-theme-dark .llm-system,
+        .theme-dark .llm-system,
+        body.studio-theme-dark .llm-output,
+        html.studio-theme-dark .llm-output,
+        .theme-dark .llm-output,
+        body.studio-theme-dark .llm-input,
+        html.studio-theme-dark .llm-input,
+        .theme-dark .llm-input,
+        body.studio-theme-dark textarea[class*="llm-"],
+        html.studio-theme-dark textarea[class*="llm-"],
+        .theme-dark textarea[class*="llm-"] {
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
             color: #f5f5f5 !important;
         }
         body.studio-theme-dark .port,
@@ -718,7 +735,7 @@
             .gate-list { grid-template-columns:repeat(3, minmax(0, 1fr)); }
         }
     </style>
-    <link rel="stylesheet" href="/static/theme.css?v=20260510-studio-pages-blue-dark10">
+    <link rel="stylesheet" href="/static/theme.css?v=20260512c">
 </head>
 <body>
     <div id="shell" class="shell no-canvas">

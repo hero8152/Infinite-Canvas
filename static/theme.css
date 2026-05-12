@@ -50,6 +50,35 @@
   background: #000;
 }
 
+/* Dark mode 反相：legacy CTA 与 design-system .btn-primary 一致变白底黑字 */
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .gen-btn,
+body.studio-theme-dark .send-btn,
+body.studio-theme-dark .primary-btn,
+body.studio-theme-dark .btn-render,
+body.studio-theme-dark .canvas-confirm-btn,
+body.studio-theme-dark .create-confirm,
+body.studio-theme-dark .comfy-run,
+body.studio-theme-dark .llm-run {
+  background: #f5f5f5;
+  color: #0e0e10;
+}
+body.studio-theme-dark .glass-btn:hover,
+body.studio-theme-dark .gen-btn:hover,
+body.studio-theme-dark .send-btn:hover,
+body.studio-theme-dark .primary-btn:hover,
+body.studio-theme-dark .btn-render:hover,
+body.studio-theme-dark .comfy-run:hover,
+body.studio-theme-dark .llm-run:hover {
+  background: #ffffff;
+}
+body.studio-theme-dark .glass-btn .pixel-icon,
+body.studio-theme-dark .gen-btn .pixel-icon,
+body.studio-theme-dark .comfy-run .pixel-icon,
+body.studio-theme-dark .llm-run .pixel-icon {
+  color: var(--primary);
+}
+
 /* 次级按钮 — cream tonal */
 .action-btn {
   display: inline-flex;
