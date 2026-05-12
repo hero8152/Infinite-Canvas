@@ -221,12 +221,169 @@
             border-color: #3a3a3d !important;
             color: #f5f5f5 !important;
         }
-        body.studio-theme-dark .port,
-        html.studio-theme-dark .port,
-        .theme-dark .port {
-            background: #f5f5f5 !important;
-            border-color: #2a2a2d !important;
+        /* v2.1 polish — 端口（节点连接点）：缩小视觉点，保留 hit area；
+           Mistral 风更克制：4px solid 实心方块，hover 才放大变橙 */
+        .port { width: 28px !important; height: 28px !important; }
+        .port.in  { left: -14px !important; }
+        .port.out { right: -14px !important; }
+        .port::after {
+            content: "";
+            position: absolute;
+            left: 10px; top: 10px;
+            width: 8px !important; height: 8px !important;
+            border-radius: 50% !important;
+            border: 1px solid var(--ink) !important;
+            background: var(--stage-bg, #ffffff) !important;
+            box-shadow: none !important;
+            transition: none !important;
         }
+        .port:hover::after {
+            transform: scale(1.35);
+            background: var(--primary) !important;
+            border-color: var(--primary) !important;
+        }
+        body.studio-theme-dark .port::after,
+        html.studio-theme-dark .port::after,
+        .theme-dark .port::after {
+            background: #1c1c1e !important;
+            border-color: #9a9a9a !important;
+        }
+        body.studio-theme-dark .port:hover::after,
+        html.studio-theme-dark .port:hover::after,
+        .theme-dark .port:hover::after {
+            background: var(--primary) !important;
+            border-color: var(--primary) !important;
+        }
+
+        /* v2.1 polish — 节点细节统一 0 圆角，对齐 §12 反例规则 */
+        .resize-handle {
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: transparent !important;
+            border: none !important;
+            color: var(--muted, #94a3b8) !important;
+            opacity: 0 !important;
+            width: 14px !important;
+            height: 14px !important;
+            right: 4px !important;
+            bottom: 4px !important;
+        }
+        .node:hover .resize-handle { opacity: 0.6 !important; }
+        .resize-handle:hover { opacity: 1 !important; color: var(--ink) !important; }
+        body.studio-theme-dark .resize-handle,
+        html.studio-theme-dark .resize-handle,
+        .theme-dark .resize-handle { color: #6a6a6a !important; }
+        body.studio-theme-dark .resize-handle:hover,
+        html.studio-theme-dark .resize-handle:hover,
+        .theme-dark .resize-handle:hover { color: #f5f5f5 !important; }
+
+        /* link-delete 圆角胶囊 → 0，默认隐藏只在 hover 时显示 */
+        .link-delete {
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: var(--ink) !important;
+            color: #ffffff !important;
+            border: none !important;
+            width: 16px !important;
+            height: 16px !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+        .link-delete.visible, .link-delete.hover {
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
+        .link-delete:hover {
+            background: var(--primary-deep, #cc3a05) !important;
+            color: #ffffff !important;
+        }
+        body.studio-theme-dark .link-delete,
+        html.studio-theme-dark .link-delete,
+        .theme-dark .link-delete {
+            background: #f5f5f5 !important;
+            color: #0e0e10 !important;
+        }
+
+        /* LLM 节点 mode toggle / chat bubble — 圆角胶囊清零 */
+        .llm-mode, .llm-mode button,
+        .llm-system, .llm-chat-input, .llm-chat-log, .llm-bubble {
+            border-radius: 0 !important;
+        }
+        body.studio-theme-dark .llm-mode,
+        html.studio-theme-dark .llm-mode,
+        .theme-dark .llm-mode {
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
+        }
+        body.studio-theme-dark .llm-mode button,
+        html.studio-theme-dark .llm-mode button,
+        .theme-dark .llm-mode button {
+            color: #9a9a9a !important;
+            background: transparent !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+        }
+        body.studio-theme-dark .llm-mode button.active,
+        html.studio-theme-dark .llm-mode button.active,
+        .theme-dark .llm-mode button.active {
+            background: #f5f5f5 !important;
+            color: #0e0e10 !important;
+            border-color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .llm-chat-log,
+        html.studio-theme-dark .llm-chat-log,
+        .theme-dark .llm-chat-log {
+            background: #1c1c1e !important;
+            border-color: #3a3a3d !important;
+        }
+        body.studio-theme-dark .llm-bubble.user,
+        html.studio-theme-dark .llm-bubble.user,
+        .theme-dark .llm-bubble.user {
+            background: #f5f5f5 !important;
+            color: #0e0e10 !important;
+        }
+        body.studio-theme-dark .llm-bubble.assistant,
+        html.studio-theme-dark .llm-bubble.assistant,
+        .theme-dark .llm-bubble.assistant {
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
+            color: #f5f5f5 !important;
+        }
+
+        /* select-lite / compact-select 圆角 999px → 0 (light + dark 都生效) */
+        .select-lite, .compact-select, .gen-count-input,
+        .input-item, .input-index,
+        .num-up, .num-down,
+        .gen-num-up, .gen-num-down {
+            border-radius: 0 !important;
+        }
+
+        /* number input 增减按钮（< > 圆角胶囊） */
+        body.studio-theme-dark .gen-num-up,
+        html.studio-theme-dark .gen-num-up,
+        .theme-dark .gen-num-up,
+        body.studio-theme-dark .gen-num-down,
+        html.studio-theme-dark .gen-num-down,
+        .theme-dark .gen-num-down,
+        body.studio-theme-dark .num-up,
+        html.studio-theme-dark .num-up,
+        .theme-dark .num-up,
+        body.studio-theme-dark .num-down,
+        html.studio-theme-dark .num-down,
+        .theme-dark .num-down {
+            background: #2a2a2d !important;
+            color: #f5f5f5 !important;
+            border-color: #3a3a3d !important;
+        }
+
+        /* node 删除按钮（标题栏右上 X）— 弱化 */
+        .node-head button {
+            background: transparent !important;
+            border: none !important;
+            opacity: 0.5;
+            transition: opacity 0.15s;
+        }
+        .node-head:hover button { opacity: 1; }
         /* 节点 title / 数值 */
         body.studio-theme-dark .node-title,
         html.studio-theme-dark .node-title,
