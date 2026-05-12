@@ -34,18 +34,40 @@
         /* canvas-card-meta-dot 是装饰圆点，保留 */
         .canvas-card-meta-dot { border-radius: 50% !important; }
 
-        /* v2.1 dark mode 修正：canvas gate 卡片用中性浅灰，取代旧 slate 藏青蓝 */
+        /* v2.1 dark mode 全局 token 重定向：把 .theme-dark 里所有 slate 系列
+           （--card / --card-solid / --soft / --soft-2 / --line / --line-2 / --panel）
+           全部 redirect 到 §3.3 中性灰，这样所有依赖 var() 的元素自动切换。 */
+        body.studio-theme-dark, html.studio-theme-dark, .theme-dark {
+            --page:        #0e0e10 !important;
+            --grid:        rgba(255, 255, 255, 0.03) !important;
+            --panel:       rgba(28, 28, 30, 0.9) !important;
+            --card:        rgba(42, 42, 45, 0.96) !important;
+            --card-solid:  #2a2a2d !important;
+            --soft:        #3a3a3d !important;
+            --soft-2:      #4a4a4d !important;
+            --line:        #3a3a3d !important;
+            --line-2:      #5a5a5d !important;
+            --text:        #f5f5f5 !important;
+            --muted:       #9a9a9a !important;
+            --faint:       #6a6a6a !important;
+            --shadow:      rgba(0, 0, 0, 0.28) !important;
+            --strong:      #f5f5f5 !important;
+            --strong-text: #0e0e10 !important;
+        }
+
+        /* v2.1 dark mode 修正：canvas gate / 节点全部用中性浅灰，整体亮度提一档，
+           彻底消除 slate-700~950 系列的藏青蓝色调。 */
         body.studio-theme-dark .canvas-item,
         html.studio-theme-dark .canvas-item,
         .theme-dark .canvas-item {
-            background: #2a2a2d !important;
-            border-color: #3a3a3d !important;
+            background: #3a3a3d !important;
+            border-color: #4a4a4d !important;
         }
         body.studio-theme-dark .canvas-item:hover,
         html.studio-theme-dark .canvas-item:hover,
         .theme-dark .canvas-item:hover {
-            background: #353538 !important;
-            border-color: #4a4a4d !important;
+            background: #454548 !important;
+            border-color: #5a5a5d !important;
         }
         body.studio-theme-dark .canvas-item.active,
         html.studio-theme-dark .canvas-item.active,
@@ -78,12 +100,12 @@
             color: #f5f5f5 !important;
             border-color: rgba(255,255,255,0.08) !important;
         }
-        /* gate 外容器：旧版用 slate-900 var(--card) 显示成藏青色，改为 dark-surface 中性灰 */
+        /* gate 外容器：提亮一档 */
         body.studio-theme-dark .gate-panel,
         html.studio-theme-dark .gate-panel,
         .theme-dark .gate-panel {
-            background: #161618 !important;
-            border-color: #2a2a2d !important;
+            background: #1c1c1e !important;
+            border-color: #3a3a3d !important;
         }
         body.studio-theme-dark .canvas-list,
         html.studio-theme-dark .canvas-list,
@@ -94,8 +116,8 @@
         body.studio-theme-dark .gate-list,
         html.studio-theme-dark .gate-list,
         .theme-dark .gate-list {
-            background: #1c1c1e !important;
-            border-color: #2a2a2d !important;
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
         }
         /* gate 顶部 action 按钮 */
         body.studio-theme-dark .gate-icon-btn,
@@ -110,19 +132,88 @@
         .theme-dark .gate-icon-btn:hover {
             background: #353538 !important;
         }
-        /* canvas 工作区节点：slate-900 var(--card) → 中性灰，对齐 §3.3 dark surface 层级 */
+        /* canvas 工作区节点：所有底色 / 子层 / 伪元素整体重写为中性灰，
+           整体亮度提一档，彻底替代 slate-700~950 蓝色调。 */
         body.studio-theme-dark .node,
         html.studio-theme-dark .node,
         .theme-dark .node {
-            background: #1c1c1e !important;
-            border-color: #2a2a2d !important;
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
             color: #f5f5f5 !important;
+        }
+        /* .node::before 是反层 var(--card) navy，必须同步覆盖 */
+        body.studio-theme-dark .node::before,
+        html.studio-theme-dark .node::before,
+        .theme-dark .node::before {
+            background: #2a2a2d !important;
         }
         body.studio-theme-dark .node-head,
         html.studio-theme-dark .node-head,
         .theme-dark .node-head {
-            background: #161618 !important;
-            border-bottom-color: #2a2a2d !important;
+            background: #1c1c1e !important;
+            border-bottom-color: #3a3a3d !important;
+            color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .node-body,
+        html.studio-theme-dark .node-body,
+        .theme-dark .node-body {
+            background: transparent !important;
+            color: #f5f5f5 !important;
+        }
+        /* output 节点的图片网格容器 */
+        body.studio-theme-dark .output-grid,
+        html.studio-theme-dark .output-grid,
+        .theme-dark .output-grid,
+        body.studio-theme-dark .output-empty,
+        html.studio-theme-dark .output-empty,
+        .theme-dark .output-empty {
+            background: #1c1c1e !important;
+            border-color: #3a3a3d !important;
+            color: #9a9a9a !important;
+        }
+        /* 参考图输入 chip / 节点端口 */
+        body.studio-theme-dark .input-item,
+        html.studio-theme-dark .input-item,
+        .theme-dark .input-item {
+            background: #3a3a3d !important;
+            border-color: #4a4a4d !important;
+        }
+        body.studio-theme-dark .input-index,
+        html.studio-theme-dark .input-index,
+        .theme-dark .input-index {
+            background: #2a2a2d !important;
+            color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .input-label,
+        html.studio-theme-dark .input-label,
+        .theme-dark .input-label {
+            color: #f5f5f5 !important;
+            background: transparent !important;
+        }
+        /* 节点内部 select / number input — navy slate-900 → 中性灰 */
+        body.studio-theme-dark .select-lite,
+        html.studio-theme-dark .select-lite,
+        .theme-dark .select-lite,
+        body.studio-theme-dark .gen-count-input,
+        html.studio-theme-dark .gen-count-input,
+        .theme-dark .gen-count-input,
+        body.studio-theme-dark .compact-select,
+        html.studio-theme-dark .compact-select,
+        .theme-dark .compact-select {
+            background: #3a3a3d !important;
+            border-color: #4a4a4d !important;
+            color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .port,
+        html.studio-theme-dark .port,
+        .theme-dark .port {
+            background: #f5f5f5 !important;
+            border-color: #2a2a2d !important;
+        }
+        /* 节点 title / 数值 */
+        body.studio-theme-dark .node-title,
+        html.studio-theme-dark .node-title,
+        .theme-dark .node-title {
             color: #f5f5f5 !important;
         }
         /* 节点内部子组件（输入框 / 设置块） */
