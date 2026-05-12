@@ -46,7 +46,7 @@
        从外层 host 文档继承过来，效果就是图标渲染不出。我们把整个 sprite 同
        步抓回来，inline 注入到 body 起始位置，引用方就能用同文档 <use href="#id">。
     */
-    const SPRITE_URL = '/static/icons/pixel.svg?v=21';
+    const SPRITE_URL = '/static/icons/pixel.svg?v=22';
     let SPRITE_HTML = null;
 
     function injectSprite() {
@@ -108,15 +108,15 @@
         'grip-vertical':      { id: 'minus' },
         'image':              { id: 'nav-zimage' },
         'image-plus':         { id: 'plus' },
-        'info':               { id: 'person' },
         'layers':             { id: 'nav-canvas' },
         'layout-grid':        { id: 'nav-canvas' },
         'message-square-text':{ id: 'nav-chat' },
         'move-horizontal':    { id: 'chevron-right' },
         'pencil':             { id: 'nav-klein' },
         'play':               { id: 'chevron-right' },
-        'refresh-cw':         { id: 'chevron-down' },
-        'rotate-ccw':         { id: 'chevron-down', flip: true },
+        'refresh-cw':         { id: 'refresh' },
+        'rotate-ccw':         { id: 'refresh', flip: true },
+        'info':               { id: 'info' },
         'text-cursor-input':  { id: 'nav-chat' },
         'text':               { id: 'nav-chat' },
         'wand-sparkles':      { id: 'flame' },
@@ -137,19 +137,17 @@
             if (el.dataset.pixelReplaced === '1') return;
             const name = el.getAttribute('data-lucide');
             const map = lucideToPixel(name);
-            const flip = map.flip ? ' style="transform:scaleX(-1)"' : '';
-            // 沿用原 class + 添加 pixel-icon 类
+            // 沿用原 class（剥掉 lucide-* 残留）+ 添加 pixel-icon 类
             const className = (el.className || '').toString().replace(/lucide[-\w]*/g, '').trim();
             const sizeMatch = (el.getAttribute('style') || '').match(/width:\s*(\d+)px/);
-            const widthAttr = sizeMatch ? ` style="width:${sizeMatch[1]}px;height:${sizeMatch[1]}px"` : '';
-            const wrap = document.createElement('svg');
-            wrap.setAttribute('class', `pixel-icon ${className}`.trim());
-            wrap.setAttribute('aria-hidden', 'true');
-            if (flip) wrap.setAttribute('style', 'transform:scaleX(-1)');
-            if (sizeMatch) wrap.style.width = wrap.style.height = `${sizeMatch[1]}px`;
-            wrap.innerHTML = `<use href="#${map.id}"/>`;
-            wrap.dataset.pixelReplaced = '1';
-            el.replaceWith(wrap);
+            const sizeAttr = sizeMatch ? ` width="${sizeMatch[1]}" height="${sizeMatch[1]}"` : '';
+            const styleAttr = map.flip ? ' style="transform:scaleX(-1)"' : '';
+            // 关键：用 innerHTML 让 HTML5 parser 把 <svg> 放到 SVG 命名空间下，
+            // 否则 document.createElement('svg') 会产生 HTML 命名空间的伪 svg，<use> 不渲染。
+            const holder = document.createElement('div');
+            holder.innerHTML = `<svg class="pixel-icon ${className}" aria-hidden="true"${sizeAttr}${styleAttr} data-pixel-replaced="1"><use href="#${map.id}"></use></svg>`;
+            const svg = holder.firstElementChild;
+            if (svg) el.replaceWith(svg);
         });
     }
 

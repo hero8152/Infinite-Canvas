@@ -149,6 +149,29 @@
     <rect x="3" y="10" width="6" height="1" fill="currentColor"/>
   </symbol>
 
+  <!-- refresh: 12×12 旋转刷新（圆角箭头形） -->
+  <symbol id="refresh" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="3" y="2" width="6" height="1" fill="currentColor"/>
+    <rect x="2" y="3" width="1" height="1" fill="currentColor"/>
+    <rect x="9" y="3" width="1" height="1" fill="currentColor"/>
+    <rect x="1" y="4" width="1" height="4" fill="currentColor"/>
+    <rect x="10" y="4" width="1" height="4" fill="currentColor"/>
+    <rect x="2" y="8" width="1" height="1" fill="currentColor"/>
+    <rect x="9" y="8" width="1" height="1" fill="currentColor"/>
+    <rect x="3" y="9" width="6" height="1" fill="currentColor"/>
+    <!-- 右下小箭头表示旋转方向 -->
+    <rect x="9" y="6" width="2" height="1" fill="currentColor"/>
+    <rect x="10" y="7" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- info: 12×12 信息（i 字形） -->
+  <symbol id="info" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="5" y="1" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="4" width="3" height="1" fill="currentColor"/>
+    <rect x="5" y="4" width="2" height="6" fill="currentColor"/>
+    <rect x="3" y="10" width="6" height="1" fill="currentColor"/>
+  </symbol>
+
   <!-- copy: 12×12 复制 -->
   <symbol id="copy" viewBox="0 0 12 12" shape-rendering="crispEdges">
     <rect x="2" y="2" width="6" height="1" fill="currentColor"/>
