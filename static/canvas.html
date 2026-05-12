@@ -33,6 +33,140 @@
         .check-dot { border-radius: 2px !important; }
         /* canvas-card-meta-dot 是装饰圆点，保留 */
         .canvas-card-meta-dot { border-radius: 50% !important; }
+
+        /* v2.1 dark mode 修正：canvas gate 卡片用中性浅灰，取代旧 slate 藏青蓝 */
+        body.studio-theme-dark .canvas-item,
+        html.studio-theme-dark .canvas-item,
+        .theme-dark .canvas-item {
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
+        }
+        body.studio-theme-dark .canvas-item:hover,
+        html.studio-theme-dark .canvas-item:hover,
+        .theme-dark .canvas-item:hover {
+            background: #353538 !important;
+            border-color: #4a4a4d !important;
+        }
+        body.studio-theme-dark .canvas-item.active,
+        html.studio-theme-dark .canvas-item.active,
+        .theme-dark .canvas-item.active {
+            background: #f5f5f5 !important;
+            border-color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .canvas-item.active .canvas-card-title,
+        html.studio-theme-dark .canvas-item.active .canvas-card-title,
+        .theme-dark .canvas-item.active .canvas-card-title { color: #0e0e10 !important; }
+        body.studio-theme-dark .canvas-card-title,
+        html.studio-theme-dark .canvas-card-title,
+        .theme-dark .canvas-card-title { color: #f5f5f5 !important; }
+        body.studio-theme-dark .canvas-card-time,
+        html.studio-theme-dark .canvas-card-time,
+        .theme-dark .canvas-card-time { color: #9a9a9a !important; }
+        body.studio-theme-dark .canvas-card-meta,
+        html.studio-theme-dark .canvas-card-meta,
+        .theme-dark .canvas-card-meta {
+            background: rgba(255,255,255,0.05) !important;
+            border-color: rgba(255,255,255,0.08) !important;
+        }
+        body.studio-theme-dark .canvas-card-meta-dot,
+        html.studio-theme-dark .canvas-card-meta-dot,
+        .theme-dark .canvas-card-meta-dot { background: #6a6a6a !important; }
+        body.studio-theme-dark .canvas-preview-mark,
+        html.studio-theme-dark .canvas-preview-mark,
+        .theme-dark .canvas-preview-mark {
+            background: rgba(255,255,255,0.05) !important;
+            color: #f5f5f5 !important;
+            border-color: rgba(255,255,255,0.08) !important;
+        }
+        /* gate 外容器：旧版用 slate-900 var(--card) 显示成藏青色，改为 dark-surface 中性灰 */
+        body.studio-theme-dark .gate-panel,
+        html.studio-theme-dark .gate-panel,
+        .theme-dark .gate-panel {
+            background: #161618 !important;
+            border-color: #2a2a2d !important;
+        }
+        body.studio-theme-dark .canvas-list,
+        html.studio-theme-dark .canvas-list,
+        .theme-dark .canvas-list {
+            background: transparent !important;
+        }
+        /* gate 内里 list 容器（包卡片列表的那个深色 panel） */
+        body.studio-theme-dark .gate-list,
+        html.studio-theme-dark .gate-list,
+        .theme-dark .gate-list {
+            background: #1c1c1e !important;
+            border-color: #2a2a2d !important;
+        }
+        /* gate 顶部 action 按钮 */
+        body.studio-theme-dark .gate-icon-btn,
+        html.studio-theme-dark .gate-icon-btn,
+        .theme-dark .gate-icon-btn {
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
+            color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .gate-icon-btn:hover,
+        html.studio-theme-dark .gate-icon-btn:hover,
+        .theme-dark .gate-icon-btn:hover {
+            background: #353538 !important;
+        }
+        /* canvas 工作区节点：slate-900 var(--card) → 中性灰，对齐 §3.3 dark surface 层级 */
+        body.studio-theme-dark .node,
+        html.studio-theme-dark .node,
+        .theme-dark .node {
+            background: #1c1c1e !important;
+            border-color: #2a2a2d !important;
+            color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .node-head,
+        html.studio-theme-dark .node-head,
+        .theme-dark .node-head {
+            background: #161618 !important;
+            border-bottom-color: #2a2a2d !important;
+            color: #f5f5f5 !important;
+        }
+        /* 节点内部子组件（输入框 / 设置块） */
+        body.studio-theme-dark .prompt-node textarea,
+        html.studio-theme-dark .prompt-node textarea,
+        .theme-dark .prompt-node textarea,
+        body.studio-theme-dark .setting-input,
+        html.studio-theme-dark .setting-input,
+        .theme-dark .setting-input {
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
+            color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .gen-settings,
+        html.studio-theme-dark .gen-settings,
+        .theme-dark .gen-settings {
+            background: #161618 !important;
+            border-color: #2a2a2d !important;
+        }
+        body.studio-theme-dark .setting-check,
+        html.studio-theme-dark .setting-check,
+        .theme-dark .setting-check,
+        body.studio-theme-dark .mode-tabs,
+        html.studio-theme-dark .mode-tabs,
+        .theme-dark .mode-tabs,
+        body.studio-theme-dark .ms-model-tabs,
+        html.studio-theme-dark .ms-model-tabs,
+        .theme-dark .ms-model-tabs {
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
+            color: #f5f5f5 !important;
+        }
+        body.studio-theme-dark .blank-image,
+        html.studio-theme-dark .blank-image,
+        .theme-dark .blank-image {
+            background: #2a2a2d !important;
+            border-color: #3a3a3d !important;
+            color: #9a9a9a !important;
+        }
+        body.studio-theme-dark .image-node img,
+        html.studio-theme-dark .image-node img,
+        .theme-dark .image-node img {
+            background: #2a2a2d !important;
+        }
     </style>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&display=swap');
