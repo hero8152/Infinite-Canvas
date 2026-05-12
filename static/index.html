@@ -148,11 +148,16 @@
             align-items: center;
             gap: 8px;
             padding: 6px 10px;
-            background: var(--ink);
-            color: #fff;
+            background: #0f0f0f;     /* 硬编码：dark mode token 翻转时不变白 */
+            color: #ffffff;
             font-family: var(--font-mono);
             font-size: 11px;
             border-radius: 0;
+        }
+        body.studio-theme-dark .nano-monitor {
+            background: #161618;
+            color: #ffffff;
+            border: 1px solid #2a2a2d;
         }
         .sidebar:not(:hover) .nano-monitor {
             justify-content: center;
