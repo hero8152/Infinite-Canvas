@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-**Infinite-Canvas**：基于 FastAPI 的单进程 AI 图像/对话工作台，前端通过 `static/index.html` 的左侧导航 + iframe 集成多个独立功能页（文生图 / 细节增强 / 图片编辑 / 角度控制 / 在线生图 / GPT 对话 / 无限画布）。后端支持三类生成后端：本地 ComfyUI（多实例负载均衡）、Comfly（OpenAI 兼容代理）、ModelScope。
+**Feebee Studios**：基于 FastAPI 的单进程 AI 图像/对话工作台，前端通过 `static/index.html` 的左侧导航 + iframe 集成多个独立功能页（文生图 / 细节增强 / 图片编辑 / 角度控制 / 在线生图 / GPT 对话 / 无限画布）。后端支持三类生成后端：本地 ComfyUI（多实例负载均衡）、Comfly（OpenAI 兼容代理）、ModelScope。
 
 ## 运行与环境
 
@@ -15,10 +15,11 @@ run.bat            # 等价于 python main.py，自动打开 http://127.0.0.1:30
 
 # 跨平台
 pip install -r requirements.txt
-python main.py     # 监听 0.0.0.0:3000
+python main.py     # 默认监听 127.0.0.1:3000
+python scripts/guardrails.py
 ```
 
-仓库没有 lint / 测试脚本，也没有打包流程；改动后通过浏览器手动验证各 iframe 页面。
+仓库没有打包流程；`scripts/guardrails.py` 是最低限度自动化护栏（编译、workflow JSON、安全、token flow、设计反例扫描）。改动后仍需通过浏览器手动验证相关 iframe 页面。
 
 ### 配置文件 `API/.env`（**手动创建，未入库**）
 
@@ -36,6 +37,9 @@ SYSTEM_PROMPT=...
 MAX_HISTORY_MESSAGES=30
 REQUEST_TIMEOUT=120
 IMAGE_POLL_INTERVAL=2
+APP_HOST=127.0.0.1
+APP_PORT=3000
+CORS_ALLOW_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
 ```
 
 `model_list()` 会把 `CHAT_MODELS` / `IMAGE_MODELS` 解析为前端 `/api/models` 暴露的下拉列表；未配置则回落到 `CHAT_MODEL` / `IMAGE_MODEL` 单值加默认补全。
@@ -74,7 +78,7 @@ IMAGE_POLL_INTERVAL=2
 ```
 output/                          # 生成图片落盘，URL 挂载在 /output
 history.json                     # 全局生成历史（图片元数据 + 参数）
-global_config.json               # 全局 token 等配置，/api/config/token 读写
+global_config.json               # 旧版 ModelScope token 兼容回退；不要通过 API 明文下发
 data/conversations/{user}/{id}.json   # 每用户聊天记录
 data/canvases/{id}.json               # 画布数据，含软删除标志（trash 保留 30 天）
 API/.env                         # 运行配置（手动创建，gitignore）
@@ -92,12 +96,14 @@ API/.env                         # 运行配置（手动创建，gitignore）
 
 `/ws/stats` 用于：在线人数广播 + 新生成图实时推送给所有打开的 iframe（画布等会订阅 `new_image` 自动落图）。
 
+任务状态统一由 `task_status.py` 定义：`queued` / `running` / `succeeded` / `failed` / `timeout`。ModelScope 的 `PENDING` / `RUNNING` / `SUCCEED` / `FAILED` 会先归一化，再通过 API 响应和 WebSocket payload 附带 `status` / `raw_status`。旧前端仍可接收 `cloud_status`，但新增代码应按统一状态字段判断。
+
 ## 路由速查（main.py）
 
 | 路径 | 用途 |
 |------|------|
 | `GET /` | 返回 `static/index.html` |
-| `GET /api/config` `/api/models` `/api/config/token` | 前端启动时读模型列表 / token |
+| `GET /api/config` `/api/models` `/api/config/token` | 前端启动时读模型列表 / token 配置状态（不返回密钥） |
 | `POST /api/upload` `/api/ai/upload` | 用户上传输入图 / AI 参考图 |
 | `POST /api/generate` | **本地 ComfyUI 通用入口**（多实例调度 + 工作流参数覆盖） |
 | `POST /generate` | ModelScope Z-Image-Turbo 异步任务 |

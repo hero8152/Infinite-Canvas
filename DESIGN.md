@@ -2,7 +2,7 @@
 
 **Version**: 2.0 — Mistral-faithful pass
 **Reference**: <https://mistral.ai/>
-**Description**: 一套贴着 Mistral 视觉语言重做的设计系统。用于 Infinite-Canvas 工作台。
+**Description**: 一套贴着 Mistral 视觉语言重做的设计系统。用于 Feebee Studios 工作台。
 关键基调：**编辑设计风的"网格纸 + 像素艺术 + 硬方角 + 日落色"**。
 反例：浮夸的圆角、磨砂玻璃滥用、迪斯科色阶、Lucide/Heroicons 通用线性图标。
 
@@ -119,7 +119,7 @@ dark 卡上的高光仅允许 `inset 0 1px 0 rgba(255,255,255,.04)`。**不允�
 | `pixel-cross` `✕` | 关闭 / 错误 | 2 条对角像素 |
 | `pixel-flame` 🔥 | "Your Model" 训练标记，参考图 4 | 3 高×3 宽 |
 | `pixel-diamond` 💎 | 用户产物 | 菱形 5×5 |
-| `pixel-M` | Mistral 风品牌字（项目内换成 **"IC"** 或 logo 字像素化） |
+| `pixel-M` | Mistral 风品牌字（项目内换成 **"FS"** 或 logo 字像素化） |
 | `pixel-dot-pulse` | 在线状态 / loading | 单像素脉冲 3 帧 |
 | `pixel-person` | "Human-in-the-loop" 徽章，参考图 3 | 4×6 简笔人形 |
 
@@ -147,6 +147,7 @@ dark 卡上的高光仅允许 `inset 0 1px 0 rgba(255,255,255,.04)`。**不允�
 - 默认在 `body`（或 shell 容器）上铺 `background-image: linear-gradient(...)` 双向网格。
 - 主格：**80px × 80px**，线宽 1px，颜色 `rgba(230, 213, 168, 0.55)`（即 `--border` 35% 透明）。
 - 子格：可选 16px × 16px，线宽 1px，颜色 `rgba(230, 213, 168, 0.22)`（仅 design canvas 模式开启）。
+- 节点式工作画布（如 `canvas.html`）应使用更安静的主格：`rgba(230, 213, 168, 0.22)`。网格是空间参照，不能和节点卡片外框竞争视觉层级。
 
 ```css
 .shell {
@@ -448,12 +449,12 @@ iframe / 主画布容器。`#ffffff` 底 + `1px solid var(--border)` 边框，�
 - shell 保持 cream 网格纸：**关闭 Excalidraw 自带虚线网格**，让 §5 的 80px 主格直接作为画布底。
 - 顶部工具栏：§8.3 Dark Glass Card 横条，工具按钮 32×32 像素方块，hover 底变 `--dark-bg`。
 - 右侧浮动属性面板：§8.3 dark glass，floating right，宽 280px，**0 圆角**。
-- 画布右下角角标：48×48 像素品牌字（"IC" 或 "∞"），`--primary` 橙色，类似图 2 的"M" 标志。
+- 画布右下角角标：48×48 像素品牌字（"FS"），`--primary` 橙色，类似图 2 的"M" 标志。
 - 画布回收站 modal：§8.3 dark glass + §6 段标签 `Trash (N)` + §15.6 checkbox 多选 + §7.1/7.2 按钮组。
 
 ### 17.5 `login.html`
 - §11 全屏 cream 网格纸。
-- 居中 hero：`text-hero` 96-128px `Infinite-Canvas.` + 副标 24px `--muted` `The next chapter of generative AI is yours.`（致敬图 1 的 hero 句式）。
+- 居中 hero：`text-hero` 96-128px `Feebee Studios.` + 副标 24px `--muted` `The next chapter of generative AI is yours.`（致敬图 1 的 hero 句式）。
 - 表单：单个 §15.2 token input + §7.1 黑 CTA `Continue`。
 - 下方 §7.3 下划线文字链 `Need a token?`。
 - 底部 §11 sunset stripe。

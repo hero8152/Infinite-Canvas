@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Infinite-Canvas pixel icon sprite — DESIGN.md §4 像素艺术图标系统
+  Feebee Studios pixel icon sprite — DESIGN.md §4 像素艺术图标系统
   规则:
     - 所有 glyph 用 <symbol> 包裹，外部 <use href="#id"/> 引用
     - shape-rendering="crispEdges" + 整数像素 <rect>
-    - fill="currentColor"，颜色由调用方 CSS 决定（一般是 var(--primary)）
+    - fill="currentColor"，颜色由调用方 CSS 决定（一般是 primary token）
     - 命名: 主语义 glyph + nav-* 前缀的 sidebar 导航图标
 -->
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
@@ -116,6 +116,16 @@
     <rect x="1" y="9" width="10" height="2" fill="currentColor"/>
   </symbol>
 
+  <!-- crop: 12×12 裁切框 -->
+  <symbol id="crop" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="2" y="1" width="1" height="8" fill="currentColor"/>
+    <rect x="1" y="2" width="7" height="1" fill="currentColor"/>
+    <rect x="4" y="3" width="1" height="8" fill="currentColor"/>
+    <rect x="5" y="8" width="6" height="1" fill="currentColor"/>
+    <rect x="8" y="4" width="1" height="4" fill="currentColor"/>
+    <rect x="4" y="3" width="4" height="1" fill="currentColor"/>
+  </symbol>
+
   <!-- plus: 12×12 加号 -->
   <symbol id="plus" viewBox="0 0 12 12" shape-rendering="crispEdges">
     <rect x="5" y="2" width="2" height="8" fill="currentColor"/>
@@ -172,6 +182,26 @@
     <rect x="3" y="10" width="6" height="1" fill="currentColor"/>
   </symbol>
 
+  <!-- key: 12×12 API key -->
+  <symbol id="key" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="1" y="4" width="1" height="4" fill="currentColor"/>
+    <rect x="2" y="3" width="4" height="1" fill="currentColor"/>
+    <rect x="2" y="8" width="4" height="1" fill="currentColor"/>
+    <rect x="5" y="5" width="6" height="2" fill="currentColor"/>
+    <rect x="9" y="7" width="1" height="2" fill="currentColor"/>
+    <rect x="7" y="7" width="1" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- settings: 12×12 sliders -->
+  <symbol id="settings" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="1" y="2" width="10" height="1" fill="currentColor"/>
+    <rect x="3" y="1" width="2" height="3" fill="currentColor"/>
+    <rect x="1" y="6" width="10" height="1" fill="currentColor"/>
+    <rect x="7" y="5" width="2" height="3" fill="currentColor"/>
+    <rect x="1" y="10" width="10" height="1" fill="currentColor"/>
+    <rect x="5" y="9" width="2" height="3" fill="currentColor"/>
+  </symbol>
+
   <!-- copy: 12×12 复制 -->
   <symbol id="copy" viewBox="0 0 12 12" shape-rendering="crispEdges">
     <rect x="2" y="2" width="6" height="1" fill="currentColor"/>
@@ -197,19 +227,19 @@
   </symbol>
 
   <!-- ====================================================================
-       项目品牌字 — "IC" 像素 logo（替换 Mistral 的 "M"）
+       项目品牌字 — "FS" 像素 logo（替换 Mistral 的 "M"）
        ==================================================================== -->
   <symbol id="ic-brand" viewBox="0 0 48 48" shape-rendering="crispEdges">
-    <!-- I -->
-    <rect x="6"  y="8"  width="14" height="4" fill="currentColor"/>
-    <rect x="10" y="12" width="6"  height="24" fill="currentColor"/>
-    <rect x="6"  y="36" width="14" height="4" fill="currentColor"/>
-    <!-- C -->
+    <!-- F -->
+    <rect x="6"  y="8"  width="16" height="4" fill="currentColor"/>
+    <rect x="6"  y="12" width="6"  height="28" fill="currentColor"/>
+    <rect x="6"  y="22" width="14" height="4" fill="currentColor"/>
+    <!-- S -->
     <rect x="28" y="8"  width="14" height="4" fill="currentColor"/>
-    <rect x="24" y="12" width="4"  height="24" fill="currentColor"/>
-    <rect x="28" y="36" width="14" height="4" fill="currentColor"/>
-    <rect x="40" y="12" width="2"  height="4" fill="currentColor"/>
-    <rect x="40" y="32" width="2"  height="4" fill="currentColor"/>
+    <rect x="24" y="12" width="4"  height="12" fill="currentColor"/>
+    <rect x="28" y="22" width="12" height="4" fill="currentColor"/>
+    <rect x="40" y="26" width="4"  height="10" fill="currentColor"/>
+    <rect x="26" y="36" width="16" height="4" fill="currentColor"/>
   </symbol>
 
   <!-- ====================================================================
@@ -308,6 +338,18 @@
     <rect x="9" y="2" width="5" height="5" fill="currentColor"/>
     <rect x="2" y="9" width="5" height="5" fill="currentColor"/>
     <rect x="9" y="9" width="5" height="5" fill="currentColor"/>
+  </symbol>
+
+  <!-- nav-batch: 批量试穿 — 2×2 输入矩阵 + 输出点 -->
+  <symbol id="nav-batch" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="2" width="4" height="4" fill="currentColor"/>
+    <rect x="8" y="2" width="4" height="4" fill="currentColor"/>
+    <rect x="2" y="8" width="4" height="4" fill="currentColor"/>
+    <rect x="8" y="8" width="4" height="4" fill="currentColor"/>
+    <rect x="13" y="5" width="1" height="1" fill="currentColor"/>
+    <rect x="14" y="6" width="1" height="4" fill="currentColor"/>
+    <rect x="13" y="10" width="1" height="1" fill="currentColor"/>
+    <rect x="12" y="13" width="3" height="1" fill="currentColor"/>
   </symbol>
 
   <!-- 主题切换：太阳 / 月亮 -->

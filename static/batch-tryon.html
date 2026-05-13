@@ -1,0 +1,3413 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Batch try-on · Feebee Studios</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512g"></script>
+    <style>
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: var(--font-sans);
+        }
+
+        [hidden] {
+            display: none !important;
+        }
+
+        button,
+        input,
+        textarea,
+        select {
+            font: inherit;
+        }
+
+        .pixel-icon {
+            flex: 0 0 auto;
+        }
+
+        .page-shell {
+            height: 100vh;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.42) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.42) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+
+        body.studio-theme-dark .page-shell {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        }
+
+        .topbar {
+            flex: 0 0 auto;
+            min-height: 76px;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.92);
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 18px;
+            position: sticky;
+            top: 0;
+            z-index: 12;
+        }
+
+        body.studio-theme-dark .topbar {
+            background: rgba(14, 14, 16, 0.92);
+            border-bottom-color: var(--dark-border);
+        }
+
+        .tabs {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .tab-btn,
+        .icon-btn,
+        .plain-btn,
+        .select-control {
+            height: 42px;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            color: var(--ink);
+            border-radius: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 0 16px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .tab-btn {
+            min-width: 116px;
+            font-weight: 600;
+        }
+
+        .tab-btn.is-active {
+            background: #0f0f0f;
+            border-color: #0f0f0f;
+            color: #ffffff;
+        }
+
+        .tab-btn.is-active .pixel-icon,
+        .btn-primary .pixel-icon {
+            color: var(--primary);
+        }
+
+        .icon-btn {
+            width: 42px;
+            padding: 0;
+        }
+
+        .plain-btn {
+            background: var(--bg-2);
+        }
+
+        .toolbar-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            min-width: 0;
+            flex-wrap: wrap;
+        }
+
+        .select-control {
+            min-width: 0;
+            width: min(390px, 100%);
+            max-width: 390px;
+            justify-content: flex-start;
+            color: var(--ink);
+        }
+
+        body.studio-theme-dark .tab-btn,
+        body.studio-theme-dark .icon-btn,
+        body.studio-theme-dark .plain-btn,
+        body.studio-theme-dark .select-control {
+            background: var(--dark-elev);
+            color: var(--dark-text);
+            border-color: var(--dark-border);
+        }
+
+        body.studio-theme-dark .tab-btn.is-active {
+            background: #f5f5f5;
+            color: #0e0e10;
+            border-color: #f5f5f5;
+        }
+
+        .view {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: auto;
+            overflow-x: hidden;
+            padding: 26px 28px 0;
+        }
+
+        .view-inner {
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            padding-bottom: 28px;
+        }
+
+        .workspace-overview,
+        .active-batch-panel {
+            margin-bottom: 22px;
+        }
+
+        .workspace-overview {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .overview-card,
+        .active-batch-panel,
+        .active-group-card,
+        .toolbar-card,
+        .summary-card,
+        .settings-meta,
+        .detail-block {
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        body.studio-theme-dark .overview-card,
+        body.studio-theme-dark .active-batch-panel,
+        body.studio-theme-dark .active-group-card,
+        body.studio-theme-dark .toolbar-card,
+        body.studio-theme-dark .summary-card,
+        body.studio-theme-dark .settings-meta,
+        body.studio-theme-dark .detail-block {
+            border-color: var(--dark-border);
+            background: rgba(28, 28, 30, 0.94);
+        }
+
+        .overview-card {
+            padding: 14px 16px;
+            min-height: 86px;
+            display: grid;
+            align-content: space-between;
+            gap: 8px;
+        }
+
+        .overview-value {
+            font-family: var(--font-mono);
+            font-size: 22px;
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        body.studio-theme-dark .overview-value {
+            color: var(--dark-text);
+        }
+
+        .overview-sub {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .overview-sub.is-alert {
+            color: var(--primary);
+        }
+
+        .workspace-head,
+        .history-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 22px;
+        }
+
+        .title-block h1 {
+            margin: 0;
+            font-size: 28px;
+            line-height: 1.08;
+            font-weight: 600;
+            letter-spacing: 0;
+        }
+
+        .title-block p {
+            margin: 6px 0 0;
+            font-family: var(--font-mono);
+            color: var(--muted);
+            font-size: 12px;
+            letter-spacing: 0.04em;
+        }
+
+        .group-list {
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+        }
+
+        .group-card,
+        .task-monitor,
+        .history-card,
+        .gallery-card,
+        .settings-panel {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid var(--border);
+            border-radius: 0;
+        }
+
+        body.studio-theme-dark .group-card,
+        body.studio-theme-dark .task-monitor,
+        body.studio-theme-dark .history-card,
+        body.studio-theme-dark .gallery-card,
+        body.studio-theme-dark .settings-panel {
+            background: rgba(28, 28, 30, 0.94);
+            border-color: var(--dark-border);
+        }
+
+        .group-card.is-collapsed .group-body {
+            display: none;
+        }
+
+        .group-header {
+            min-height: 70px;
+            display: grid;
+            grid-template-columns: auto minmax(180px, 1fr) auto;
+            gap: 18px;
+            align-items: center;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        body.studio-theme-dark .group-header {
+            border-bottom-color: var(--dark-border);
+        }
+
+        .group-title {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            min-width: 0;
+        }
+
+        .group-title-copy {
+            min-width: 0;
+            display: grid;
+            gap: 8px;
+        }
+
+        .group-name {
+            width: min(420px, 100%);
+            height: 42px;
+            border: 0;
+            border-left: 3px solid #0f0f0f;
+            background: transparent;
+            color: var(--ink);
+            padding: 0 0 0 16px;
+            font-size: 20px;
+            font-weight: 600;
+            outline: none;
+        }
+
+        body.studio-theme-dark .group-name {
+            color: var(--dark-text);
+            border-left-color: #f5f5f5;
+        }
+
+        .group-tools {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .group-status {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            border-left: 1px solid var(--border);
+            padding-left: 14px;
+            margin-left: 6px;
+        }
+
+        body.studio-theme-dark .group-status {
+            border-left-color: var(--dark-border);
+        }
+
+        .mini-stat {
+            min-height: 26px;
+            padding: 0 8px;
+            border: 1px solid var(--border);
+            background: var(--bg-2);
+            color: var(--muted);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .mini-stat strong {
+            color: var(--ink);
+            font-weight: 600;
+        }
+
+        .mini-stat.is-primary {
+            border-color: #0f0f0f;
+            background: var(--stage-bg);
+        }
+
+        .mini-stat.is-alert {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        body.studio-theme-dark .mini-stat {
+            border-color: var(--dark-border);
+            background: var(--dark-surface);
+        }
+
+        body.studio-theme-dark .mini-stat strong {
+            color: var(--dark-text);
+        }
+
+        .group-body {
+            padding: 24px 28px 30px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+            gap: 28px;
+        }
+
+        .lane-divider {
+            width: 1px;
+            align-self: stretch;
+            background: #0f0f0f;
+            min-height: 220px;
+        }
+
+        body.studio-theme-dark .lane-divider {
+            background: #f5f5f5;
+        }
+
+        .image-lane {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .lane-body {
+            display: grid;
+            gap: 14px;
+        }
+
+        .lane-body.is-populated {
+            grid-template-columns: minmax(180px, 228px) minmax(0, 1fr);
+            align-items: start;
+        }
+
+        .lane-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .label {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.2;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .dropzone {
+            min-height: 190px;
+            border: 1px dashed var(--border-2);
+            background: rgba(255, 244, 214, 0.82);
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            cursor: pointer;
+            padding: 18px;
+        }
+
+        .dropzone.is-compact {
+            min-height: 132px;
+            padding: 14px;
+            align-content: center;
+        }
+
+        .dropzone.is-over {
+            border-style: solid;
+            border-color: #0f0f0f;
+            background: var(--stage-bg);
+            color: var(--ink);
+        }
+
+        body.studio-theme-dark .dropzone {
+            background: rgba(22, 22, 24, 0.84);
+            border-color: var(--dark-border);
+        }
+
+        body.studio-theme-dark .dropzone.is-over {
+            border-color: #f5f5f5;
+            color: var(--dark-text);
+        }
+
+        .drop-inner {
+            display: grid;
+            justify-items: center;
+            gap: 12px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .thumb-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
+            gap: 10px;
+        }
+
+        .thumb {
+            position: relative;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            aspect-ratio: 1 / 1;
+            overflow: hidden;
+        }
+
+        body.studio-theme-dark .thumb {
+            border-color: var(--dark-border);
+            background: var(--dark-surface);
+        }
+
+        .thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .thumb-open {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border: 0;
+            background: transparent;
+            padding: 0;
+            cursor: pointer;
+        }
+
+        .thumb-remove {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 24px;
+            height: 24px;
+            border: 0;
+            background: #0f0f0f;
+            color: #ffffff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .thumb-crop {
+            position: absolute;
+            left: 4px;
+            bottom: 4px;
+            min-width: 28px;
+            height: 24px;
+            border: 0;
+            background: rgba(15, 15, 15, 0.94);
+            color: #ffffff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0 6px;
+        }
+
+        .thumb-crop .pixel-icon,
+        .thumb-remove .pixel-icon {
+            pointer-events: none;
+        }
+
+        .thumb-note {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .generation-bar {
+            position: sticky;
+            bottom: 0;
+            z-index: 8;
+            margin-top: 26px;
+            border: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.96);
+            display: grid;
+            grid-template-columns: minmax(220px, 1.1fr) minmax(360px, 0.95fr) minmax(260px, 0.9fr);
+            gap: 22px;
+            align-items: center;
+            padding: 16px;
+            min-width: 0;
+        }
+
+        body.studio-theme-dark .generation-bar {
+            background: rgba(14, 14, 16, 0.96);
+            border-color: var(--dark-border);
+        }
+
+        .start-btn {
+            min-height: 58px;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .mode-panel {
+            display: grid;
+            gap: 8px;
+            min-width: 360px;
+            min-width: 0;
+        }
+
+        .mode-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(74px, 1fr));
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+        }
+
+        .mode-btn {
+            min-height: 42px;
+            border: 0;
+            border-right: 1px solid var(--border);
+            background: transparent;
+            color: var(--ink);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .mode-btn:last-child {
+            border-right: 0;
+        }
+
+        .mode-btn.is-active {
+            background: #0f0f0f;
+            color: #ffffff;
+        }
+
+        .mode-btn.is-active .pixel-icon {
+            color: var(--primary);
+        }
+
+        body.studio-theme-dark .mode-grid {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
+        }
+
+        body.studio-theme-dark .mode-btn {
+            color: var(--dark-text);
+            border-right-color: var(--dark-border);
+        }
+
+        body.studio-theme-dark .mode-btn.is-active {
+            background: #f5f5f5;
+            color: #0e0e10;
+        }
+
+        .bar-meta {
+            min-width: 0;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--muted);
+            display: grid;
+            gap: 8px;
+        }
+
+        .bar-meta strong {
+            color: var(--ink);
+        }
+
+        body.studio-theme-dark .bar-meta strong {
+            color: var(--dark-text);
+        }
+
+        .bar-summary {
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            padding: 10px 12px;
+            display: grid;
+            gap: 6px;
+        }
+
+        body.studio-theme-dark .bar-summary {
+            border-color: var(--dark-border);
+            background: var(--dark-surface);
+        }
+
+        .batch-controls {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .active-batch-panel {
+            padding: 18px;
+            display: grid;
+            gap: 16px;
+        }
+
+        .panel-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .panel-head .title-block h1 {
+            font-size: 22px;
+        }
+
+        .panel-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .summary-grid,
+        .group-progress-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .summary-card,
+        .active-group-card {
+            padding: 12px;
+            display: grid;
+            gap: 8px;
+        }
+
+        .group-progress-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .active-group-card.is-failed {
+            border-color: var(--primary);
+        }
+
+        .active-group-card.is-running {
+            border-color: #0f0f0f;
+        }
+
+        .progress-bar {
+            height: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-2);
+            position: relative;
+        }
+
+        .progress-fill {
+            position: absolute;
+            inset: 0 auto 0 0;
+            background: #0f0f0f;
+        }
+
+        body.studio-theme-dark .progress-bar {
+            border-color: var(--dark-border);
+            background: var(--dark-surface);
+        }
+
+        body.studio-theme-dark .progress-fill {
+            background: #f5f5f5;
+        }
+
+        .task-monitor {
+            margin-top: 24px;
+            padding: 18px;
+        }
+
+        .monitor-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .metric-row {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .metric {
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            padding: 10px 12px;
+            min-height: 60px;
+        }
+
+        body.studio-theme-dark .metric {
+            border-color: var(--dark-border);
+            background: var(--dark-surface);
+        }
+
+        .metric .value {
+            margin-top: 6px;
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .task-table td:last-child,
+        .task-table th:last-child {
+            text-align: right;
+        }
+
+        .task-table-wrap {
+            overflow: auto;
+        }
+
+        .task-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 13px;
+        }
+
+        .task-table th,
+        .task-table td {
+            border-top: 1px solid var(--border);
+            padding: 10px 8px;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        body.studio-theme-dark .task-table th,
+        body.studio-theme-dark .task-table td {
+            border-top-color: var(--dark-border);
+        }
+
+        .task-table th {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            color: var(--muted);
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+
+        .task-ref {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .mini-img {
+            width: 30px;
+            height: 30px;
+            object-fit: cover;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 28px;
+            padding: 0 10px;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .status-pill.completed {
+            color: #3f7f2a;
+            border-color: #a8c25a;
+        }
+
+        .status-pill.failed {
+            color: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .status-pill.running {
+            color: var(--ink);
+            border-color: var(--ink);
+        }
+
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 16px;
+        }
+
+        .view-toolbar {
+            margin-bottom: 16px;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .toolbar-card {
+            padding: 12px;
+            display: grid;
+            gap: 8px;
+        }
+
+        .toolbar-card select {
+            width: 100%;
+        }
+
+        .gallery-card {
+            padding: 12px;
+            display: grid;
+            gap: 10px;
+        }
+
+        .gallery-card .source-strip {
+            display: flex;
+            gap: 6px;
+        }
+
+        .gallery-card img.result {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            object-fit: cover;
+            display: block;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+        }
+
+        .gallery-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .history-grid {
+            display: grid;
+            grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+
+        .history-card {
+            padding: 16px;
+        }
+
+        .history-card--list {
+            position: sticky;
+            top: 96px;
+        }
+
+        .batch-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .batch-item {
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            color: var(--ink);
+            padding: 12px;
+            text-align: left;
+            cursor: pointer;
+            display: grid;
+            gap: 6px;
+        }
+
+        .batch-item.is-active {
+            border-color: #0f0f0f;
+            border-left-width: 4px;
+        }
+
+        body.studio-theme-dark .batch-item {
+            background: var(--dark-surface);
+            color: var(--dark-text);
+            border-color: var(--dark-border);
+        }
+
+        body.studio-theme-dark .batch-item.is-active {
+            border-color: #f5f5f5;
+            border-left-width: 4px;
+        }
+
+        .empty-state {
+            min-height: 160px;
+            border: 1px dashed var(--border-2);
+            display: grid;
+            place-items: center;
+            padding: 26px;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 13px;
+            text-align: center;
+        }
+
+        .settings-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 20;
+            background: rgba(15, 15, 15, 0.36);
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .settings-panel {
+            width: min(560px, 100%);
+            height: 100%;
+            overflow: auto;
+            padding: 24px;
+            border-right: 0;
+            border-top: 0;
+            border-bottom: 0;
+        }
+
+        .settings-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .settings-head h2 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .field {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .field-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .input,
+        .textarea,
+        .field select {
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 0;
+            background: var(--stage-bg);
+            color: var(--ink);
+            padding: 12px 14px;
+            outline: none;
+        }
+
+        .input,
+        .field select {
+            min-height: 46px;
+        }
+
+        .textarea {
+            min-height: 180px;
+            resize: vertical;
+            line-height: 1.45;
+        }
+
+        body.studio-theme-dark .input,
+        body.studio-theme-dark .textarea,
+        body.studio-theme-dark .field select {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+            color: var(--dark-text);
+        }
+
+        .settings-meta {
+            margin-bottom: 16px;
+            padding: 12px;
+            display: grid;
+            gap: 6px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .status-line {
+            min-height: 28px;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: flex-end;
+            text-align: right;
+        }
+
+        .status-line.is-error {
+            color: var(--primary);
+        }
+
+        .truncate {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .inline-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .detail-block {
+            padding: 12px;
+            display: grid;
+            gap: 8px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .detail-row strong {
+            color: var(--ink);
+        }
+
+        body.studio-theme-dark .detail-row strong {
+            color: var(--dark-text);
+        }
+
+        .crop-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 24;
+            background: rgba(15, 15, 15, 0.76);
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 16px;
+            overflow: auto;
+        }
+
+        .crop-panel {
+            width: min(1180px, calc(100vw - 56px));
+            max-width: 100%;
+            height: min(980px, calc(100dvh - 32px));
+            max-height: calc(100dvh - 32px);
+            overflow: hidden;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            border: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.98);
+        }
+
+        body.studio-theme-dark .crop-panel {
+            border-color: var(--dark-border);
+            background: rgba(14, 14, 16, 0.98);
+        }
+
+        .crop-head,
+        .crop-actions {
+            padding: 18px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .crop-actions {
+            border-bottom: 0;
+            border-top: 1px solid var(--border);
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        body.studio-theme-dark .crop-head,
+        body.studio-theme-dark .crop-actions {
+            border-color: var(--dark-border);
+        }
+
+        .crop-head h2 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .crop-head p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .crop-stage {
+            min-height: 0;
+            overflow: auto;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 244, 214, 0.44);
+        }
+
+        body.studio-theme-dark .crop-stage {
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .crop-canvas {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 0;
+            width: 100%;
+            height: 100%;
+            min-width: 0;
+            min-height: 0;
+            user-select: none;
+        }
+
+        .crop-canvas img {
+            display: block;
+            max-width: min(100%, 960px);
+            width: auto;
+            height: auto;
+            max-height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .crop-overlay-hit {
+            position: absolute;
+            inset: 0;
+            cursor: crosshair;
+            touch-action: none;
+        }
+
+        .crop-selection {
+            position: absolute;
+            border: 1px solid #ffffff;
+            box-shadow: 0 0 0 9999px rgba(15, 15, 15, 0.56);
+            cursor: move;
+        }
+
+        .crop-grid-row,
+        .crop-grid-col {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.72;
+        }
+
+        .crop-grid-row {
+            display: grid;
+            grid-template-rows: repeat(3, 1fr);
+        }
+
+        .crop-grid-col {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .crop-grid-row span:not(:last-child) {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.72);
+        }
+
+        .crop-grid-col span:not(:last-child) {
+            border-right: 1px solid rgba(255, 255, 255, 0.72);
+        }
+
+        .crop-handle {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border: 1px solid #0f0f0f;
+            background: #ffffff;
+        }
+
+        .crop-handle[data-crop-handle="nw"] {
+            top: -7px;
+            left: -7px;
+            cursor: nwse-resize;
+        }
+
+        .crop-handle[data-crop-handle="ne"] {
+            top: -7px;
+            right: -7px;
+            cursor: nesw-resize;
+        }
+
+        .crop-handle[data-crop-handle="sw"] {
+            left: -7px;
+            bottom: -7px;
+            cursor: nesw-resize;
+        }
+
+        .crop-handle[data-crop-handle="se"] {
+            right: -7px;
+            bottom: -7px;
+            cursor: nwse-resize;
+        }
+
+        .crop-ratios {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .crop-ratio-btn {
+            min-height: 36px;
+            padding: 0 12px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .crop-ratio-btn.is-active {
+            background: #0f0f0f;
+            border-color: #0f0f0f;
+            color: #ffffff;
+        }
+
+        body.studio-theme-dark .crop-ratio-btn {
+            border-color: var(--dark-border);
+            color: var(--dark-muted);
+        }
+
+        body.studio-theme-dark .crop-ratio-btn.is-active {
+            background: #f5f5f5;
+            border-color: #f5f5f5;
+            color: #0e0e10;
+        }
+
+        .crop-meta {
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        @media (max-width: 1560px) {
+            .topbar {
+                grid-template-columns: 1fr;
+                align-items: stretch;
+            }
+
+            .tabs,
+            .toolbar-actions {
+                justify-content: flex-start;
+            }
+
+            .toolbar-actions {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+                align-items: center;
+            }
+
+            .select-control {
+                width: 100%;
+                max-width: none;
+            }
+
+            .generation-bar {
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            }
+
+            .generation-bar > :first-child {
+                grid-column: 1 / -1;
+            }
+
+            .mode-panel,
+            .bar-meta {
+                width: 100%;
+            }
+
+            .summary-grid,
+            .group-progress-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 1320px) {
+            .toolbar-actions {
+                grid-template-columns: 1fr;
+            }
+
+            .generation-bar,
+            .history-grid,
+            .workspace-overview,
+            .summary-grid,
+            .group-progress-grid,
+            .detail-grid,
+            .view-toolbar {
+                grid-template-columns: 1fr;
+            }
+
+            .group-header {
+                grid-template-columns: 1fr;
+                align-items: stretch;
+            }
+
+            .group-tools,
+            .panel-head,
+            .monitor-head {
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
+
+            .metric-row {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 1080px) {
+            body {
+                overflow: auto;
+            }
+
+            .page-shell {
+                min-height: 100vh;
+                height: auto;
+            }
+
+            .topbar,
+            .workspace-head,
+            .history-head {
+                grid-template-columns: 1fr;
+                align-items: stretch;
+            }
+
+            .toolbar-actions,
+            .tabs {
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
+
+            .view {
+                overflow: visible;
+                padding: 18px 16px 0;
+            }
+
+            .group-header,
+            .generation-bar,
+            .history-grid,
+            .workspace-overview,
+            .summary-grid,
+            .group-progress-grid,
+            .detail-grid,
+            .view-toolbar,
+            .toolbar-actions {
+                grid-template-columns: 1fr;
+            }
+
+            .generation-bar {
+                position: static;
+            }
+
+            .group-body {
+                grid-template-columns: 1fr;
+            }
+
+            .lane-body.is-populated {
+                grid-template-columns: 1fr;
+            }
+
+            .lane-divider {
+                display: none;
+            }
+
+            .mode-panel,
+            .select-control {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .group-title {
+                align-items: stretch;
+            }
+
+            .group-status {
+                margin-left: 0;
+                padding-left: 12px;
+            }
+
+            .history-card--list {
+                position: static;
+            }
+
+            .metric-row {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .task-table {
+                min-width: 720px;
+            }
+
+            .crop-overlay {
+                padding: 10px;
+            }
+
+            .crop-panel {
+                width: min(100%, calc(100vw - 20px));
+                height: min(920px, calc(100dvh - 20px));
+                max-height: calc(100dvh - 20px);
+            }
+
+            .crop-head,
+            .crop-actions {
+                padding: 14px;
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .crop-stage {
+                padding: 12px;
+            }
+
+            .crop-canvas img {
+                max-height: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body class="shell-grid">
+    <div class="page-shell">
+        <header class="topbar">
+            <div class="section-tag">
+                <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#nav-batch"/></svg>
+                Batch try-on
+            </div>
+            <nav class="tabs" aria-label="Batch try-on sections">
+                <button class="tab-btn is-active" type="button" data-action="tab" data-tab="workspace">Workspace</button>
+                <button class="tab-btn" type="button" data-action="tab" data-tab="gallery">Gallery</button>
+                <button class="tab-btn" type="button" data-action="tab" data-tab="history">History</button>
+            </nav>
+            <div class="toolbar-actions">
+                <select id="batchSelect" class="select-control" aria-label="Batch select"></select>
+                <button class="plain-btn" type="button" data-action="refresh">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#refresh"/></svg>
+                    Refresh
+                </button>
+                <button class="icon-btn" type="button" data-action="settings" aria-label="Settings">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#settings"/></svg>
+                </button>
+                <button class="btn-primary" type="button" data-action="new-group">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#plus"/></svg>
+                    New Group
+                </button>
+            </div>
+        </header>
+
+        <main id="workspaceView" class="view">
+            <div class="view-inner">
+                <div class="workspace-head">
+                    <div class="title-block">
+                        <h1>Image Groups</h1>
+                    </div>
+                    <div id="statusLine" class="status-line"></div>
+                </div>
+                <section id="workspaceOverview" class="workspace-overview"></section>
+                <section id="activeBatchPanel" class="active-batch-panel"></section>
+                <div id="groupList" class="group-list"></div>
+                <div id="generationBar" class="generation-bar"></div>
+                <section id="taskMonitor" class="task-monitor"></section>
+            </div>
+        </main>
+
+        <section id="galleryView" class="view" hidden>
+            <div class="view-inner">
+                <div class="history-head">
+                    <div class="title-block">
+                        <h1>Gallery</h1>
+                    </div>
+                </div>
+                <div id="galleryToolbar" class="view-toolbar"></div>
+                <div id="galleryGrid" class="gallery-grid"></div>
+            </div>
+        </section>
+
+        <section id="historyView" class="view" hidden>
+            <div class="view-inner">
+                <div class="history-head">
+                    <div class="title-block">
+                        <h1>Batch History</h1>
+                    </div>
+                </div>
+                <div class="history-grid">
+                    <aside id="batchList" class="history-card history-card--list batch-list"></aside>
+                    <section id="historyDetail" class="history-card"></section>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="settingsOverlay" class="settings-overlay" hidden>
+        <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+            <div class="settings-head">
+                <h2 id="settingsTitle">Generation Settings</h2>
+                <button class="icon-btn" type="button" data-action="close-settings" aria-label="Close settings">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#cross"/></svg>
+                </button>
+            </div>
+            <div class="field">
+                <label class="label" for="settingsTitleInput">Batch name</label>
+                <input id="settingsTitleInput" class="input" type="text">
+            </div>
+            <div class="field">
+                <label class="label" for="settingsPromptInput">Prompt</label>
+                <textarea id="settingsPromptInput" class="textarea"></textarea>
+            </div>
+            <div class="field-grid">
+                <div class="field">
+                    <label class="label" for="settingsModelInput">Model</label>
+                    <input id="settingsModelInput" class="input" type="text">
+                </div>
+                <div class="field">
+                    <label class="label" for="settingsSizeInput">Size</label>
+                    <select id="settingsSizeInput">
+                        <option value="1024x1024">1024x1024</option>
+                        <option value="1536x1024">1536x1024</option>
+                        <option value="1024x1536">1024x1536</option>
+                    </select>
+                </div>
+            </div>
+            <div class="field">
+                <label class="label" for="settingsQualityInput">Quality</label>
+                <select id="settingsQualityInput">
+                    <option value="auto">auto</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                </select>
+            </div>
+            <div id="settingsMeta" class="settings-meta"></div>
+            <button class="btn-primary" type="button" data-action="save-settings" style="width:100%; justify-content:center; min-height:52px;">
+                <svg class="pixel-icon pixel-icon--sm"><use href="/static/icons/pixel.svg#check"/></svg>
+                Save Settings
+            </button>
+        </section>
+    </div>
+
+    <div id="cropOverlayRoot"></div>
+
+    <input id="fileInput" type="file" accept="image/*" multiple hidden>
+
+    <script>
+        (() => {
+            const STORAGE_KEY = 'feebee_batch_tryon_workspace_v3';
+            const LEGACY_STORAGE_KEY = 'feebee_batch_tryon_workspace_v2';
+            const API = '/api/batch-tryon';
+            const DEFAULT_PROMPT = [
+                'Extract ONLY the clothing, accessories and shoes worn by the person in image 1.',
+                'Ignore image 1 background, walls, floor and body identity.',
+                'Place those garments on the person in image 2 while preserving the model pose and body proportions.',
+                'Return a clean product try-on image.'
+            ].join(' ');
+            const MODE_LABELS = {
+                pair: '1:1',
+                fixedModel: 'Fix Model',
+                fixedClothing: 'Fix Cloth',
+                matrix: 'Matrix'
+            };
+            const MODE_ICONS = {
+                pair: 'chevron-right',
+                fixedModel: 'person',
+                fixedClothing: 'nav-batch',
+                matrix: 'diamond'
+            };
+            const DEFAULT_SETTINGS = {
+                title: 'PM batch try-on',
+                prompt: DEFAULT_PROMPT,
+                model: localStorage.getItem('comfly_image_model') || 'gpt-image-2',
+                size: '1024x1024',
+                quality: 'auto'
+            };
+
+            const refs = {
+                workspace: document.getElementById('workspaceView'),
+                gallery: document.getElementById('galleryView'),
+                history: document.getElementById('historyView'),
+                workspaceOverview: document.getElementById('workspaceOverview'),
+                activeBatchPanel: document.getElementById('activeBatchPanel'),
+                groupList: document.getElementById('groupList'),
+                generationBar: document.getElementById('generationBar'),
+                taskMonitor: document.getElementById('taskMonitor'),
+                batchSelect: document.getElementById('batchSelect'),
+                batchList: document.getElementById('batchList'),
+                historyDetail: document.getElementById('historyDetail'),
+                galleryToolbar: document.getElementById('galleryToolbar'),
+                galleryGrid: document.getElementById('galleryGrid'),
+                settingsOverlay: document.getElementById('settingsOverlay'),
+                cropOverlayRoot: document.getElementById('cropOverlayRoot'),
+                settingsMeta: document.getElementById('settingsMeta'),
+                statusLine: document.getElementById('statusLine'),
+                fileInput: document.getElementById('fileInput')
+            };
+
+            function uid(prefix = 'id') {
+                return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+            }
+
+            function icon(name, size = 'sm') {
+                return `<svg class="pixel-icon pixel-icon--${size}"><use href="/static/icons/pixel.svg#${name}"/></svg>`;
+            }
+
+            function escapeHtml(value) {
+                return String(value ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            function newGroup(name) {
+                return {
+                    id: uid('group'),
+                    name: name || 'Group',
+                    clothing_images: [],
+                    model_images: [],
+                    collapsed: false
+                };
+            }
+
+            function initialWorkspace() {
+                return {
+                    mode: 'pair',
+                    settings: { ...DEFAULT_SETTINGS },
+                    groups: [newGroup('Group 1')]
+                };
+            }
+
+            const state = {
+                tab: 'workspace',
+                workspace: initialWorkspace(),
+                workspaceBaseline: '',
+                batches: [],
+                batchCache: {},
+                activeBatchId: '',
+                inspectBatchId: '',
+                galleryBatchId: '',
+                taskStatusFilter: 'all',
+                taskGroupFilter: 'all',
+                galleryStatusFilter: 'all',
+                galleryGroupFilter: 'all',
+                uploadTarget: null,
+                crop: {
+                    open: false,
+                    groupId: '',
+                    type: '',
+                    imageId: '',
+                    src: '',
+                    name: '',
+                    aspect: 'free',
+                    rect: null,
+                    imageSize: { w: 0, h: 0 },
+                    imageFrame: { x: 0, y: 0, w: 0, h: 0 },
+                    dragging: false,
+                    dragMode: '',
+                    start: { x: 0, y: 0 },
+                    rectStart: null,
+                    pointerId: null
+                },
+                pollTimer: null,
+                status: '',
+                statusError: false
+            };
+
+            function cleanGroup(group, index = 0) {
+                return {
+                    id: group?.id || uid('group'),
+                    name: (group?.name || `Group ${index + 1}`).slice(0, 120),
+                    clothing_images: Array.isArray(group?.clothing_images) ? group.clothing_images : [],
+                    model_images: Array.isArray(group?.model_images) ? group.model_images : [],
+                    collapsed: Boolean(group?.collapsed)
+                };
+            }
+
+            function cleanWorkspace(workspace) {
+                const groups = Array.isArray(workspace?.groups) ? workspace.groups.map(cleanGroup) : [];
+                return {
+                    mode: workspace?.mode || 'pair',
+                    settings: { ...DEFAULT_SETTINGS, ...(workspace?.settings || {}) },
+                    groups: groups.length ? groups : [newGroup('Group 1')]
+                };
+            }
+
+            function currentGroups() {
+                return state.workspace.groups;
+            }
+
+            function currentSettings() {
+                return state.workspace.settings;
+            }
+
+            function currentMode() {
+                return state.workspace.mode;
+            }
+
+            function comparableWorkspace(workspace) {
+                const clean = cleanWorkspace(workspace);
+                return {
+                    mode: clean.mode,
+                    settings: {
+                        title: clean.settings.title || '',
+                        prompt: clean.settings.prompt || '',
+                        model: clean.settings.model || '',
+                        size: clean.settings.size || '',
+                        quality: clean.settings.quality || ''
+                    },
+                    groups: clean.groups.map(group => ({
+                        name: group.name || '',
+                        clothing_images: (group.clothing_images || []).map(item => item.url || ''),
+                        model_images: (group.model_images || []).map(item => item.url || '')
+                    }))
+                };
+            }
+
+            function workspaceSnapshot(workspace = state.workspace) {
+                return JSON.stringify(comparableWorkspace(workspace));
+            }
+
+            function markWorkspaceClean() {
+                state.workspaceBaseline = workspaceSnapshot(state.workspace);
+                saveDraft();
+            }
+
+            function workspaceIsDirty() {
+                return workspaceSnapshot(state.workspace) !== state.workspaceBaseline;
+            }
+
+            function loadDraft() {
+                const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) || '{}';
+                try {
+                    const draft = JSON.parse(raw);
+                    if (draft.workspace) {
+                        state.workspace = cleanWorkspace(draft.workspace);
+                        state.activeBatchId = draft.activeBatchId || '';
+                        state.galleryBatchId = draft.galleryBatchId || '';
+                    } else {
+                        state.workspace = cleanWorkspace({
+                            mode: draft.mode,
+                            settings: draft.settings,
+                            groups: draft.groups
+                        });
+                    }
+                } catch (err) {
+                    state.workspace = initialWorkspace();
+                }
+                state.workspaceBaseline = workspaceSnapshot(state.workspace);
+            }
+
+            function saveDraft() {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    workspace: state.workspace,
+                    activeBatchId: state.activeBatchId,
+                    galleryBatchId: state.galleryBatchId
+                }));
+            }
+
+            async function fetchJson(url, options = {}) {
+                const response = await fetch(url, options);
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    const message = data.detail || data.error || `${response.status} ${response.statusText}`;
+                    throw new Error(message);
+                }
+                return data;
+            }
+
+            function setStatus(message, isError = false) {
+                state.status = message || '';
+                state.statusError = Boolean(isError);
+                refs.statusLine.classList.toggle('is-error', state.statusError);
+                refs.statusLine.innerHTML = state.status
+                    ? `${icon(isError ? 'info' : 'check')}<span>${escapeHtml(state.status)}</span>`
+                    : '';
+            }
+
+            function currentCrop() {
+                return state.crop;
+            }
+
+            function cropImageEl() {
+                return document.getElementById('cropImage');
+            }
+
+            function cropOverlayEl() {
+                return document.getElementById('cropOverlay');
+            }
+
+            function cropSelectionEl() {
+                return document.getElementById('cropSelection');
+            }
+
+            function findImageRecord(groupId, type, imageId) {
+                const group = findGroup(groupId);
+                if (!group) return null;
+                const key = type === 'clothing' ? 'clothing_images' : 'model_images';
+                const image = (group[key] || []).find(item => (item.id || item.url) === imageId);
+                return image ? { group, key, image } : null;
+            }
+
+            function closeCrop() {
+                state.crop = {
+                    open: false,
+                    groupId: '',
+                    type: '',
+                    imageId: '',
+                    src: '',
+                    name: '',
+                    aspect: 'free',
+                    rect: null,
+                    imageSize: { w: 0, h: 0 },
+                    imageFrame: { x: 0, y: 0, w: 0, h: 0 },
+                    dragging: false,
+                    dragMode: '',
+                    start: { x: 0, y: 0 },
+                    rectStart: null,
+                    pointerId: null
+                };
+                renderCropOverlay();
+            }
+
+            function cropRatioValue() {
+                const aspect = currentCrop().aspect;
+                if (aspect === '1:1') return 1;
+                if (aspect === '3:4') return 3 / 4;
+                if (aspect === '4:3') return 4 / 3;
+                if (aspect === '16:9') return 16 / 9;
+                return null;
+            }
+
+            function clampCropRect(rect) {
+                const imageSize = currentCrop().imageSize;
+                const maxW = imageSize.w || 0;
+                const maxH = imageSize.h || 0;
+                const w = Math.min(Math.max(rect.w, 1), Math.max(1, maxW));
+                const h = Math.min(Math.max(rect.h, 1), Math.max(1, maxH));
+                const x = Math.min(Math.max(rect.x, 0), Math.max(0, maxW - w));
+                const y = Math.min(Math.max(rect.y, 0), Math.max(0, maxH - h));
+                return { x, y, w, h };
+            }
+
+            function applyCropAspect(rect, anchor = 'se') {
+                const ratio = cropRatioValue();
+                if (!ratio) return rect;
+                let { x, y, w, h } = rect;
+                if (anchor === 'se') {
+                    h = w / ratio;
+                } else if (anchor === 'sw') {
+                    h = w / ratio;
+                    x = rect.x + rect.w - w;
+                } else if (anchor === 'ne') {
+                    h = w / ratio;
+                    y = rect.y + rect.h - h;
+                } else if (anchor === 'nw') {
+                    h = w / ratio;
+                    x = rect.x + rect.w - w;
+                    y = rect.y + rect.h - h;
+                }
+                return { x, y, w, h };
+            }
+
+            function defaultCropRect() {
+                const imageSize = currentCrop().imageSize;
+                if (!imageSize.w || !imageSize.h) return null;
+                const ratio = cropRatioValue();
+                let w = imageSize.w * 0.72;
+                let h = imageSize.h * 0.72;
+                if (ratio) {
+                    if (w / h > ratio) {
+                        w = h * ratio;
+                    } else {
+                        h = w / ratio;
+                    }
+                }
+                w = Math.max(120, Math.min(w, imageSize.w));
+                h = Math.max(120, Math.min(h, imageSize.h));
+                return clampCropRect({
+                    x: Math.max(0, (imageSize.w - w) / 2),
+                    y: Math.max(0, (imageSize.h - h) / 2),
+                    w,
+                    h
+                });
+            }
+
+            function paintCropRect() {
+                const selection = cropSelectionEl();
+                const rect = currentCrop().rect;
+                if (!selection || !rect) return;
+                const frame = currentCrop().imageFrame || { x: 0, y: 0 };
+                selection.style.left = `${frame.x + rect.x}px`;
+                selection.style.top = `${frame.y + rect.y}px`;
+                selection.style.width = `${rect.w}px`;
+                selection.style.height = `${rect.h}px`;
+            }
+
+            function syncCropImageSize() {
+                const img = cropImageEl();
+                if (!img) return;
+                const canvas = img.closest('.crop-canvas');
+                const imageBounds = img.getBoundingClientRect();
+                const canvasBounds = canvas ? canvas.getBoundingClientRect() : imageBounds;
+                const imageSize = {
+                    w: img.clientWidth || 0,
+                    h: img.clientHeight || 0
+                };
+                currentCrop().imageSize = imageSize;
+                currentCrop().imageFrame = {
+                    x: Math.max(0, imageBounds.left - canvasBounds.left),
+                    y: Math.max(0, imageBounds.top - canvasBounds.top),
+                    w: imageBounds.width || 0,
+                    h: imageBounds.height || 0
+                };
+                if (!currentCrop().rect && imageSize.w && imageSize.h) {
+                    currentCrop().rect = defaultCropRect();
+                    renderCropOverlay();
+                    return;
+                }
+                if (currentCrop().rect) {
+                    currentCrop().rect = clampCropRect(currentCrop().rect);
+                    paintCropRect();
+                }
+            }
+
+            function cropPointFromEvent(event) {
+                const overlay = cropOverlayEl();
+                if (!overlay) return { x: 0, y: 0 };
+                const bounds = overlay.getBoundingClientRect();
+                return {
+                    x: event.clientX - bounds.left,
+                    y: event.clientY - bounds.top
+                };
+            }
+
+            function beginCropInteraction(event, mode) {
+                let overlay = cropOverlayEl();
+                if (!overlay || !currentCrop().imageSize.w || !currentCrop().imageSize.h) return;
+                const point = cropPointFromEvent(event);
+                const x = Math.min(Math.max(point.x, 0), currentCrop().imageSize.w);
+                const y = Math.min(Math.max(point.y, 0), currentCrop().imageSize.h);
+                currentCrop().dragging = true;
+                currentCrop().dragMode = mode;
+                currentCrop().pointerId = event.pointerId;
+                currentCrop().start = { x, y };
+                currentCrop().rectStart = currentCrop().rect ? { ...currentCrop().rect } : null;
+                if (mode === 'new') {
+                    currentCrop().rect = { x, y, w: 1, h: 1 };
+                    renderCropOverlay();
+                    overlay = cropOverlayEl();
+                } else {
+                    paintCropRect();
+                }
+                if (overlay.setPointerCapture) overlay.setPointerCapture(event.pointerId);
+            }
+
+            function moveCropInteraction(event) {
+                if (!currentCrop().dragging) return;
+                const point = cropPointFromEvent(event);
+                const x = Math.min(Math.max(point.x, 0), currentCrop().imageSize.w);
+                const y = Math.min(Math.max(point.y, 0), currentCrop().imageSize.h);
+                const start = currentCrop().start;
+                const mode = currentCrop().dragMode;
+                if (mode === 'new') {
+                    currentCrop().rect = clampCropRect(applyCropAspect({
+                        x: Math.min(start.x, x),
+                        y: Math.min(start.y, y),
+                        w: Math.abs(x - start.x),
+                        h: Math.abs(y - start.y)
+                    }, 'se'));
+                    const selection = cropSelectionEl();
+                    if (selection) {
+                        paintCropRect();
+                    } else {
+                        renderCropOverlay();
+                    }
+                    return;
+                }
+                if (!currentCrop().rectStart) return;
+                const base = currentCrop().rectStart;
+                if (mode === 'move') {
+                    currentCrop().rect = clampCropRect({
+                        x: base.x + (x - start.x),
+                        y: base.y + (y - start.y),
+                        w: base.w,
+                        h: base.h
+                    });
+                    paintCropRect();
+                    return;
+                }
+                let next = { ...base };
+                if (mode === 'se') {
+                    next.w = Math.max(1, x - base.x);
+                    next.h = Math.max(1, y - base.y);
+                    next = applyCropAspect(next, 'se');
+                } else if (mode === 'sw') {
+                    next.w = Math.max(1, base.x + base.w - x);
+                    next.h = Math.max(1, y - base.y);
+                    next.x = base.x + base.w - next.w;
+                    next = applyCropAspect(next, 'sw');
+                } else if (mode === 'ne') {
+                    next.w = Math.max(1, x - base.x);
+                    next.h = Math.max(1, base.y + base.h - y);
+                    next.y = base.y + base.h - next.h;
+                    next = applyCropAspect(next, 'ne');
+                } else if (mode === 'nw') {
+                    next.w = Math.max(1, base.x + base.w - x);
+                    next.h = Math.max(1, base.y + base.h - y);
+                    next.x = base.x + base.w - next.w;
+                    next.y = base.y + base.h - next.h;
+                    next = applyCropAspect(next, 'nw');
+                }
+                currentCrop().rect = clampCropRect(next);
+                paintCropRect();
+            }
+
+            function endCropInteraction(event) {
+                if (!currentCrop().dragging) return;
+                currentCrop().dragging = false;
+                const overlay = cropOverlayEl();
+                if (overlay && overlay.releasePointerCapture && currentCrop().pointerId !== null) {
+                    try {
+                        overlay.releasePointerCapture(currentCrop().pointerId);
+                    } catch (err) {
+                        // ignore stale pointer capture
+                    }
+                }
+                currentCrop().pointerId = null;
+                if (!currentCrop().rect || currentCrop().rect.w < 8 || currentCrop().rect.h < 8) {
+                    currentCrop().rect = defaultCropRect();
+                    renderCropOverlay();
+                    return;
+                }
+                currentCrop().dragMode = 'move';
+                if (event) paintCropRect();
+            }
+
+            function renderCropOverlay() {
+                if (!currentCrop().open) {
+                    refs.cropOverlayRoot.innerHTML = '';
+                    return;
+                }
+                const ratioButtons = ['free', '1:1', '3:4', '4:3', '16:9'].map(ratio => `
+                    <button class="crop-ratio-btn ${currentCrop().aspect === ratio ? 'is-active' : ''}" type="button" data-action="crop-aspect" data-ratio="${ratio}">
+                        ${ratio === 'free' ? 'Free' : ratio}
+                    </button>
+                `).join('');
+                const rect = currentCrop().rect;
+                const frame = currentCrop().imageFrame || { x: 0, y: 0, w: 0, h: 0 };
+                refs.cropOverlayRoot.innerHTML = `
+                    <div class="crop-overlay" data-action="crop-backdrop">
+                        <section class="crop-panel" role="dialog" aria-modal="true" aria-labelledby="cropTitle">
+                            <div class="crop-head">
+                                <div>
+                                    <h2 id="cropTitle">Crop Image</h2>
+                                    <p>${escapeHtml(currentCrop().name || 'Uploaded image')} · click and drag to define the export frame</p>
+                                </div>
+                                <button class="icon-btn" type="button" data-action="close-crop" aria-label="Close crop">
+                                    ${icon('cross')}
+                                </button>
+                            </div>
+                            <div class="crop-stage">
+                                <div class="crop-canvas">
+                                    <img id="cropImage" src="${escapeHtml(currentCrop().src)}" alt="">
+                                    <div id="cropOverlay" class="crop-overlay-hit" style="left:${frame.x}px;top:${frame.y}px;width:${frame.w}px;height:${frame.h}px;"></div>
+                                    ${rect ? `
+                                        <div id="cropSelection" class="crop-selection" data-crop-drag="move" style="left:${frame.x + rect.x}px;top:${frame.y + rect.y}px;width:${rect.w}px;height:${rect.h}px;">
+                                            <div class="crop-grid-row"><span></span><span></span><span></span></div>
+                                            <div class="crop-grid-col"><span></span><span></span><span></span></div>
+                                            <span class="crop-handle" data-crop-handle="nw"></span>
+                                            <span class="crop-handle" data-crop-handle="ne"></span>
+                                            <span class="crop-handle" data-crop-handle="sw"></span>
+                                            <span class="crop-handle" data-crop-handle="se"></span>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            <div class="crop-actions">
+                                <div class="crop-ratios">${ratioButtons}</div>
+                                <div class="inline-actions">
+                                    <div class="crop-meta">${rect ? `${Math.round(rect.w)} × ${Math.round(rect.h)} preview px` : 'Draw a crop region to continue'}</div>
+                                    <button class="plain-btn" type="button" data-action="reset-crop">${icon('refresh', 'xs')} Reset</button>
+                                    <button class="plain-btn" type="button" data-action="close-crop">${icon('cross', 'xs')} Cancel</button>
+                                    <button class="btn-primary" type="button" data-action="apply-crop" ${!rect ? 'disabled' : ''}>${icon('crop', 'xs')} Apply Crop</button>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                `;
+                const img = cropImageEl();
+                if (img) {
+                    if (img.complete) {
+                        syncCropImageSize();
+                    } else {
+                        img.addEventListener('load', syncCropImageSize, { once: true });
+                    }
+                }
+            }
+
+            function openCrop(groupId, type, imageId) {
+                const record = findImageRecord(groupId, type, imageId);
+                if (!record) return;
+                state.crop = {
+                    open: true,
+                    groupId,
+                    type,
+                    imageId,
+                    src: record.image.url,
+                    name: record.image.name || record.image.url,
+                    aspect: 'free',
+                    rect: null,
+                    imageSize: { w: 0, h: 0 },
+                    imageFrame: { x: 0, y: 0, w: 0, h: 0 },
+                    dragging: false,
+                    dragMode: '',
+                    start: { x: 0, y: 0 },
+                    rectStart: null,
+                    pointerId: null
+                };
+                renderCropOverlay();
+            }
+
+            async function applyCrop() {
+                const rect = currentCrop().rect;
+                const img = cropImageEl();
+                if (!rect || !img) return;
+                const scaleX = img.naturalWidth / img.width;
+                const scaleY = img.naturalHeight / img.height;
+                const sx = Math.max(0, rect.x * scaleX);
+                const sy = Math.max(0, rect.y * scaleY);
+                const sw = Math.max(1, rect.w * scaleX);
+                const sh = Math.max(1, rect.h * scaleY);
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.round(sw);
+                canvas.height = Math.round(sh);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+                if (!blob) throw new Error('Failed to export cropped image.');
+                setStatus('Uploading cropped image...');
+                const form = new FormData();
+                form.append('files', blob, `${(currentCrop().name || 'cropped').replace(/\.[a-z0-9]+$/i, '')}-crop.jpg`);
+                const data = await fetchJson('/api/ai/upload', { method: 'POST', body: form });
+                const next = data.files?.[0];
+                if (!next?.url) throw new Error('Crop upload failed.');
+                const record = findImageRecord(currentCrop().groupId, currentCrop().type, currentCrop().imageId);
+                if (!record) {
+                    closeCrop();
+                    render();
+                    return;
+                }
+                Object.assign(record.image, {
+                    url: next.url,
+                    name: next.name || currentCrop().name || next.url
+                });
+                saveDraft();
+                closeCrop();
+                render();
+                setStatus('Crop applied and workspace image updated.');
+            }
+
+            function cacheBatchDetail(data) {
+                if (data?.batch?.id) {
+                    state.batchCache[data.batch.id] = data;
+                }
+                return data;
+            }
+
+            function detailFor(batchId) {
+                return batchId ? state.batchCache[batchId] || null : null;
+            }
+
+            function activeDetail() {
+                return detailFor(state.activeBatchId);
+            }
+
+            function inspectDetail() {
+                return detailFor(state.inspectBatchId);
+            }
+
+            function galleryDetail() {
+                return detailFor(state.galleryBatchId);
+            }
+
+            async function ensureBatchDetail(batchId, force = false) {
+                if (!batchId) return null;
+                if (!force && state.batchCache[batchId]) return state.batchCache[batchId];
+                const data = await fetchJson(`${API}/batches/${encodeURIComponent(batchId)}`);
+                return cacheBatchDetail(data);
+            }
+
+            function normalizeDetailGroups(groups) {
+                return (groups || []).map((group, index) => cleanGroup(group, index));
+            }
+
+            function derivedGroups(detail) {
+                const directGroups = normalizeDetailGroups(detail?.groups || []);
+                if (directGroups.length) return directGroups;
+                const tasks = detail?.tasks || [];
+                if (!tasks.length) return [];
+                const fallback = {
+                    id: 'legacy-group-1',
+                    name: 'Group 1',
+                    clothing_images: [],
+                    model_images: [],
+                    collapsed: false
+                };
+                const seenClothing = new Set();
+                const seenModels = new Set();
+                tasks.forEach(task => {
+                    (task.clothing_images || []).forEach(item => {
+                        const key = item.url || item.id || JSON.stringify(item);
+                        if (!seenClothing.has(key)) {
+                            seenClothing.add(key);
+                            fallback.clothing_images.push(item);
+                        }
+                    });
+                    const model = task.model_image || {};
+                    const modelKey = model.url || model.id || '';
+                    if (modelKey && !seenModels.has(modelKey)) {
+                        seenModels.add(modelKey);
+                        fallback.model_images.push(model);
+                    }
+                });
+                return [fallback];
+            }
+
+            function workspaceFromDetail(detail) {
+                return cleanWorkspace({
+                    mode: detail?.batch?.pairing_mode || 'pair',
+                    settings: {
+                        title: detail?.batch?.title || DEFAULT_SETTINGS.title,
+                        prompt: detail?.batch?.prompt || DEFAULT_PROMPT,
+                        model: detail?.batch?.model || DEFAULT_SETTINGS.model,
+                        size: detail?.batch?.size || DEFAULT_SETTINGS.size,
+                        quality: detail?.batch?.quality || DEFAULT_SETTINGS.quality
+                    },
+                    groups: derivedGroups(detail)
+                });
+            }
+
+            function counts(detail = activeDetail()) {
+                return detail?.batch?.counts || { total: 0, pending: 0, running: 0, completed: 0, failed: 0 };
+            }
+
+            function formatTime(value) {
+                if (!value) return 'not started';
+                return new Date(value * 1000).toLocaleString();
+            }
+
+            function batchMatchesWorkspace(batchId = state.activeBatchId) {
+                const detail = detailFor(batchId);
+                return detail ? workspaceSnapshot(state.workspace) === workspaceSnapshot(workspaceFromDetail(detail)) : false;
+            }
+
+            function estimateGroup(group) {
+                const clothing = group.clothing_images.length;
+                const models = group.model_images.length;
+                const active = clothing > 0 || models > 0;
+                if (!active) return { active: false, valid: true, count: 0, message: '' };
+                if (!clothing || !models) return { active: true, valid: false, count: 0, message: `${group.name}: needs clothing and model images` };
+                if (currentMode() === 'pair') {
+                    if (clothing !== models) {
+                        return { active: true, valid: false, count: Math.min(clothing, models), message: `${group.name}: 1:1 needs equal image counts` };
+                    }
+                    return { active: true, valid: true, count: clothing, message: '' };
+                }
+                if (currentMode() === 'fixedModel') return { active: true, valid: true, count: clothing, message: '' };
+                if (currentMode() === 'fixedClothing') return { active: true, valid: true, count: models, message: '' };
+                if (currentMode() === 'matrix') return { active: true, valid: true, count: clothing * models, message: '' };
+                return { active: true, valid: false, count: 0, message: 'Unsupported pairing mode' };
+            }
+
+            function estimateGroups(groups = currentGroups()) {
+                const estimates = groups.map(estimateGroup);
+                const active = estimates.filter(item => item.active);
+                const invalid = active.find(item => !item.valid);
+                return {
+                    valid: !invalid,
+                    message: invalid ? invalid.message : '',
+                    total: active.reduce((sum, item) => sum + item.count, 0),
+                    activeCount: active.length,
+                    readyCount: active.filter(item => item.valid && item.count > 0).length,
+                    incompleteCount: active.filter(item => !item.valid).length
+                };
+            }
+
+            function validateGroups(groups) {
+                const estimate = estimateGroups(groups);
+                if (!estimate.activeCount) throw new Error('Add clothing and model images before starting.');
+                if (!estimate.valid) throw new Error(estimate.message);
+                if (estimate.total > 500) throw new Error('A single batch can contain at most 500 tasks.');
+                return estimate;
+            }
+
+            function taskCountsForGroup(groupId, detail = activeDetail()) {
+                const rows = (detail?.tasks || []).filter(task => {
+                    if (groupId === 'legacy-group-1' && !task.group_id) return true;
+                    return task.group_id === groupId;
+                });
+                return {
+                    total: rows.length,
+                    pending: rows.filter(task => task.status === 'pending').length,
+                    running: rows.filter(task => task.status === 'running').length,
+                    completed: rows.filter(task => task.status === 'completed').length,
+                    failed: rows.filter(task => task.status === 'failed').length
+                };
+            }
+
+            function groupState(group) {
+                const estimate = estimateGroup(group);
+                const info = taskCountsForGroup(group.id);
+                if (!estimate.active || !estimate.valid) return { label: 'incomplete', tone: 'is-alert' };
+                if (!info.total) return { label: 'ready', tone: '' };
+                if (info.running || info.pending) return { label: 'running', tone: '' };
+                if (info.failed && !info.completed) return { label: 'failed', tone: 'is-alert' };
+                if (info.completed === info.total) return { label: 'done', tone: '' };
+                if (info.failed) return { label: 'partial', tone: 'is-alert' };
+                return { label: 'ready', tone: '' };
+            }
+
+            function lastGroupUpdate(groupId, detail = activeDetail()) {
+                const rows = (detail?.tasks || []).filter(task => {
+                    if (groupId === 'legacy-group-1' && !task.group_id) return true;
+                    return task.group_id === groupId;
+                });
+                const values = rows.map(task => task.completed_at || task.started_at || task.updated_at || 0).filter(Boolean);
+                return values.length ? Math.max(...values) : 0;
+            }
+
+            function renderTabs() {
+                document.querySelectorAll('.tab-btn').forEach(btn => {
+                    btn.classList.toggle('is-active', btn.dataset.tab === state.tab);
+                });
+                refs.workspace.hidden = state.tab !== 'workspace';
+                refs.gallery.hidden = state.tab !== 'gallery';
+                refs.history.hidden = state.tab !== 'history';
+            }
+
+            function renderBatchSelect() {
+                const selected = state.activeBatchId || '';
+                refs.batchSelect.innerHTML = [
+                    '<option value="">Select active batch</option>',
+                    ...state.batches.map(batch => {
+                        const status = batch.status || 'pending';
+                        const total = batch.counts?.total || 0;
+                        return `<option value="${escapeHtml(batch.id)}" ${batch.id === selected ? 'selected' : ''}>${escapeHtml(batch.title || batch.id)} · ${status} · ${total}</option>`;
+                    })
+                ].join('');
+            }
+
+            function renderWorkspaceOverview() {
+                const estimate = estimateGroups();
+                const relationLabel = state.activeBatchId
+                    ? (batchMatchesWorkspace() ? 'Workspace matches active batch' : 'Workspace changed after last active launch')
+                    : 'No active batch attached';
+                refs.workspaceOverview.innerHTML = `
+                    <article class="overview-card">
+                        <span class="label">Workspace</span>
+                        <div class="overview-value">${workspaceIsDirty() ? 'DIRTY' : 'CLEAN'}</div>
+                        <div class="overview-sub ${workspaceIsDirty() ? 'is-alert' : ''}">${workspaceIsDirty() ? 'Unsubmitted workspace changes' : 'No unsubmitted workspace changes'}</div>
+                    </article>
+                    <article class="overview-card">
+                        <span class="label">Groups</span>
+                        <div class="overview-value">${currentGroups().length}</div>
+                        <div class="overview-sub">${estimate.readyCount} ready · ${estimate.incompleteCount} incomplete</div>
+                    </article>
+                    <article class="overview-card">
+                        <span class="label">Estimate</span>
+                        <div class="overview-value">${estimate.total}</div>
+                        <div class="overview-sub">${MODE_LABELS[currentMode()]} · ${estimate.activeCount} active groups</div>
+                    </article>
+                    <article class="overview-card">
+                        <span class="label">Batch Link</span>
+                        <div class="overview-value">${state.activeBatchId ? 'ACTIVE' : 'NONE'}</div>
+                        <div class="overview-sub ${batchMatchesWorkspace() ? '' : 'is-alert'}">${escapeHtml(relationLabel)}</div>
+                    </article>
+                `;
+            }
+
+            function renderThumbs(group, type) {
+                const key = type === 'clothing' ? 'clothing_images' : 'model_images';
+                const images = group[key] || [];
+                if (!images.length) return '';
+                return `<div class="thumb-grid">${images.map(item => `
+                    <div class="thumb" title="${escapeHtml(item.name || item.url)}">
+                        <button class="thumb-open" type="button" data-action="open-crop" data-group-id="${escapeHtml(group.id)}" data-type="${type}" data-image-id="${escapeHtml(item.id || item.url)}" aria-label="Crop image">
+                            <img src="${escapeHtml(item.url)}" alt="">
+                        </button>
+                        <button class="thumb-crop" type="button" data-action="open-crop" data-group-id="${escapeHtml(group.id)}" data-type="${type}" data-image-id="${escapeHtml(item.id || item.url)}" aria-label="Crop image">
+                            ${icon('crop', 'xs')}
+                        </button>
+                        <button class="thumb-remove" type="button" data-action="remove-image" data-group-id="${escapeHtml(group.id)}" data-type="${type}" data-image-id="${escapeHtml(item.id || item.url)}" aria-label="Remove image">
+                            ${icon('cross', 'xs')}
+                        </button>
+                    </div>
+                `).join('')}</div>`;
+            }
+
+            function renderGroup(group, index) {
+                const clothingCount = group.clothing_images.length;
+                const modelCount = group.model_images.length;
+                const estimate = estimateGroup(group);
+                const info = taskCountsForGroup(group.id);
+                const stateInfo = groupState(group);
+                const statusBits = [
+                    `<span class="mini-stat is-primary"><strong>${MODE_LABELS[currentMode()]}</strong></span>`,
+                    `<span class="mini-stat"><strong>${clothingCount}C</strong> / <strong>${modelCount}M</strong></span>`,
+                    `<span class="mini-stat"><strong>${estimate.count}</strong> planned</span>`,
+                    `<span class="mini-stat ${stateInfo.tone}"><strong>${escapeHtml(stateInfo.label)}</strong></span>`
+                ];
+                if (info.completed) statusBits.push(`<span class="mini-stat"><strong>${info.completed}</strong> outputs</span>`);
+                if (info.failed) statusBits.push(`<span class="mini-stat is-alert"><strong>${info.failed}</strong> failed</span>`);
+                if (lastGroupUpdate(group.id)) statusBits.push(`<span class="mini-stat"><strong>${escapeHtml(formatTime(lastGroupUpdate(group.id)))}</strong></span>`);
+                const clothingPopulated = clothingCount > 0;
+                const modelPopulated = modelCount > 0;
+                return `
+                    <article class="group-card ${group.collapsed ? 'is-collapsed' : ''}" data-group-id="${escapeHtml(group.id)}">
+                        <header class="group-header">
+                            <button class="icon-btn" type="button" data-action="toggle-group" data-group-id="${escapeHtml(group.id)}" aria-label="Toggle group">
+                                ${icon(group.collapsed ? 'chevron-right' : 'chevron-down')}
+                            </button>
+                            <div class="group-title">
+                                <div class="group-title-copy">
+                                    <input class="group-name" type="text" value="${escapeHtml(group.name)}" data-action="rename-group" data-group-id="${escapeHtml(group.id)}" aria-label="Group name">
+                                    <div class="group-status">${statusBits.join('')}</div>
+                                </div>
+                            </div>
+                            <div class="group-tools">
+                                <button class="icon-btn" type="button" data-action="move-group-up" data-group-id="${escapeHtml(group.id)}" ${index === 0 ? 'disabled' : ''} aria-label="Move group up">${icon('chevron-up')}</button>
+                                <button class="icon-btn" type="button" data-action="move-group-down" data-group-id="${escapeHtml(group.id)}" ${index === currentGroups().length - 1 ? 'disabled' : ''} aria-label="Move group down">${icon('chevron-down')}</button>
+                                <button class="plain-btn" type="button" data-action="run-group" data-group-id="${escapeHtml(group.id)}">${icon('chevron-right')} Run Group</button>
+                                ${info.completed ? `<button class="plain-btn" type="button" data-action="view-group-results" data-group-id="${escapeHtml(group.id)}">${icon('search', 'xs')} View Results</button>` : ''}
+                                <button class="icon-btn" type="button" data-action="delete-group" data-group-id="${escapeHtml(group.id)}" aria-label="Delete group">${icon('trash')}</button>
+                            </div>
+                        </header>
+                        <div class="group-body">
+                            <section class="image-lane">
+                                <div class="lane-head"><span class="label">Clothing Images (${clothingCount})</span></div>
+                                <div class="lane-body ${clothingPopulated ? 'is-populated' : ''}">
+                                    <div class="dropzone ${clothingPopulated ? 'is-compact' : ''}" role="button" tabindex="0" data-action="upload" data-type="clothing" data-group-id="${escapeHtml(group.id)}">
+                                        <div class="drop-inner">
+                                            ${icon('upload', 'md')}
+                                            <strong>${clothingPopulated ? 'Add more images' : 'Drop or click to upload'}</strong>
+                                            <span>JPG, PNG, WEBP</span>
+                                            ${clothingPopulated ? '<span class="thumb-note">Click any thumbnail to crop.</span>' : ''}
+                                        </div>
+                                    </div>
+                                    ${renderThumbs(group, 'clothing')}
+                                </div>
+                            </section>
+                            <div class="lane-divider" aria-hidden="true"></div>
+                            <section class="image-lane">
+                                <div class="lane-head"><span class="label">Model Images (${modelCount})</span></div>
+                                <div class="lane-body ${modelPopulated ? 'is-populated' : ''}">
+                                    <div class="dropzone ${modelPopulated ? 'is-compact' : ''}" role="button" tabindex="0" data-action="upload" data-type="model" data-group-id="${escapeHtml(group.id)}">
+                                        <div class="drop-inner">
+                                            ${icon('upload', 'md')}
+                                            <strong>${modelPopulated ? 'Add more images' : 'Drop or click to upload'}</strong>
+                                            <span>JPG, PNG, WEBP</span>
+                                            ${modelPopulated ? '<span class="thumb-note">Click any thumbnail to crop.</span>' : ''}
+                                        </div>
+                                    </div>
+                                    ${renderThumbs(group, 'model')}
+                                </div>
+                            </section>
+                        </div>
+                    </article>
+                `;
+            }
+
+            function renderGroups() {
+                refs.groupList.innerHTML = currentGroups().map(renderGroup).join('');
+            }
+
+            function renderActiveBatchPanel() {
+                const detail = activeDetail();
+                if (!detail) {
+                    refs.activeBatchPanel.innerHTML = '<div class="empty-state">No active batch. Start a new batch from the workspace draft when the groups are ready.</div>';
+                    return;
+                }
+                const c = counts(detail);
+                refs.activeBatchPanel.innerHTML = `
+                    <div class="panel-head">
+                        <div class="title-block">
+                            <h1>Active Batch</h1>
+                            <p>${escapeHtml(detail.batch.title || detail.batch.id)} · ${escapeHtml(detail.batch.id)} · ${escapeHtml(detail.batch.status || '')}</p>
+                        </div>
+                        <div class="panel-actions">
+                            <button class="plain-btn" type="button" data-action="pause-batch" ${detail.batch.status !== 'running' ? 'disabled' : ''}>${icon('cross', 'xs')} Pause</button>
+                            <button class="plain-btn" type="button" data-action="resume-batch" ${!['paused', 'failed'].includes(detail.batch.status) ? 'disabled' : ''}>${icon('chevron-right', 'xs')} Resume</button>
+                            <button class="plain-btn" type="button" data-action="retry-failed" ${!c.failed ? 'disabled' : ''}>${icon('refresh', 'xs')} Retry failed</button>
+                        </div>
+                    </div>
+                    <div class="summary-grid">
+                        ${[
+                            ['Total', c.total],
+                            ['Pending', c.pending],
+                            ['Running', c.running],
+                            ['Completed', c.completed],
+                            ['Failed', c.failed],
+                            ['Created', formatTime(detail.batch.created_at)],
+                            ['Updated', formatTime(detail.batch.updated_at)],
+                            ['Workspace', batchMatchesWorkspace() ? 'aligned' : 'diverged']
+                        ].map(([label, value]) => `
+                            <div class="summary-card">
+                                <span class="label">${label}</span>
+                                <div class="overview-value" style="font-size:18px;">${escapeHtml(String(value))}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="group-progress-grid">
+                        ${derivedGroups(detail).map(group => {
+                            const info = taskCountsForGroup(group.id, detail);
+                            const progress = info.total ? Math.round((info.completed / info.total) * 100) : 0;
+                            const tone = info.failed ? 'is-failed' : info.running || info.pending ? 'is-running' : '';
+                            return `
+                                <article class="active-group-card ${tone}">
+                                    <strong>${escapeHtml(group.name)}</strong>
+                                    <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
+                                    <div class="overview-sub">${progress}% · ${info.completed}/${info.total || 0} done · ${info.failed} failed</div>
+                                    <div class="inline-actions">
+                                        ${info.completed ? `<button class="plain-btn" type="button" data-action="gallery-batch-group" data-batch-id="${escapeHtml(detail.batch.id)}" data-group-id="${escapeHtml(group.id)}">${icon('search', 'xs')} Results</button>` : ''}
+                                    </div>
+                                </article>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            }
+
+            function renderGenerationBar() {
+                const estimate = estimateGroups();
+                const disabled = !(estimate.valid && estimate.total > 0);
+                const summaryText = estimate.valid
+                    ? `${estimate.readyCount} ready groups · ${estimate.incompleteCount} incomplete`
+                    : estimate.message;
+                refs.generationBar.innerHTML = `
+                    <button class="btn-primary start-btn" type="button" data-action="start-all" ${disabled ? 'disabled' : ''}>
+                        ${icon('chevron-right')} Start Generation
+                    </button>
+                    <section class="mode-panel">
+                        <span class="label">Pairing Mode</span>
+                        <div class="mode-grid">
+                            ${Object.entries(MODE_LABELS).map(([mode, label]) => `
+                                <button class="mode-btn ${currentMode() === mode ? 'is-active' : ''}" type="button" data-action="mode" data-mode="${mode}">
+                                    ${icon(MODE_ICONS[mode], 'xs')} ${label}
+                                </button>
+                            `).join('')}
+                        </div>
+                    </section>
+                    <section class="bar-meta">
+                        <div class="bar-summary">
+                            <div><strong>${estimate.total}</strong> task${estimate.total === 1 ? '' : 's'} estimated</div>
+                            <div class="truncate">${escapeHtml(currentSettings().title || DEFAULT_SETTINGS.title)}</div>
+                            <div class="${estimate.valid ? '' : 'text-primary'}">${escapeHtml(summaryText)}</div>
+                        </div>
+                        <button class="plain-btn" type="button" data-action="open-settings">${icon('settings', 'xs')} Review Settings</button>
+                    </section>
+                `;
+            }
+
+            function renderTaskRow(task) {
+                const clothing = task.clothing_images || [];
+                const model = task.model_image || {};
+                return `
+                    <tr>
+                        <td>#${task.task_index || '-'}</td>
+                        <td><span class="status-pill ${escapeHtml(task.status)}">${escapeHtml(task.status)}</span></td>
+                        <td>
+                            <div class="task-ref">
+                                ${clothing.slice(0, 2).map(item => `<img class="mini-img" src="${escapeHtml(item.url)}" alt="">`).join('')}
+                                ${model.url ? `<img class="mini-img" src="${escapeHtml(model.url)}" alt="">` : ''}
+                                <span class="truncate">${escapeHtml(task.error_message || '')}</span>
+                            </div>
+                        </td>
+                        <td>${task.result_url ? `<a class="btn-underline" href="${escapeHtml(task.result_url)}" target="_blank" rel="noreferrer">open</a>` : '-'}</td>
+                        <td><button class="plain-btn" type="button" data-action="retry-task" data-task-id="${escapeHtml(task.id)}" ${task.status !== 'failed' ? 'disabled' : ''}>Retry</button></td>
+                    </tr>
+                `;
+            }
+
+            function renderTaskMonitor() {
+                const detail = activeDetail();
+                const groupOptions = ['<option value="all">All groups</option>']
+                    .concat(derivedGroups(detail).map(group => `<option value="${escapeHtml(group.id)}" ${state.taskGroupFilter === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`));
+                const rows = (detail?.tasks || [])
+                    .filter(task => state.taskStatusFilter === 'all' || task.status === state.taskStatusFilter)
+                    .filter(task => state.taskGroupFilter === 'all' || task.group_id === state.taskGroupFilter)
+                    .slice()
+                    .sort((a, b) => (b.task_index || 0) - (a.task_index || 0))
+                    .slice(0, 18);
+                const c = counts(detail);
+                refs.taskMonitor.innerHTML = `
+                    <div class="monitor-head">
+                        <div class="title-block"><h1 style="font-size:22px;">Task Monitor</h1></div>
+                        <div class="inline-actions">
+                            <select class="input" data-control="task-status-filter" style="min-width:140px;">
+                                <option value="all" ${state.taskStatusFilter === 'all' ? 'selected' : ''}>All status</option>
+                                <option value="pending" ${state.taskStatusFilter === 'pending' ? 'selected' : ''}>pending</option>
+                                <option value="running" ${state.taskStatusFilter === 'running' ? 'selected' : ''}>running</option>
+                                <option value="completed" ${state.taskStatusFilter === 'completed' ? 'selected' : ''}>completed</option>
+                                <option value="failed" ${state.taskStatusFilter === 'failed' ? 'selected' : ''}>failed</option>
+                            </select>
+                            <select class="input" data-control="task-group-filter" style="min-width:180px;">${groupOptions.join('')}</select>
+                        </div>
+                    </div>
+                    <div class="metric-row">
+                        ${['total', 'pending', 'running', 'completed', 'failed'].map(key => `
+                            <div class="metric">
+                                <div class="label">${key}</div>
+                                <div class="value">${c[key] || 0}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ${rows.length ? `
+                        <div class="task-table-wrap">
+                            <table class="task-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:70px;">Task</th>
+                                        <th style="width:130px;">Status</th>
+                                        <th>Refs</th>
+                                        <th>Result</th>
+                                        <th style="width:110px;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${rows.map(renderTaskRow).join('')}</tbody>
+                            </table>
+                        </div>
+                    ` : '<div class="empty-state">No tasks match the current task filters.</div>'}
+                `;
+            }
+
+            function renderGalleryToolbar() {
+                const batchOptions = ['<option value="">Select batch</option>']
+                    .concat(state.batches.map(batch => `<option value="${escapeHtml(batch.id)}" ${state.galleryBatchId === batch.id ? 'selected' : ''}>${escapeHtml(batch.title || batch.id)}</option>`));
+                const groups = derivedGroups(galleryDetail());
+                const groupOptions = ['<option value="all">All groups</option>']
+                    .concat(groups.map(group => `<option value="${escapeHtml(group.id)}" ${state.galleryGroupFilter === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`));
+                refs.galleryToolbar.innerHTML = `
+                    <div class="toolbar-card">
+                        <span class="label">Batch</span>
+                        <select class="input" data-control="gallery-batch-select">${batchOptions.join('')}</select>
+                    </div>
+                    <div class="toolbar-card">
+                        <span class="label">Group</span>
+                        <select class="input" data-control="gallery-group-filter">${groupOptions.join('')}</select>
+                    </div>
+                    <div class="toolbar-card">
+                        <span class="label">Status</span>
+                        <select class="input" data-control="gallery-status-filter">
+                            <option value="all" ${state.galleryStatusFilter === 'all' ? 'selected' : ''}>all</option>
+                            <option value="completed" ${state.galleryStatusFilter === 'completed' ? 'selected' : ''}>completed</option>
+                            <option value="failed" ${state.galleryStatusFilter === 'failed' ? 'selected' : ''}>failed</option>
+                        </select>
+                    </div>
+                `;
+            }
+
+            function renderGallery() {
+                const detail = galleryDetail();
+                const tasks = (detail?.tasks || [])
+                    .filter(task => state.galleryStatusFilter === 'all' || task.status === state.galleryStatusFilter)
+                    .filter(task => state.galleryGroupFilter === 'all' || task.group_id === state.galleryGroupFilter);
+                refs.galleryGrid.innerHTML = tasks.length ? tasks.map(task => {
+                    const sourceStrip = `
+                        <div class="source-strip">
+                            ${(task.clothing_images || []).slice(0, 2).map(item => `<img class="mini-img" src="${escapeHtml(item.url)}" alt="">`).join('')}
+                            ${task.model_image?.url ? `<img class="mini-img" src="${escapeHtml(task.model_image.url)}" alt="">` : ''}
+                        </div>
+                    `;
+                    if (task.result_url) {
+                        return `
+                            <article class="gallery-card">
+                                <a href="${escapeHtml(task.result_url)}" target="_blank" rel="noreferrer">
+                                    <img class="result" src="${escapeHtml(task.result_url)}" alt="">
+                                </a>
+                                ${sourceStrip}
+                                <div class="gallery-meta">
+                                    <span>Task #${task.task_index}</span>
+                                    <a class="btn-underline" href="/api/download-output?url=${encodeURIComponent(task.result_url)}">Download</a>
+                                </div>
+                                <div class="inline-actions">
+                                    <button class="plain-btn" type="button" data-action="gallery-batch-group" data-batch-id="${escapeHtml(detail.batch.id)}" data-group-id="${escapeHtml(task.group_id || '')}">${icon('nav-batch', 'xs')} Go to Group</button>
+                                    <button class="plain-btn" type="button" data-action="set-active-batch" data-batch-id="${escapeHtml(detail.batch.id)}">${icon('refresh', 'xs')} Go to Batch</button>
+                                </div>
+                            </article>
+                        `;
+                    }
+                    return `
+                        <article class="gallery-card">
+                            <div class="empty-state" style="min-height:220px;">Failed task</div>
+                            ${sourceStrip}
+                            <div class="gallery-meta">
+                                <span>Task #${task.task_index}</span>
+                                <span>${escapeHtml(task.status)}</span>
+                            </div>
+                            <div class="overview-sub is-alert">${escapeHtml(task.error_message || 'No error message')}</div>
+                            <div class="inline-actions">
+                                <button class="plain-btn" type="button" data-action="retry-task" data-task-id="${escapeHtml(task.id)}">Retry task</button>
+                                <button class="plain-btn" type="button" data-action="set-active-batch" data-batch-id="${escapeHtml(detail.batch.id)}">${icon('refresh', 'xs')} Go to Batch</button>
+                            </div>
+                        </article>
+                    `;
+                }).join('') : '<div class="empty-state" style="grid-column: 1 / -1;">No gallery items match the current filters.</div>';
+            }
+
+            function renderHistory() {
+                refs.batchList.innerHTML = state.batches.length ? state.batches.map(batch => `
+                    <button class="batch-item ${state.inspectBatchId === batch.id ? 'is-active' : ''}" type="button" data-action="inspect-batch" data-batch-id="${escapeHtml(batch.id)}">
+                        <strong class="truncate">${escapeHtml(batch.title || batch.id)}</strong>
+                        <span class="label">${escapeHtml(batch.status || 'pending')} · ${(batch.counts?.completed || 0)}/${(batch.counts?.total || 0)} done</span>
+                        <span class="label">${escapeHtml(MODE_LABELS[batch.pairing_mode] || batch.pairing_mode || 'pair')}</span>
+                        <span class="label">${escapeHtml(formatTime(batch.updated_at))}</span>
+                    </button>
+                `).join('') : '<div class="empty-state">No persisted batches.</div>';
+                const detail = inspectDetail();
+                refs.historyDetail.innerHTML = detail ? `
+                    <div class="workspace-head" style="margin-bottom:14px;">
+                        <div class="title-block">
+                            <h1>${escapeHtml(detail.batch.title || detail.batch.id)}</h1>
+                            <p>${escapeHtml(detail.batch.id)} · ${escapeHtml(detail.batch.status || '')}</p>
+                        </div>
+                        <div class="inline-actions">
+                            <button class="plain-btn" type="button" data-action="set-active-batch" data-batch-id="${escapeHtml(detail.batch.id)}">${icon('refresh', 'xs')} Set Active View</button>
+                            <button class="plain-btn" type="button" data-action="load-workspace" data-batch-id="${escapeHtml(detail.batch.id)}">${icon('nav-batch', 'xs')} Load as Workspace</button>
+                        </div>
+                    </div>
+                    <div class="detail-grid" style="margin-bottom:14px;">
+                        <div class="detail-block">
+                            <span class="label">Batch Summary</span>
+                            <div class="detail-row"><span>Status</span><strong>${escapeHtml(detail.batch.status || '')}</strong></div>
+                            <div class="detail-row"><span>Mode</span><strong>${escapeHtml(MODE_LABELS[detail.batch.pairing_mode] || detail.batch.pairing_mode || '')}</strong></div>
+                            <div class="detail-row"><span>Tasks</span><strong>${detail.batch.counts?.total || 0}</strong></div>
+                            <div class="detail-row"><span>Groups</span><strong>${derivedGroups(detail).length}</strong></div>
+                            <div class="detail-row"><span>Updated</span><strong>${escapeHtml(formatTime(detail.batch.updated_at))}</strong></div>
+                        </div>
+                        <div class="detail-block">
+                            <span class="label">Generation Settings</span>
+                            <div class="detail-row"><span>Model</span><strong>${escapeHtml(detail.batch.model || '')}</strong></div>
+                            <div class="detail-row"><span>Size</span><strong>${escapeHtml(detail.batch.size || '')}</strong></div>
+                            <div class="detail-row"><span>Quality</span><strong>${escapeHtml(detail.batch.quality || '')}</strong></div>
+                            <div class="detail-row"><span>Prompt</span><strong class="truncate">${escapeHtml(detail.batch.prompt || '')}</strong></div>
+                        </div>
+                    </div>
+                    <div class="group-progress-grid" style="margin-bottom:14px;">
+                        ${derivedGroups(detail).map(group => {
+                            const info = taskCountsForGroup(group.id, detail);
+                            return `
+                                <article class="active-group-card ${info.failed ? 'is-failed' : ''}">
+                                    <strong>${escapeHtml(group.name)}</strong>
+                                    <div class="overview-sub">${info.completed}/${info.total || 0} done · ${info.failed} failed</div>
+                                    <div class="inline-actions">
+                                        <button class="plain-btn" type="button" data-action="gallery-batch-group" data-batch-id="${escapeHtml(detail.batch.id)}" data-group-id="${escapeHtml(group.id)}">${icon('search', 'xs')} Inspect Results</button>
+                                    </div>
+                                </article>
+                            `;
+                        }).join('')}
+                    </div>
+                    ${detail.tasks.length ? `
+                        <div class="task-table-wrap">
+                            <table class="task-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:70px;">Task</th>
+                                        <th style="width:130px;">Status</th>
+                                        <th>Refs</th>
+                                        <th>Result</th>
+                                        <th style="width:110px;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${detail.tasks.map(renderTaskRow).join('')}</tbody>
+                            </table>
+                        </div>
+                    ` : '<div class="empty-state">No tasks in this batch.</div>'}
+                ` : '<div class="empty-state">Select a batch to inspect tasks.</div>';
+            }
+
+            function renderSettings() {
+                document.getElementById('settingsTitleInput').value = currentSettings().title;
+                document.getElementById('settingsPromptInput').value = currentSettings().prompt;
+                document.getElementById('settingsModelInput').value = currentSettings().model;
+                document.getElementById('settingsSizeInput').value = currentSettings().size;
+                document.getElementById('settingsQualityInput').value = currentSettings().quality;
+                refs.settingsMeta.innerHTML = `
+                    <div>${escapeHtml(workspaceIsDirty() ? 'Workspace has unsubmitted changes.' : 'Workspace settings are clean.')}</div>
+                    <div>${escapeHtml(batchMatchesWorkspace() ? 'Active batch matches the current workspace.' : 'Saving these settings will stage a new batch configuration.')}</div>
+                `;
+            }
+
+            function render() {
+                renderTabs();
+                renderBatchSelect();
+                renderWorkspaceOverview();
+                renderActiveBatchPanel();
+                renderGroups();
+                renderGenerationBar();
+                renderTaskMonitor();
+                renderGalleryToolbar();
+                renderGallery();
+                renderHistory();
+                renderCropOverlay();
+                setStatus(state.status, state.statusError);
+            }
+
+            function findGroup(groupId) {
+                return currentGroups().find(group => group.id === groupId);
+            }
+
+            async function uploadFiles(groupId, type, files) {
+                const group = findGroup(groupId);
+                if (!group) return;
+                const chosen = Array.from(files || []).filter(file => file.type.startsWith('image/'));
+                if (!chosen.length) return;
+                setStatus(`Uploading ${chosen.length} image${chosen.length === 1 ? '' : 's'}...`);
+                const form = new FormData();
+                chosen.forEach(file => form.append('files', file));
+                const data = await fetchJson('/api/ai/upload', { method: 'POST', body: form });
+                const mapped = (data.files || []).map(file => ({
+                    id: uid('img'),
+                    url: file.url,
+                    name: file.name || file.url
+                }));
+                const key = type === 'clothing' ? 'clothing_images' : 'model_images';
+                group[key].push(...mapped);
+                saveDraft();
+                render();
+                setStatus(`Uploaded ${mapped.length} image${mapped.length === 1 ? '' : 's'}.`);
+            }
+
+            function activeGroupsForSubmit(groups) {
+                return groups.filter(group => group.clothing_images.length || group.model_images.length);
+            }
+
+            function payloadGroups(groups) {
+                return groups.map(group => ({
+                    id: group.id,
+                    name: group.name,
+                    clothing_images: group.clothing_images,
+                    model_images: group.model_images
+                }));
+            }
+
+            async function createBatch(groupId = '') {
+                const selectedGroups = groupId ? currentGroups().filter(group => group.id === groupId) : currentGroups();
+                const activeGroups = activeGroupsForSubmit(selectedGroups);
+                validateGroups(activeGroups);
+                setStatus(groupId ? 'Starting group...' : 'Starting batch...');
+                const data = await fetchJson(`${API}/batches`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: currentSettings().title,
+                        prompt: currentSettings().prompt,
+                        model: currentSettings().model,
+                        size: currentSettings().size,
+                        quality: currentSettings().quality,
+                        pairing_mode: currentMode(),
+                        groups: payloadGroups(activeGroups),
+                        autostart: true
+                    })
+                });
+                cacheBatchDetail(data);
+                state.activeBatchId = data.batch?.id || '';
+                state.galleryBatchId = state.activeBatchId;
+                state.workspace = workspaceFromDetail(data);
+                markWorkspaceClean();
+                await loadBatches(false);
+                render();
+                syncPolling();
+                setStatus(`Batch ${data.batch?.id || ''} started from workspace.`);
+            }
+
+            async function loadBatches(shouldRender = true) {
+                const data = await fetchJson(`${API}/batches?limit=50`);
+                state.batches = data.batches || [];
+                if (!state.activeBatchId) {
+                    const running = state.batches.find(batch => batch.status === 'running');
+                    if (running) state.activeBatchId = running.id;
+                }
+                if (!state.galleryBatchId && (state.activeBatchId || state.batches[0]?.id)) {
+                    state.galleryBatchId = state.activeBatchId || state.batches[0].id;
+                }
+                if (shouldRender) render();
+            }
+
+            async function setActiveBatch(batchId) {
+                state.activeBatchId = batchId || '';
+                if (state.activeBatchId) {
+                    await ensureBatchDetail(state.activeBatchId);
+                }
+                saveDraft();
+                render();
+                syncPolling();
+                setStatus(state.activeBatchId ? `Active batch set to ${state.activeBatchId}.` : 'Active batch cleared.');
+            }
+
+            async function inspectBatch(batchId) {
+                state.inspectBatchId = batchId || '';
+                if (state.inspectBatchId) {
+                    await ensureBatchDetail(state.inspectBatchId);
+                }
+                render();
+                setStatus(state.inspectBatchId ? `Inspecting ${state.inspectBatchId}.` : 'History selection cleared.');
+            }
+
+            async function setGalleryBatch(batchId, groupId = 'all') {
+                state.galleryBatchId = batchId || '';
+                state.galleryGroupFilter = groupId || 'all';
+                if (state.galleryBatchId) {
+                    await ensureBatchDetail(state.galleryBatchId);
+                }
+                saveDraft();
+                render();
+            }
+
+            async function refreshCurrent() {
+                await loadBatches(false);
+                const ids = [state.activeBatchId, state.inspectBatchId, state.galleryBatchId].filter(Boolean);
+                for (const batchId of [...new Set(ids)]) {
+                    await ensureBatchDetail(batchId, true);
+                }
+                render();
+                syncPolling();
+                setStatus('Workspace, active batch, and history cache refreshed.');
+            }
+
+            async function controlBatch(action) {
+                if (!state.activeBatchId) return;
+                const data = await fetchJson(`${API}/batches/${encodeURIComponent(state.activeBatchId)}/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                cacheBatchDetail(data);
+                render();
+                syncPolling();
+                setStatus(`${action.replace('-', ' ')} requested.`);
+            }
+
+            async function retryTask(taskId) {
+                const data = await fetchJson(`${API}/tasks/${encodeURIComponent(taskId)}/retry`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                cacheBatchDetail(data);
+                render();
+                setStatus('Task retry queued.');
+            }
+
+            function syncPolling() {
+                if (state.pollTimer) {
+                    clearInterval(state.pollTimer);
+                    state.pollTimer = null;
+                }
+                const detail = activeDetail();
+                if (!detail || detail.batch?.status !== 'running') return;
+                state.pollTimer = setInterval(async () => {
+                    try {
+                        await ensureBatchDetail(state.activeBatchId, true);
+                        render();
+                    } catch (err) {
+                        clearInterval(state.pollTimer);
+                        state.pollTimer = null;
+                        setStatus(err.message, true);
+                    }
+                }, 2500);
+            }
+
+            function openUpload(groupId, type) {
+                state.uploadTarget = { groupId, type };
+                refs.fileInput.value = '';
+                refs.fileInput.click();
+            }
+
+            function moveGroup(groupId, direction) {
+                const index = currentGroups().findIndex(group => group.id === groupId);
+                const next = index + direction;
+                if (index < 0 || next < 0 || next >= currentGroups().length) return;
+                const copy = currentGroups().slice();
+                [copy[index], copy[next]] = [copy[next], copy[index]];
+                state.workspace.groups = copy;
+                saveDraft();
+                render();
+            }
+
+            function saveSettings() {
+                state.workspace.settings = {
+                    title: document.getElementById('settingsTitleInput').value.trim() || DEFAULT_SETTINGS.title,
+                    prompt: document.getElementById('settingsPromptInput').value.trim() || DEFAULT_PROMPT,
+                    model: document.getElementById('settingsModelInput').value.trim() || DEFAULT_SETTINGS.model,
+                    size: document.getElementById('settingsSizeInput').value,
+                    quality: document.getElementById('settingsQualityInput').value
+                };
+                saveDraft();
+                refs.settingsOverlay.hidden = true;
+                render();
+                setStatus('Settings saved. Starting generation will create a new batch from this workspace.');
+            }
+
+            async function loadInspectIntoWorkspace(batchId) {
+                const detail = detailFor(batchId) || await ensureBatchDetail(batchId);
+                if (!detail) return;
+                if (workspaceIsDirty() && !window.confirm('Current workspace has unsubmitted changes. Replace it with the selected batch workspace?')) {
+                    return;
+                }
+                state.workspace = workspaceFromDetail(detail);
+                markWorkspaceClean();
+                state.tab = 'workspace';
+                render();
+                setStatus(`Workspace loaded from ${detail.batch.title || detail.batch.id}.`);
+            }
+
+            async function handleAction(target, origin = null) {
+                const action = target.dataset.action;
+                if (!action) return;
+                if (action === 'tab') {
+                    state.tab = target.dataset.tab || 'workspace';
+                    render();
+                    return;
+                }
+                if (action === 'new-group') {
+                    state.workspace.groups.push(newGroup(`Group ${currentGroups().length + 1}`));
+                    saveDraft();
+                    render();
+                    return;
+                }
+                if (action === 'settings' || action === 'open-settings') {
+                    renderSettings();
+                    refs.settingsOverlay.hidden = false;
+                    return;
+                }
+                if (action === 'close-settings') {
+                    refs.settingsOverlay.hidden = true;
+                    return;
+                }
+                if (action === 'save-settings') {
+                    saveSettings();
+                    return;
+                }
+                if (action === 'crop-backdrop') {
+                    if (target === origin) closeCrop();
+                    return;
+                }
+                if (action === 'close-crop') {
+                    closeCrop();
+                    return;
+                }
+                if (action === 'crop-aspect') {
+                    currentCrop().aspect = target.dataset.ratio || 'free';
+                    if (currentCrop().rect) {
+                        currentCrop().rect = clampCropRect(applyCropAspect({ ...currentCrop().rect }, 'se'));
+                    }
+                    renderCropOverlay();
+                    return;
+                }
+                if (action === 'reset-crop') {
+                    currentCrop().rect = defaultCropRect();
+                    renderCropOverlay();
+                    return;
+                }
+                if (action === 'apply-crop') {
+                    await applyCrop();
+                    return;
+                }
+                if (action === 'mode') {
+                    state.workspace.mode = target.dataset.mode || 'pair';
+                    saveDraft();
+                    render();
+                    return;
+                }
+                const groupId = target.dataset.groupId;
+                const group = groupId ? findGroup(groupId) : null;
+                if (action === 'upload') return openUpload(groupId, target.dataset.type || 'clothing');
+                if (action === 'toggle-group' && group) {
+                    group.collapsed = !group.collapsed;
+                    saveDraft();
+                    render();
+                    return;
+                }
+                if (action === 'delete-group' && group) {
+                    const hasContent = group.clothing_images.length || group.model_images.length;
+                    if (hasContent && !window.confirm(`Delete ${group.name} and remove its uploaded draft images from the workspace?`)) {
+                        return;
+                    }
+                    state.workspace.groups = currentGroups().filter(item => item.id !== group.id);
+                    if (!state.workspace.groups.length) state.workspace.groups = [newGroup('Group 1')];
+                    saveDraft();
+                    render();
+                    return;
+                }
+                if (action === 'move-group-up') return moveGroup(groupId, -1);
+                if (action === 'move-group-down') return moveGroup(groupId, 1);
+                if (action === 'open-crop' && group) {
+                    openCrop(groupId, target.dataset.type || 'clothing', target.dataset.imageId);
+                    return;
+                }
+                if (action === 'remove-image' && group) {
+                    const key = target.dataset.type === 'clothing' ? 'clothing_images' : 'model_images';
+                    group[key] = group[key].filter(item => (item.id || item.url) !== target.dataset.imageId);
+                    if (currentCrop().open && currentCrop().groupId === groupId && currentCrop().imageId === target.dataset.imageId) {
+                        closeCrop();
+                    }
+                    saveDraft();
+                    render();
+                    return;
+                }
+                if (action === 'view-group-results') {
+                    state.galleryBatchId = state.activeBatchId;
+                    state.galleryGroupFilter = groupId || 'all';
+                    state.galleryStatusFilter = 'completed';
+                    state.tab = 'gallery';
+                    render();
+                    return;
+                }
+                if (action === 'run-group') return createBatch(groupId);
+                if (action === 'start-all') return createBatch('');
+                if (action === 'refresh') return refreshCurrent();
+                if (action === 'pause-batch') return controlBatch('pause');
+                if (action === 'resume-batch') return controlBatch('resume');
+                if (action === 'retry-failed') return controlBatch('retry-failed');
+                if (action === 'retry-task') return retryTask(target.dataset.taskId);
+                if (action === 'inspect-batch') return inspectBatch(target.dataset.batchId);
+                if (action === 'set-active-batch') return setActiveBatch(target.dataset.batchId);
+                if (action === 'gallery-batch-group') {
+                    await setGalleryBatch(target.dataset.batchId, target.dataset.groupId || 'all');
+                    state.tab = 'gallery';
+                    return;
+                }
+                if (action === 'load-workspace') return loadInspectIntoWorkspace(target.dataset.batchId);
+            }
+
+            document.addEventListener('click', async event => {
+                const target = event.target.closest('[data-action]');
+                if (!target) return;
+                event.preventDefault();
+                try {
+                    await handleAction(target, event.target);
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+            });
+
+            document.addEventListener('keydown', event => {
+                if (currentCrop().open && event.key === 'Escape') {
+                    event.preventDefault();
+                    closeCrop();
+                    return;
+                }
+                const target = event.target.closest('.dropzone');
+                if (!target) return;
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                openUpload(target.dataset.groupId, target.dataset.type || 'clothing');
+            });
+
+            document.addEventListener('input', event => {
+                if (!event.target.matches('.group-name')) return;
+                const group = findGroup(event.target.dataset.groupId);
+                if (!group) return;
+                group.name = event.target.value.slice(0, 120) || 'Group';
+                saveDraft();
+                render();
+            });
+
+            refs.batchSelect.addEventListener('change', async event => {
+                try {
+                    await setActiveBatch(event.target.value);
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+            });
+
+            document.addEventListener('change', async event => {
+                const control = event.target.dataset.control;
+                if (!control) return;
+                try {
+                    if (control === 'task-status-filter') state.taskStatusFilter = event.target.value;
+                    if (control === 'task-group-filter') state.taskGroupFilter = event.target.value;
+                    if (control === 'gallery-status-filter') state.galleryStatusFilter = event.target.value;
+                    if (control === 'gallery-group-filter') state.galleryGroupFilter = event.target.value;
+                    if (control === 'gallery-batch-select') {
+                        await setGalleryBatch(event.target.value, 'all');
+                        return;
+                    }
+                    render();
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+            });
+
+            refs.fileInput.addEventListener('change', async () => {
+                const target = state.uploadTarget;
+                if (!target) return;
+                try {
+                    await uploadFiles(target.groupId, target.type, refs.fileInput.files);
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+            });
+
+            document.addEventListener('dragover', event => {
+                const zone = event.target.closest('.dropzone');
+                if (!zone) return;
+                event.preventDefault();
+                zone.classList.add('is-over');
+            });
+
+            document.addEventListener('dragleave', event => {
+                const zone = event.target.closest('.dropzone');
+                if (zone) zone.classList.remove('is-over');
+            });
+
+            document.addEventListener('drop', async event => {
+                const zone = event.target.closest('.dropzone');
+                if (!zone) return;
+                event.preventDefault();
+                zone.classList.remove('is-over');
+                try {
+                    await uploadFiles(zone.dataset.groupId, zone.dataset.type || 'clothing', event.dataTransfer.files);
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+            });
+
+            document.addEventListener('pointerdown', event => {
+                if (!currentCrop().open) return;
+                const handle = event.target.closest('[data-crop-handle]');
+                if (handle) {
+                    event.preventDefault();
+                    beginCropInteraction(event, handle.dataset.cropHandle || 'se');
+                    return;
+                }
+                const selection = event.target.closest('#cropSelection');
+                if (selection) {
+                    event.preventDefault();
+                    beginCropInteraction(event, 'move');
+                    return;
+                }
+                const overlay = event.target.closest('#cropOverlay');
+                if (overlay) {
+                    event.preventDefault();
+                    beginCropInteraction(event, 'new');
+                }
+            });
+
+            document.addEventListener('pointermove', event => {
+                if (!currentCrop().open) return;
+                moveCropInteraction(event);
+            });
+
+            document.addEventListener('pointerup', event => {
+                if (!currentCrop().open) return;
+                endCropInteraction(event);
+            });
+
+            document.addEventListener('pointercancel', event => {
+                if (!currentCrop().open) return;
+                endCropInteraction(event);
+            });
+
+            window.addEventListener('resize', () => {
+                if (currentCrop().open) syncCropImageSize();
+            });
+
+            window.addEventListener('beforeunload', () => {
+                if (state.pollTimer) clearInterval(state.pollTimer);
+            });
+
+            async function init() {
+                loadDraft();
+                render();
+                try {
+                    const config = await fetchJson('/api/config');
+                    if (!currentSettings().model && config.image_model) {
+                        state.workspace.settings.model = config.image_model;
+                        saveDraft();
+                    }
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+                try {
+                    await loadBatches(false);
+                    if (state.activeBatchId) await ensureBatchDetail(state.activeBatchId);
+                    if (state.galleryBatchId) await ensureBatchDetail(state.galleryBatchId);
+                    render();
+                    syncPolling();
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+            }
+
+            init();
+        })();
+    </script>
+</body>
+
+</html>

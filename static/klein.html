@@ -4,10 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>Image edit · Infinite-Canvas</title>
-    <link rel="stylesheet" href="/static/design-system.css?v=23">
-    <script src="/static/theme.js?v=20260512c"></script>
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Image edit · Feebee Studios</title>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512g"></script>
     <style>
         /* ============================================================
            klein.html 页内特化样式（DESIGN.md v2.1 §17.2 模板）
@@ -35,6 +35,11 @@
             display: flex;
             min-height: 100vh;
             gap: 0;
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.28) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.28) 1px, transparent 1px);
+            background-size: 80px 80px;
         }
         .param-panel {
             width: 380px;
@@ -44,9 +49,18 @@
             flex-direction: column;
             gap: 20px;
             border-right: 1px solid var(--border);
-            background: transparent;
+            background: rgba(255, 250, 235, 0.94);
         }
-        body.studio-theme-dark .param-panel { border-right-color: var(--dark-border); }
+        body.studio-theme-dark .page-wrap {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
+        body.studio-theme-dark .param-panel {
+            background: rgba(14, 14, 16, 0.94);
+            border-right-color: var(--dark-border);
+        }
 
         .stage-main {
             flex: 1;
@@ -55,6 +69,17 @@
             flex-direction: column;
             gap: 24px;
             min-width: 0;
+            background: rgba(255, 255, 255, 0.58);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.18) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.18) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+        body.studio-theme-dark .stage-main {
+            background: rgba(14, 14, 16, 0.72);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
         /* 参数字段分组 */
@@ -80,7 +105,10 @@
             align-items: center;
             gap: 16px;
             flex-wrap: wrap;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
         }
+        body.studio-theme-dark .stage-header { border-bottom-color: var(--dark-border); }
 
         /* —— 3 上传插槽（核心：§15.8 dropzone 横向 3 列）—— */
         .slot-grid {
@@ -261,8 +289,20 @@
             padding: 64px 16px;
             min-height: 320px;
             color: var(--muted);
+            background: rgba(255, 250, 235, 0.72);
+            border: 1px solid var(--border);
         }
-        .stage-empty .image-placeholder { width: 160px; height: 160px; aspect-ratio: auto; }
+        .stage-empty .image-placeholder {
+            width: 168px;
+            height: 168px;
+            aspect-ratio: auto;
+            border: 1px solid var(--border);
+        }
+        body.studio-theme-dark .stage-empty {
+            background: rgba(28, 28, 30, 0.72);
+            border-color: var(--dark-border);
+        }
+        .image-card { border-width: 2px; }
 
         /* —— Lightbox (DESIGN.md §16.5 spec：纯黑 .92，无 backdrop-blur) —— */
         .lightbox-mask {
@@ -457,7 +497,7 @@
                     <span class="field-hint">node 168</span>
                 </label>
                 <textarea id="promptInput" class="textarea" rows="4"
-                    placeholder="Describe how to edit the image…"></textarea>
+                    placeholder="Describe the edit…"></textarea>
             </div>
 
             <!-- Seed §15.5 number-input -->
@@ -545,7 +585,7 @@
                     <span id="archiveCountLabel">Recent edits (0)</span>
                     <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#chevron-down"/></svg>
                 </span>
-                <span class="text-mono text-muted">Tap any card to open before / after compare</span>
+                <span class="text-mono text-muted">COMPARE READY</span>
             </div>
 
             <!-- §16.2 image-grid 4 列 -->
@@ -553,7 +593,7 @@
                 <div id="emptyState" class="stage-empty" style="grid-column: 1 / -1;">
                     <div class="image-placeholder"></div>
                     <div class="text-body">No edits yet</div>
-                    <div class="field-hint">Upload Main image, write a prompt and press Edit</div>
+                    <div class="field-hint">Awaiting main layer</div>
                 </div>
             </div>
 

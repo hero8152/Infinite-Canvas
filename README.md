@@ -1,4 +1,4 @@
-# Infinite-Canvas
+# Feebee Studios
 Supports comfyui/API calls/modelscope calls
 
 支持几乎所有API平台调用，修改API文件中的env的网址和key就可以运行。
@@ -45,6 +45,18 @@ CHAT_MODELS=gpt-5.5
 IMAGE_MODELS=gpt-image-2,nano-banana-pro
 
 MODELSCOPE_CHAT_MODELS=Qwen/Qwen3-235B-A22B
+
+APP_HOST=127.0.0.1
+
+APP_PORT=3000
+
+CORS_ALLOW_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
+
+Development check:
+
+```bash
+python scripts/guardrails.py
+```
 
 <img width="2196" height="1040" alt="image" src="https://github.com/user-attachments/assets/6d823668-cde2-4836-8332-1858efe5f520" />
 <img width="2214" height="771" alt="image" src="https://github.com/user-attachments/assets/52e10958-753f-45ba-a50e-3bbec27be436" />

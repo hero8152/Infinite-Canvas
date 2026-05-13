@@ -4,17 +4,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>Text to image · Infinite Canvas</title>
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Text to image · Feebee Studios</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/design-system.css?v=23">
-    <script src="/static/theme.js?v=20260512c"></script>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512g"></script>
     <style>
         /* ===== 页面级特化：仅做布局，不重发明组件 ===== */
 
         html,
         body {
             height: 100%;
+            width: 100%;
         }
 
         body {
@@ -22,6 +23,8 @@
             color: var(--ink);
             font-family: var(--font-sans);
             overflow: hidden;
+            overflow-x: hidden;
+            width: 100%;
         }
 
         /* 整体左右分栏：左 380px 参数 + 右网格 */
@@ -29,14 +32,27 @@
             display: flex;
             width: 100%;
             height: 100vh;
+            height: 100dvh;
             min-height: 0;
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.28) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.28) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+
+        body.studio-theme-dark .page-shell {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
         /* ===== 左侧 380 参数面板 ===== */
         .params-panel {
             width: 380px;
             flex-shrink: 0;
-            background: var(--bg);
+            background: rgba(255, 250, 235, 0.94);
             border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
@@ -133,7 +149,12 @@
         .gallery-panel {
             flex: 1;
             min-width: 0;
+            width: 0;
             background: var(--stage-bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.18) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.18) 1px, transparent 1px);
+            background-size: 80px 80px;
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -141,6 +162,9 @@
 
         body.studio-theme-dark .gallery-panel {
             background: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
         .gallery-head {
@@ -149,6 +173,13 @@
             justify-content: space-between;
             padding: 24px 24px 16px;
             gap: 16px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.72);
+        }
+
+        body.studio-theme-dark .gallery-head {
+            background: rgba(14, 14, 16, 0.72);
+            border-bottom-color: var(--dark-border);
         }
 
         .gallery-scroll {
@@ -164,7 +195,12 @@
             width: 100%;
             aspect-ratio: 1 / 1;
             background: var(--bg-2);
+            border-bottom: 1px solid var(--border);
             overflow: hidden;
+        }
+
+        body.studio-theme-dark .image-card .img-wrap {
+            border-bottom-color: var(--dark-border);
         }
 
         .image-card .img-wrap img {
@@ -236,14 +272,33 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            min-height: calc(100vh - 160px);
             padding: 96px 24px;
             gap: 16px;
             color: var(--muted);
             text-align: center;
         }
 
+        .empty-state .empty-preview {
+            width: 168px;
+            height: 168px;
+            aspect-ratio: auto;
+            border: 1px solid var(--border);
+        }
+
+        .empty-state .empty-copy {
+            padding: 8px 12px;
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+        }
+
         body.studio-theme-dark .empty-state {
             color: var(--dark-muted);
+        }
+
+        body.studio-theme-dark .empty-state .empty-copy {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
         }
 
         /* Load more */
@@ -459,7 +514,8 @@
                 <div id="masonry" class="image-grid"></div>
 
                 <div id="emptyState" class="empty-state" style="display:none">
-                    <span class="text-mono">No images yet · type a prompt and press Generate</span>
+                    <div class="image-placeholder empty-preview" aria-hidden="true"></div>
+                    <span class="text-mono empty-copy">No images yet</span>
                 </div>
 
                 <div class="load-more">
@@ -539,9 +595,9 @@
         window.addEventListener('message', (event) => {
             if (event.data?.type === 'studio-theme' && window.StudioTheme) {
                 window.StudioTheme.apply(event.data.theme);
-            } else if (event.data?.type === 'cloud_status') {
+            } else if (event.data?.type === 'cloud_status' || event.data?.type === 'task_status') {
                 // 保留 cloud_status 接收（来源于父框架转发）
-                const t = event.data.text || event.data.message;
+                const t = event.data.text || event.data.message || event.data.status;
                 if (t) setStatus(t, 'busy');
             }
         });
@@ -614,17 +670,19 @@
 
         /* ====================== ModelScope 云端 ====================== */
         // API: POST /generate  body: { prompt, api_key, resolution }
+        // api_key is optional when the backend has MODELSCOPE_API_KEY configured.
         async function runCloudTask(prompt) {
             let apiKey = localStorage.getItem(MS_TOKEN_KEY);
+            let hasBackendToken = false;
             if (!apiKey) {
                 try {
                     const res = await fetch('/api/config/token');
                     const data = await res.json();
-                    if (data.token) apiKey = data.token;
+                    hasBackendToken = Boolean(data.has_token);
                 } catch (e) { }
             }
-            if (!apiKey) {
-                alert("ModelScope Token Required. Please set it in the sidebar (API Token).");
+            if (!apiKey && !hasBackendToken) {
+                alert("ModelScope Token Required. Set MODELSCOPE_API_KEY in API/.env or add a local ModelScope token.");
                 return;
             }
 
@@ -639,7 +697,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         prompt: prompt,
-                        api_key: apiKey,
+                        api_key: apiKey || "",
                         resolution: `${document.getElementById('width').value}x${document.getElementById('height').value}`
                     })
                 });
@@ -839,7 +897,7 @@
             event.stopPropagation();
             const a = document.createElement('a');
             a.href = url;
-            a.download = `IC-${Date.now()}.png`;
+            a.download = `FS-${Date.now()}.png`;
             a.click();
         }
 
@@ -883,7 +941,7 @@
         function downloadImage() {
             const a = document.createElement('a');
             a.href = document.getElementById('lightboxImg').src;
-            a.download = `IC-${Date.now()}.png`;
+            a.download = `FS-${Date.now()}.png`;
             a.click();
         }
 

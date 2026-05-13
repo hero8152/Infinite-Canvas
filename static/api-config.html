@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>API / Models - Feebee Studios</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512h"></script>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--stage-bg);
+            color: var(--ink);
+            font-family: var(--font-sans);
+        }
+
+        .api-page {
+            min-height: 100vh;
+            padding: 32px;
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.24) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.24) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+        body.studio-theme-dark .api-page {
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
+
+        .page-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+        .head-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 28px;
+            font-weight: 500;
+            line-height: 1.1;
+        }
+        .head-title .pixel-icon {
+            width: 22px;
+            height: 22px;
+            color: var(--primary);
+        }
+        .head-copy {
+            max-width: 720px;
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .status-strip {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .status-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            height: 28px;
+            padding: 0 10px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+        body.studio-theme-dark .status-chip {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+            color: var(--dark-muted);
+        }
+        .status-chip.is-on { color: var(--primary); border-color: var(--primary); }
+
+        .settings-grid {
+            display: grid;
+            grid-template-columns: minmax(340px, 1fr) minmax(340px, 1fr);
+            gap: 16px;
+        }
+        .full-row { grid-column: 1 / -1; }
+
+        .panel {
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.78);
+        }
+        body.studio-theme-dark .panel {
+            background: rgba(28, 28, 30, 0.94);
+            border-color: var(--dark-border);
+        }
+        .panel-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        body.studio-theme-dark .panel-head { border-bottom-color: var(--dark-border); }
+        .panel-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .panel-title .pixel-icon {
+            width: 14px;
+            height: 14px;
+            color: var(--primary);
+        }
+        .panel-state {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--primary);
+            text-transform: uppercase;
+        }
+        .panel-body {
+            display: grid;
+            gap: 14px;
+            padding: 16px;
+        }
+        .field-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .field {
+            display: grid;
+            gap: 7px;
+        }
+        .field label,
+        .table-label {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .field input,
+        .field select {
+            width: 100%;
+            height: 40px;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            color: var(--ink);
+            padding: 0 12px;
+            font-family: var(--font-mono);
+            font-size: 13px;
+            outline: none;
+            border-radius: 0;
+        }
+        .field input:focus,
+        .field select:focus {
+            border-color: var(--primary);
+        }
+        body.studio-theme-dark .field input,
+        body.studio-theme-dark .field select {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+            color: var(--dark-text);
+        }
+
+        .note {
+            padding: 10px 12px;
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        body.studio-theme-dark .note {
+            background: #101012;
+            border-color: var(--dark-border);
+            color: var(--dark-muted);
+        }
+
+        .table {
+            display: grid;
+            gap: 8px;
+        }
+        .model-row,
+        .guide-row {
+            display: grid;
+            grid-template-columns: 150px minmax(180px, 1fr) minmax(180px, 1fr) 96px;
+            gap: 8px;
+            align-items: center;
+        }
+        .guide-row {
+            grid-template-columns: 150px minmax(240px, 1fr) 180px 150px;
+            min-height: 42px;
+            padding: 0 10px;
+            border: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.6);
+        }
+        body.studio-theme-dark .guide-row {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+        .guide-provider,
+        .guide-model,
+        .guide-route {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--muted);
+            overflow-wrap: anywhere;
+        }
+        .guide-model { color: var(--ink); }
+        body.studio-theme-dark .guide-model { color: var(--dark-text); }
+
+        .model-row input,
+        .model-row select {
+            height: 38px;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            color: var(--ink);
+            padding: 0 10px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            outline: none;
+            border-radius: 0;
+        }
+        body.studio-theme-dark .model-row input,
+        body.studio-theme-dark .model-row select {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+            color: var(--dark-text);
+        }
+
+        .actions {
+            display: grid;
+            grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(140px, 0.5fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .btn {
+            height: 44px;
+            border: none;
+            border-radius: 0;
+            cursor: pointer;
+            font-family: var(--font-sans);
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .btn-primary {
+            background: #0f0f0f;
+            color: #ffffff;
+        }
+        .btn-secondary {
+            background: var(--bg-2);
+            color: var(--ink);
+            border: 1px solid var(--border);
+        }
+        .btn-small {
+            height: 34px;
+            padding: 0 10px;
+            font-size: 12px;
+        }
+        body.studio-theme-dark .btn-primary {
+            background: #f2f2f2;
+            color: #111111;
+        }
+        body.studio-theme-dark .btn-secondary {
+            background: var(--dark-surface);
+            color: var(--dark-text);
+            border-color: var(--dark-border);
+        }
+
+        .message {
+            min-height: 20px;
+            margin-top: 12px;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        @media (max-width: 900px) {
+            .api-page { padding: 20px; }
+            .page-head,
+            .settings-grid,
+            .field-grid,
+            .actions { grid-template-columns: 1fr; display: grid; }
+            .model-row,
+            .guide-row { grid-template-columns: 1fr; }
+            .status-strip { justify-content: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <main class="api-page">
+        <header class="page-head">
+            <div>
+                <div class="head-title">
+                    <svg class="pixel-icon" aria-hidden="true"><use href="#key"></use></svg>
+                    <span>API / Models</span>
+                </div>
+                <div class="head-copy">Provider defaults live in this browser. Model-specific keys override provider keys only for the matching model.</div>
+            </div>
+            <div class="status-strip">
+                <span class="status-chip" id="comflyStatus">Comfly not set</span>
+                <span class="status-chip" id="modelscopeStatus">ModelScope not set</span>
+                <span class="status-chip">Local only</span>
+            </div>
+        </header>
+
+        <section class="settings-grid">
+            <div class="panel">
+                <div class="panel-head">
+                    <div class="panel-title"><svg class="pixel-icon"><use href="#key"></use></svg><span>Comfly</span></div>
+                    <span class="panel-state" id="comflyPanelState">Not set</span>
+                </div>
+                <div class="panel-body">
+                    <div class="field">
+                        <label for="comflyBaseUrl"><span>Base URL</span><span>https</span></label>
+                        <input id="comflyBaseUrl" type="url" spellcheck="false" autocomplete="off" placeholder="https://ai.comfly.chat">
+                    </div>
+                    <div class="field">
+                        <label for="comflyToken"><span>Global API key</span><span>Bearer</span></label>
+                        <input id="comflyToken" type="password" spellcheck="false" autocomplete="off" placeholder="sk-...">
+                    </div>
+                    <div class="field-grid">
+                        <div class="field">
+                            <label for="comflyImageModel"><span>Image default</span><span>route</span></label>
+                            <input id="comflyImageModel" list="imageModels" spellcheck="false" autocomplete="off" placeholder="gpt-image-2">
+                        </div>
+                        <div class="field">
+                            <label for="comflyChatModel"><span>Chat default</span><span>route</span></label>
+                            <input id="comflyChatModel" list="chatModels" spellcheck="false" autocomplete="off" placeholder="gpt-4o-mini">
+                        </div>
+                    </div>
+                    <div class="note">Use the same Comfly token group selected on ai.comfly.chat/api-set. For gpt-image-2-all, keep image generation at 1k unless that group supports larger sizes.</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-head">
+                    <div class="panel-title"><svg class="pixel-icon"><use href="#nav-online"></use></svg><span>ModelScope</span></div>
+                    <span class="panel-state" id="modelscopePanelState">Not set</span>
+                </div>
+                <div class="panel-body">
+                    <div class="field">
+                        <label for="modelscopeBaseUrl"><span>Base URL</span><span>root</span></label>
+                        <input id="modelscopeBaseUrl" type="url" spellcheck="false" autocomplete="off" placeholder="https://api-inference.modelscope.cn">
+                    </div>
+                    <div class="field">
+                        <label for="modelscopeToken"><span>Global API key</span><span>Bearer</span></label>
+                        <input id="modelscopeToken" type="password" spellcheck="false" autocomplete="off" placeholder="ms-...">
+                    </div>
+                    <div class="field">
+                        <label for="modelscopeChatModel"><span>Chat default</span><span>cloud</span></label>
+                        <input id="modelscopeChatModel" list="msChatModels" spellcheck="false" autocomplete="off" placeholder="Qwen/Qwen3-235B-A22B">
+                    </div>
+                    <div class="note">Cloud image, angle edit, and Klein routes can use the global ModelScope key or a model-specific override below.</div>
+                </div>
+            </div>
+
+            <div class="panel full-row">
+                <div class="panel-head">
+                    <div class="panel-title"><svg class="pixel-icon"><use href="#settings"></use></svg><span>Model-specific keys</span></div>
+                    <button class="btn btn-secondary btn-small" type="button" onclick="addModelKeyRow()">Add override</button>
+                </div>
+                <div class="panel-body">
+                    <div class="table" id="modelKeyRows"></div>
+                    <div class="note">Override rows are optional. Leave them empty unless a provider gives separate token groups per model.</div>
+                </div>
+            </div>
+
+            <div class="panel full-row">
+                <div class="panel-head">
+                    <div class="panel-title"><svg class="pixel-icon"><use href="#nav-canvas"></use></svg><span>Route guide</span></div>
+                    <span class="panel-state">Defaults</span>
+                </div>
+                <div class="panel-body table" id="routeGuide"></div>
+            </div>
+        </section>
+
+        <div class="actions">
+            <button class="btn btn-primary" type="button" onclick="saveConfig()">Save configuration</button>
+            <button class="btn btn-secondary" type="button" onclick="loadConfig()">Reload local values</button>
+            <button class="btn btn-secondary" type="button" onclick="clearConfig()">Clear local config</button>
+        </div>
+        <div class="message" id="message"></div>
+
+        <datalist id="imageModels">
+            <option value="gpt-image-2"></option>
+            <option value="gpt-image-2-all"></option>
+            <option value="nano-banana-pro"></option>
+            <option value="gemini-3.1-flash-image-preview-2k"></option>
+        </datalist>
+        <datalist id="chatModels">
+            <option value="gpt-4o-mini"></option>
+            <option value="gpt-5.5"></option>
+            <option value="gemini-3.1-flash-image-preview-2k"></option>
+        </datalist>
+        <datalist id="msChatModels">
+            <option value="Qwen/Qwen3-235B-A22B"></option>
+            <option value="MiniMax/MiniMax-M2.7:MiniMax"></option>
+        </datalist>
+    </main>
+
+    <script>
+        const KEYS = {
+            comflyToken: 'comfly_token',
+            modelscopeToken: 'modelscope_api_token',
+            comflyBase: 'comfly_base_url',
+            modelscopeBase: 'modelscope_base_url',
+            imageModel: 'comfly_image_model',
+            chatModel: 'comfly_chat_model',
+            msChatModel: 'modelscope_chat_model',
+            modelKeys: 'provider_model_keys'
+        };
+        const DEFAULTS = {
+            comflyBase: 'https://ai.comfly.chat',
+            modelscopeBase: 'https://api-inference.modelscope.cn',
+            imageModel: 'gpt-image-2',
+            chatModel: 'gpt-4o-mini',
+            msChatModel: 'Qwen/Qwen3-235B-A22B'
+        };
+        const ROUTES = [
+            ['comfly', 'gpt-image-2', 'Image default', 'Use image default'],
+            ['comfly', 'gpt-image-2-all', 'Image fallback', 'Use image default'],
+            ['comfly', 'nano-banana-pro', 'Image route', 'Use image default'],
+            ['comfly', 'gpt-4o-mini', 'Chat default', 'Use chat default'],
+            ['modelscope', 'Tongyi-MAI/Z-Image-Turbo', 'Text to image cloud', 'Add override'],
+            ['modelscope', 'Qwen/Qwen-Image-Edit-2511', 'Angle edit cloud', 'Add override'],
+            ['modelscope', 'black-forest-labs/FLUX.2-klein-9B', 'Klein cloud', 'Add override'],
+            ['modelscope', 'Qwen/Qwen3-235B-A22B', 'Chat default', 'Use chat default'],
+            ['modelscope', 'MiniMax/MiniMax-M2.7:MiniMax', 'Chat alternate', 'Use chat default']
+        ];
+
+        function $(id) { return document.getElementById(id); }
+        function value(id) { return ($(id)?.value || '').trim(); }
+        function setValue(id, next) { if ($(id)) $(id).value = next || ''; }
+        function message(text) { $('message').textContent = text || ''; }
+
+        function readModelKeys() {
+            try {
+                const data = JSON.parse(localStorage.getItem(KEYS.modelKeys) || '{}');
+                return data && typeof data === 'object' ? data : {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function flattenModelKeys(data) {
+            const rows = [];
+            ['comfly', 'modelscope'].forEach(provider => {
+                Object.entries(data[provider] || {}).forEach(([model, key]) => {
+                    if (model || key) rows.push({ provider, model, key });
+                });
+            });
+            return rows;
+        }
+
+        function collectModelKeys() {
+            const grouped = { comfly: {}, modelscope: {} };
+            document.querySelectorAll('.model-row').forEach(row => {
+                const provider = row.querySelector('[data-field="provider"]').value;
+                const model = row.querySelector('[data-field="model"]').value.trim();
+                const key = row.querySelector('[data-field="key"]').value.trim();
+                if (provider && model && key) grouped[provider][model] = key;
+            });
+            return grouped;
+        }
+
+        function updateStatus() {
+            const comflySet = Boolean(localStorage.getItem(KEYS.comflyToken) || Object.keys(readModelKeys().comfly || {}).length);
+            const msSet = Boolean(localStorage.getItem(KEYS.modelscopeToken) || Object.keys(readModelKeys().modelscope || {}).length);
+            $('comflyStatus').textContent = comflySet ? 'Comfly ready' : 'Comfly not set';
+            $('modelscopeStatus').textContent = msSet ? 'ModelScope ready' : 'ModelScope not set';
+            $('comflyPanelState').textContent = comflySet ? 'Ready' : 'Not set';
+            $('modelscopePanelState').textContent = msSet ? 'Ready' : 'Not set';
+            $('comflyStatus').classList.toggle('is-on', comflySet);
+            $('modelscopeStatus').classList.toggle('is-on', msSet);
+        }
+
+        function addModelKeyRow(row = {}) {
+            const wrap = document.createElement('div');
+            wrap.className = 'model-row';
+            wrap.innerHTML = `
+                <select data-field="provider">
+                    <option value="comfly">Comfly</option>
+                    <option value="modelscope">ModelScope</option>
+                </select>
+                <input data-field="model" list="allModels" spellcheck="false" autocomplete="off" placeholder="model id">
+                <input data-field="key" type="password" spellcheck="false" autocomplete="off" placeholder="model API key">
+                <button class="btn btn-secondary btn-small" type="button">Remove</button>
+            `;
+            wrap.querySelector('[data-field="provider"]').value = row.provider || 'comfly';
+            wrap.querySelector('[data-field="model"]').value = row.model || '';
+            wrap.querySelector('[data-field="key"]').value = row.key || '';
+            wrap.querySelector('button').addEventListener('click', () => wrap.remove());
+            $('modelKeyRows').appendChild(wrap);
+        }
+
+        function renderModelKeyRows(rows) {
+            $('modelKeyRows').innerHTML = '';
+            const nextRows = rows && rows.length ? rows : [{ provider: 'comfly', model: '', key: '' }];
+            nextRows.forEach(addModelKeyRow);
+        }
+
+        function setRouteDefault(provider, model, route) {
+            if (provider === 'comfly' && route.includes('Image')) setValue('comflyImageModel', model);
+            else if (provider === 'comfly') setValue('comflyChatModel', model);
+            else if (route.includes('Chat')) setValue('modelscopeChatModel', model);
+            else addModelKeyRow({ provider, model, key: '' });
+            message('Route selected. Save to apply it.');
+        }
+
+        function renderGuide() {
+            $('routeGuide').innerHTML = ROUTES.map(([provider, model, route, action]) => `
+                <div class="guide-row">
+                    <span class="guide-provider">${provider}</span>
+                    <span class="guide-model">${model}</span>
+                    <span class="guide-route">${route}</span>
+                    <button class="btn btn-secondary btn-small" type="button" data-provider="${provider}" data-model="${model}" data-route="${route}">${action}</button>
+                </div>
+            `).join('');
+            $('routeGuide').querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('click', () => setRouteDefault(btn.dataset.provider, btn.dataset.model, btn.dataset.route));
+            });
+        }
+
+        function saveItem(key, next) {
+            if (next) localStorage.setItem(key, next);
+            else localStorage.removeItem(key);
+        }
+
+        function saveConfig() {
+            saveItem(KEYS.comflyToken, value('comflyToken'));
+            saveItem(KEYS.modelscopeToken, value('modelscopeToken'));
+            saveItem(KEYS.comflyBase, value('comflyBaseUrl') || DEFAULTS.comflyBase);
+            saveItem(KEYS.modelscopeBase, value('modelscopeBaseUrl') || DEFAULTS.modelscopeBase);
+            saveItem(KEYS.imageModel, value('comflyImageModel') || DEFAULTS.imageModel);
+            saveItem(KEYS.chatModel, value('comflyChatModel') || DEFAULTS.chatModel);
+            saveItem(KEYS.msChatModel, value('modelscopeChatModel') || DEFAULTS.msChatModel);
+            localStorage.setItem(KEYS.modelKeys, JSON.stringify(collectModelKeys()));
+            updateStatus();
+            window.parent?.postMessage({ type: 'api-config-updated' }, '*');
+            message('Saved locally. New requests will use these provider and model settings.');
+        }
+
+        function loadConfig() {
+            setValue('comflyToken', localStorage.getItem(KEYS.comflyToken) || '');
+            setValue('modelscopeToken', localStorage.getItem(KEYS.modelscopeToken) || '');
+            setValue('comflyBaseUrl', localStorage.getItem(KEYS.comflyBase) || DEFAULTS.comflyBase);
+            setValue('modelscopeBaseUrl', localStorage.getItem(KEYS.modelscopeBase) || DEFAULTS.modelscopeBase);
+            setValue('comflyImageModel', localStorage.getItem(KEYS.imageModel) || DEFAULTS.imageModel);
+            setValue('comflyChatModel', localStorage.getItem(KEYS.chatModel) || DEFAULTS.chatModel);
+            setValue('modelscopeChatModel', localStorage.getItem(KEYS.msChatModel) || DEFAULTS.msChatModel);
+            renderModelKeyRows(flattenModelKeys(readModelKeys()));
+            updateStatus();
+        }
+
+        function clearConfig() {
+            Object.values(KEYS).forEach(key => localStorage.removeItem(key));
+            loadConfig();
+            window.parent?.postMessage({ type: 'api-config-updated' }, '*');
+            message('Cleared local API configuration.');
+        }
+
+        function addAllModelDatalist() {
+            const list = document.createElement('datalist');
+            list.id = 'allModels';
+            ROUTES.forEach(([, model]) => {
+                const option = document.createElement('option');
+                option.value = model;
+                list.appendChild(option);
+            });
+            document.body.appendChild(list);
+        }
+
+        addAllModelDatalist();
+        renderGuide();
+        loadConfig();
+    </script>
+</body>
+</html>

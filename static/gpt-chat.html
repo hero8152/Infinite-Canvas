@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>GPT 对话</title>
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>GPT Chat · Feebee Studios</title>
     <!-- Phase 1: 引入 Editorial Canvas 设计系统（DESIGN.md v2.1） -->
-    <link rel="stylesheet" href="/static/design-system.css?v=23">
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
     <!-- 保留 theme.js 用于接收父 frame 的主题切换 postMessage -->
-    <script src="/static/theme.js?v=20260512c"></script>
+    <script src="/static/theme.js?v=20260512g"></script>
     <style>
         /* ============================================================
            gpt-chat 局部规则 — 仅做布局, 不写颜色/圆角/阴影/transition
@@ -18,16 +18,27 @@
         html, body { height: 100%; }
         body {
             background: var(--bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.28) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.28) 1px, transparent 1px);
+            background-size: 80px 80px;
             color: var(--ink);
             overflow: hidden;
+        }
+        body.studio-theme-dark {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
         /* shell: 左 240px 历史侧栏 + 右主区 */
         .chat-shell {
             display: grid;
-            grid-template-columns: 240px 1fr;
+            grid-template-columns: 264px 1fr;
             height: 100vh;
             min-height: 0;
+            background: transparent;
         }
 
         /* ---------- Sidebar (240px 历史会话列) ---------- */
@@ -38,8 +49,12 @@
             min-height: 0;
             padding: 16px 12px;
             gap: 12px;
+            background: rgba(255, 250, 235, 0.94);
         }
-        body.studio-theme-dark .sidebar-history { border-right-color: var(--dark-border); }
+        body.studio-theme-dark .sidebar-history {
+            background: rgba(14, 14, 16, 0.94);
+            border-right-color: var(--dark-border);
+        }
 
         .sidebar-header {
             display: flex;
@@ -61,7 +76,10 @@
             display: flex;
             flex-direction: column;
             gap: 4px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
         }
+        body.studio-theme-dark .thread-list { border-top-color: var(--dark-border); }
 
         /* 历史会话单项 — §15.7 chip 风格，激活态 §11 sidebar nav-item */
         .thread-row {
@@ -166,8 +184,17 @@
             min-width: 0;
             min-height: 0;
             background: var(--stage-bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.18) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.18) 1px, transparent 1px);
+            background-size: 80px 80px;
         }
-        body.studio-theme-dark .main-pane { background: var(--dark-bg); }
+        body.studio-theme-dark .main-pane {
+            background: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
 
         /* 顶部条 — section-tag 标题 + select 模型 */
         .top-bar {
@@ -177,8 +204,12 @@
             gap: 16px;
             padding: 16px 24px;
             border-bottom: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.72);
         }
-        body.studio-theme-dark .top-bar { border-bottom-color: var(--dark-border); }
+        body.studio-theme-dark .top-bar {
+            background: rgba(14, 14, 16, 0.72);
+            border-bottom-color: var(--dark-border);
+        }
 
         .top-bar-left {
             display: flex;
@@ -217,6 +248,7 @@
         .messages-inner {
             width: 100%;
             max-width: 880px;
+            min-height: 100%;
             margin: 0 auto;
             display: flex;
             flex-direction: column;
@@ -325,19 +357,33 @@
             flex-direction: column;
             align-items: center;
             gap: 12px;
+            width: min(360px, 100%);
+            padding: 24px;
+            background: rgba(255, 250, 235, 0.72);
+            border: 1px solid var(--border);
         }
         .messages-empty svg.pixel-icon { color: var(--primary); }
+        .messages-empty .image-placeholder {
+            width: 168px;
+            height: 168px;
+            aspect-ratio: auto;
+            border: 1px solid var(--border);
+        }
         .messages-empty .empty-label {
             font-family: var(--font-mono);
             font-size: 12px;
             letter-spacing: 0.1em;
             text-transform: uppercase;
         }
+        body.studio-theme-dark .messages-empty {
+            background: rgba(28, 28, 30, 0.72);
+            border-color: var(--dark-border);
+        }
 
         /* ---------- Composer (底部输入栏) ---------- */
         .composer-wrap {
             border-top: 1px solid var(--border);
-            background: var(--bg);
+            background: rgba(255, 250, 235, 0.94);
             padding: 16px 24px 20px;
         }
         body.studio-theme-dark .composer-wrap {
@@ -352,6 +398,13 @@
             display: flex;
             flex-direction: column;
             gap: 12px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid var(--border);
+        }
+        body.studio-theme-dark .composer {
+            background: rgba(28, 28, 30, 0.72);
+            border-color: var(--dark-border);
         }
 
         /* mode 切换 + provider 切换：§15.7 radio-row 横向排 */
@@ -617,7 +670,7 @@
                             id="messageInput"
                             class="textarea"
                             rows="2"
-                            placeholder="输入消息，Enter 发送 / Shift+Enter 换行 / 粘贴或拖入图片作参考"
+                            placeholder="输入消息或拖入参考图"
                             oninput="autoGrow(this)"
                             onkeydown="handleKey(event)"></textarea>
                         <button id="sendBtn" class="btn-primary send-btn" onclick="sendMessage()" title="Send">
@@ -627,7 +680,7 @@
                     </div>
 
                     <div class="composer-hint">
-                        <span>Enter to send · Shift+Enter for newline · paste / drop image to attach</span>
+                        <span>Ready</span>
                         <span id="hintRight"></span>
                     </div>
                 </div>
@@ -866,7 +919,9 @@
             if (!messages.length) {
                 inner.innerHTML = `
                     <div class="messages-empty">
-                        <svg class="pixel-icon pixel-icon--xl"><use href="/static/icons/pixel.svg#nav-chat"/></svg>
+                        <div class="image-placeholder" aria-hidden="true">
+                            <svg class="pixel-icon pixel-icon--xl"><use href="/static/icons/pixel.svg#nav-chat"/></svg>
+                        </div>
                         <div class="empty-label">Ready</div>
                     </div>
                 `;

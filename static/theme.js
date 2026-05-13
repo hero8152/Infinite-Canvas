@@ -40,13 +40,208 @@
     });
 
     /* ----------------------------------------------------------------------
+       Browser-local provider token
+       ----------------------------------------------------------------------
+       登录页保存的 comfly_token 不写入服务端文件；同源 AI 请求由前端以请求头
+       传给后端，后端仅用于当前请求。
+    */
+    const COMFLY_TOKEN_ENDPOINTS = new Set([
+        '/api/config',
+        '/api/online-image',
+        '/api/chat',
+        '/api/chat/stream',
+        '/api/canvas-llm'
+    ]);
+    const MODELSCOPE_BODY_ENDPOINTS = new Set([
+        '/generate',
+        '/api/angle/generate',
+        '/api/angle/poll_status',
+        '/api/ms/generate'
+    ]);
+    const nativeFetch = window.fetch.bind(window);
+
+    function sameOriginPath(input) {
+        const raw = input instanceof Request ? input.url : String(input || '');
+        const url = new URL(raw, window.location.href);
+        return url.origin === window.location.origin ? url.pathname : '';
+    }
+
+    function shouldAttachComflyToken(input) {
+        const path = sameOriginPath(input);
+        return COMFLY_TOKEN_ENDPOINTS.has(path) || path.startsWith('/api/batch-tryon/');
+    }
+
+    function localValue(key) {
+        return (localStorage.getItem(key) || '').trim();
+    }
+
+    function readModelKeys() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem('provider_model_keys') || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function keyFor(provider, model, fallbackKey) {
+        const modelKeys = readModelKeys();
+        const cleanModel = (model || '').trim();
+        const scoped = modelKeys[provider] || {};
+        return (cleanModel && scoped[cleanModel] ? String(scoped[cleanModel]).trim() : '') || localValue(fallbackKey);
+    }
+
+    function parseJsonBody(body) {
+        if (!body || typeof body !== 'string') return null;
+        try {
+            return JSON.parse(body);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    async function requestBody(input, init) {
+        if (init && Object.prototype.hasOwnProperty.call(init, 'body')) return init.body;
+        if (input instanceof Request) return input.bodyUsed ? null : input.clone().text();
+        return null;
+    }
+
+    async function jsonPayload(input, init) {
+        const body = await requestBody(input, init);
+        if (!body) return null;
+        if (typeof body === 'string') return parseJsonBody(body);
+        if (body instanceof Blob) return parseJsonBody(await body.text());
+        if (body instanceof URLSearchParams) return null;
+        if (body && typeof body === 'object' && !(body instanceof FormData)) return body;
+        return null;
+    }
+
+    function comflyModelFor(path, payload) {
+        if (path === '/api/online-image' || path.startsWith('/api/batch-tryon/')) return payload?.model || localValue('comfly_image_model');
+        if (path === '/api/chat') {
+            if (payload?.provider === 'modelscope') return '';
+            return payload?.mode === 'image'
+                ? (payload?.image_model || payload?.model || localValue('comfly_image_model'))
+                : (payload?.model || localValue('comfly_chat_model'));
+        }
+        if (path === '/api/chat/stream' || path === '/api/canvas-llm') {
+            if (payload?.provider === 'modelscope') return '';
+            return payload?.model || localValue('comfly_chat_model');
+        }
+        return '';
+    }
+
+    function modelscopeModelFor(path, payload) {
+        if (path === '/generate') return 'Tongyi-MAI/Z-Image-Turbo';
+        if (path === '/api/angle/generate' || path === '/api/angle/poll_status') return 'Qwen/Qwen-Image-Edit-2511';
+        if (path === '/api/ms/generate') return payload?.model || 'black-forest-labs/FLUX.2-klein-9B';
+        return payload?.ms_model || payload?.model || localValue('modelscope_chat_model');
+    }
+
+    function withPreferred(list, value) {
+        const clean = (value || '').trim();
+        const values = Array.isArray(list) ? list.filter(Boolean) : [];
+        if (!clean) return values;
+        return [clean, ...values.filter(item => item !== clean)];
+    }
+
+    async function responseWithLocalConfig(response) {
+        if (!response.ok) return response;
+        const data = await response.clone().json();
+        const imageModel = localValue('comfly_image_model');
+        const chatModel = localValue('comfly_chat_model');
+        const msChatModel = localValue('modelscope_chat_model');
+        if (imageModel) {
+            data.image_model = imageModel;
+            data.image_models = withPreferred(data.image_models, imageModel);
+        }
+        if (chatModel) {
+            data.chat_model = chatModel;
+            data.chat_models = withPreferred(data.chat_models, chatModel);
+        }
+        if (msChatModel) {
+            data.ms_chat_models = withPreferred(data.ms_chat_models, msChatModel);
+        }
+        const comflyBase = localValue('comfly_base_url');
+        const msBase = localValue('modelscope_base_url');
+        if (comflyBase) data.base_url = comflyBase.replace(/\/+$/, '');
+        if (msBase) data.modelscope_base_url = msBase.replace(/\/+$/, '');
+        const headers = new Headers(response.headers);
+        headers.set('Content-Type', 'application/json');
+        return new Response(JSON.stringify(data), {
+            status: response.status,
+            statusText: response.statusText,
+            headers
+        });
+    }
+
+    window.fetch = async function fetchWithProviderConfig(input, init) {
+        const path = sameOriginPath(input);
+        const shouldAttach = shouldAttachComflyToken(input);
+        const raw = input instanceof Request ? input.url : String(input || '');
+        const url = new URL(raw, window.location.href);
+        const payload = await jsonPayload(input, init);
+        let nextInit = init || {};
+
+        if (shouldAttach) {
+            const requestHeaders = input instanceof Request ? input.headers : undefined;
+            const headers = new Headers((init && init.headers) || requestHeaders || {});
+            const token = keyFor('comfly', comflyModelFor(path, payload), 'comfly_token');
+            if (token && !headers.has('X-Comfly-API-Key')) {
+                headers.set('X-Comfly-API-Key', token);
+            }
+            const baseUrl = localValue('comfly_base_url');
+            if (baseUrl && !headers.has('X-Comfly-Base-URL')) {
+                headers.set('X-Comfly-Base-URL', baseUrl);
+            }
+            nextInit = { ...nextInit, headers };
+        }
+
+        if ((path === '/api/chat' || path === '/api/chat/stream' || path === '/api/canvas-llm')
+            && payload?.provider === 'modelscope') {
+            const token = keyFor('modelscope', modelscopeModelFor(path, payload), 'modelscope_api_token');
+            const baseUrl = localValue('modelscope_base_url');
+            const nextBody = { ...payload };
+            if (token && !nextBody.ms_api_key) nextBody.ms_api_key = token;
+            if (baseUrl && !nextBody.ms_base_url) nextBody.ms_base_url = baseUrl;
+            const headers = new Headers(nextInit.headers || {});
+            if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+            nextInit = {
+                ...nextInit,
+                headers,
+                body: JSON.stringify(nextBody)
+            };
+        }
+
+        if (MODELSCOPE_BODY_ENDPOINTS.has(path) && payload && typeof payload === 'object') {
+            const token = keyFor('modelscope', modelscopeModelFor(path, payload), 'modelscope_api_token');
+            const baseUrl = localValue('modelscope_base_url');
+            const nextBody = { ...payload };
+            if (token && !nextBody.api_key) nextBody.api_key = token;
+            if (baseUrl && !nextBody.base_url) nextBody.base_url = baseUrl;
+            const headers = new Headers(nextInit.headers || {});
+            if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+            nextInit = {
+                ...nextInit,
+                headers,
+                body: JSON.stringify(nextBody)
+            };
+        }
+        const request = nativeFetch(input, nextInit);
+        if (url.origin === window.location.origin && url.pathname === '/api/config') {
+            return request.then(responseWithLocalConfig);
+        }
+        return request;
+    };
+
+    /* ----------------------------------------------------------------------
        Pixel icon sprite injector
        ----------------------------------------------------------------------
        跨文档 <use href="external.svg#id"> 在多数浏览器里 currentColor 不会
        从外层 host 文档继承过来，效果就是图标渲染不出。我们把整个 sprite 同
        步抓回来，inline 注入到 body 起始位置，引用方就能用同文档 <use href="#id">。
     */
-    const SPRITE_URL = '/static/icons/pixel.svg?v=22';
+    const SPRITE_URL = '/static/icons/pixel.svg?v=26';
     let SPRITE_HTML = null;
 
     function injectSprite() {
@@ -61,22 +256,25 @@
         document.body.insertBefore(wrap, document.body.firstChild);
     }
 
-    // 同步抓 sprite，确保 DOM 渲染之前已经 inline 好
-    try {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', SPRITE_URL, false); // sync
-        xhr.send(null);
-        if (xhr.status === 200) SPRITE_HTML = xhr.responseText;
-    } catch (e) {
-        // Sync XHR 在 chrome 高版本 deprecation warning 但仍可用；失败时回退到异步 fetch
-        fetch(SPRITE_URL).then(r => r.text()).then(t => { SPRITE_HTML = t; injectSprite(); });
+    function injectSpriteWhenReady() {
+        if (document.body) {
+            injectSprite();
+        } else {
+            document.addEventListener('DOMContentLoaded', injectSprite, { once: true });
+        }
     }
 
-    if (document.body) {
-        injectSprite();
-    } else {
-        document.addEventListener('DOMContentLoaded', injectSprite);
-    }
+    fetch(SPRITE_URL, { cache: 'force-cache' })
+        .then(r => {
+            if (!r.ok) throw new Error(`pixel sprite ${r.status}`);
+            return r.text();
+        })
+        .then(t => {
+            SPRITE_HTML = t;
+            injectSpriteWhenReady();
+            replaceLucideIcons(document);
+        })
+        .catch(e => console.warn('Failed to load pixel sprite', e));
 
     /* ----------------------------------------------------------------------
        Lucide → Pixel sprite 转换器

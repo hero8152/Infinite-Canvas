@@ -4,10 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>Angle control · Infinite-Canvas</title>
-    <link rel="stylesheet" href="/static/design-system.css?v=23">
-    <script src="/static/theme.js?v=20260512c"></script>
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Angle control · Feebee Studios</title>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512g"></script>
     <script type="importmap">
         {
             "imports": {
@@ -42,6 +42,11 @@
             display: flex;
             min-height: 100vh;
             gap: 0;
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.28) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.28) 1px, transparent 1px);
+            background-size: 80px 80px;
         }
         .param-panel {
             width: 380px;
@@ -51,9 +56,18 @@
             flex-direction: column;
             gap: 24px;
             border-right: 1px solid var(--border);
-            background: transparent;
+            background: rgba(255, 250, 235, 0.94);
         }
-        body.studio-theme-dark .param-panel { border-right-color: var(--dark-border); }
+        body.studio-theme-dark .page-wrap {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
+        body.studio-theme-dark .param-panel {
+            background: rgba(14, 14, 16, 0.94);
+            border-right-color: var(--dark-border);
+        }
 
         .stage-main {
             flex: 1;
@@ -62,6 +76,17 @@
             flex-direction: column;
             gap: 24px;
             min-width: 0;
+            background: rgba(255, 255, 255, 0.58);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.18) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.18) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+        body.studio-theme-dark .stage-main {
+            background: rgba(14, 14, 16, 0.72);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
         /* 参数面板内部分组 */
@@ -86,7 +111,10 @@
             align-items: center;
             gap: 16px;
             flex-wrap: wrap;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
         }
+        body.studio-theme-dark .stage-header { border-bottom-color: var(--dark-border); }
 
         /* dropzone 上传后的 64×64 缩略图条 */
         .dropzone-thumb {
@@ -288,11 +316,18 @@
             gap: 12px;
             color: var(--muted);
             text-align: center;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 250, 235, 0.62);
         }
         .result-card .empty-stage .image-placeholder {
-            width: 160px;
-            height: 160px;
+            width: 168px;
+            height: 168px;
             aspect-ratio: auto;
+            border: 1px solid var(--border);
+        }
+        body.studio-theme-dark .result-card .empty-stage {
+            background: rgba(28, 28, 30, 0.62);
         }
         .result-card .out-download {
             position: absolute;
@@ -433,12 +468,20 @@
             padding: 48px 16px;
             color: var(--muted);
             text-align: center;
+            background: rgba(255, 250, 235, 0.72);
+            border: 1px solid var(--border);
         }
         .archive-empty .image-placeholder {
-            width: 160px;
-            height: 160px;
+            width: 168px;
+            height: 168px;
             aspect-ratio: auto;
+            border: 1px solid var(--border);
         }
+        body.studio-theme-dark .archive-empty {
+            background: rgba(28, 28, 30, 0.72);
+            border-color: var(--dark-border);
+        }
+        .archive-card { border-width: 2px; }
 
         /* Lightbox：§16.5 全黑 .92 + 0 backdrop-blur */
         .lightbox-mask {
@@ -736,7 +779,7 @@
                         <div id="emptyState" class="empty-stage">
                             <div class="image-placeholder"></div>
                             <div class="text-body">Canvas ready</div>
-                            <div class="field-hint">Upload image and adjust angle</div>
+                            <div class="field-hint">Awaiting angle render</div>
                         </div>
 
                         <!-- loading state（§16.3 棋盘 + §16.4 terminal） -->
@@ -779,14 +822,14 @@
                         <span id="archiveCountLabel">Archive (0)</span>
                         <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-chevron-down"/></svg>
                     </span>
-                    <span class="text-mono text-muted">Tap any card to preview</span>
+                    <span class="text-mono text-muted">ARCHIVE READY</span>
                 </div>
 
                 <div id="masonry" class="archive-grid">
                     <div id="archiveEmpty" class="archive-empty">
                         <div class="image-placeholder"></div>
                         <div class="text-body">No archive yet</div>
-                        <div class="field-hint">Generated angles will appear here</div>
+                        <div class="field-hint">Awaiting result</div>
                     </div>
                 </div>
                 <div id="loadMoreTrigger" style="padding:24px 0; text-align:center; color:var(--muted); font-family:var(--font-mono); font-size:12px;">
@@ -822,7 +865,7 @@
         // Initialize WebSocket Listener for Cloud Progress
         window.addEventListener('message', function(event) {
             const data = event.data;
-            if (data && data.type === 'cloud_status') {
+            if (data && (data.type === 'cloud_status' || data.type === 'task_status')) {
                 updateCloudProgress(data);
             }
         });
@@ -845,8 +888,12 @@
             if (data.status) {
                 // Simplify status text (remove internal details if needed)
                 let displayStatus = data.status;
-                if (displayStatus.includes("PENDING")) displayStatus = "Queueing...";
-                if (displayStatus.includes("RUNNING")) displayStatus = "Generating...";
+                const normalized = String(displayStatus).toLowerCase();
+                if (normalized === "queued" || displayStatus.includes("PENDING")) displayStatus = "Queueing...";
+                if (normalized === "running" || displayStatus.includes("RUNNING")) displayStatus = "Generating...";
+                if (normalized === "succeeded") displayStatus = "Done";
+                if (normalized === "failed") displayStatus = "Failed";
+                if (normalized === "timeout") displayStatus = "Timeout";
                 statusText.innerText = displayStatus;
             }
 
@@ -1282,26 +1329,28 @@
         async function runCloudTask() {
             if (!uploadedFile) throw new Error("Please upload an image first");
 
-            // Get token from centralized management (Personal -> Global)
+            // Use a local personal token when present; otherwise let the backend
+            // use MODELSCOPE_API_KEY without exposing it to the browser.
             let token = localStorage.getItem('modelscope_api_token');
+            let hasBackendToken = false;
 
             if (!token) {
                 try {
                     const res = await fetch('/api/config/token');
                     if (res.ok) {
                         const data = await res.json();
-                        if (data.token) token = data.token;
+                        hasBackendToken = Boolean(data.has_token);
                     }
                 } catch (e) {
-                    console.warn("Failed to fetch global token", e);
+                    console.warn("Failed to fetch token status", e);
                 }
             }
 
-            if (!token) {
+            if (!token && !hasBackendToken) {
                 if (window.parent && typeof window.parent.openTokenModal === 'function') {
                     window.parent.openTokenModal();
                 }
-                throw new Error("请先点击右上角设置 ModelScope Token");
+                throw new Error("请先在 API/.env 配置 MODELSCOPE_API_KEY，或设置本地 ModelScope Token");
             }
 
             // Convert image to Base64
@@ -1325,7 +1374,7 @@
 
             const payload = {
                 "prompt": promptInput.value,
-                "api_key": token,
+                "api_key": token || "",
                 "type": "angle",
                 "model": "Qwen/Qwen-Image-Edit-2511",
                 "image_urls": [dataUri],
@@ -1367,7 +1416,7 @@
                         // Call poll endpoint
                         const pollPayload = {
                             "task_id": taskId,
-                            "api_key": token,
+                            "api_key": token || "",
                             "client_id": clientId
                         };
 
@@ -1595,7 +1644,7 @@
                             <div id="archiveEmpty" class="archive-empty">
                                 <div class="image-placeholder"></div>
                                 <div class="text-body">No archive yet</div>
-                                <div class="field-hint">Generated angles will appear here</div>
+                                <div class="field-hint">Awaiting result</div>
                             </div>
                         `;
                     }

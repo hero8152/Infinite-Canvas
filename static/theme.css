@@ -1,5 +1,5 @@
 /* ============================================================================
-   Infinite-Canvas theme.css — v2.1 thin compatibility layer
+   Feebee Studios theme.css — v2.1 thin compatibility layer
    ----------------------------------------------------------------------------
    v2.0 之前这里堆了 1700+ 行的 dark mode 覆盖。v2.1 重构把所有视觉规则迁移到
    /static/design-system.css，由 token 驱动 light/dark 自动切换。

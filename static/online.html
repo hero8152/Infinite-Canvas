@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>Online generate · Infinite-Canvas</title>
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Online generate · Feebee Studios</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/design-system.css?v=23">
-    <script src="/static/theme.js?v=20260512c"></script>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512g"></script>
     <style>
         /* 页面级布局：左 380px 参数面板 + 右侧 grid 主区，参照 DESIGN.md §17.2 统一模板 */
         body {
@@ -41,7 +41,7 @@
             flex-direction: column;
             gap: 16px;
             border-right: 1px solid var(--border);
-            background: var(--bg);
+            background: rgba(255, 250, 235, 0.94);
         }
         body.studio-theme-dark .params-panel {
             border-right-color: var(--dark-border);
@@ -54,6 +54,17 @@
             display: flex;
             flex-direction: column;
             gap: 24px;
+            background: rgba(255, 255, 255, 0.72);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.18) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.18) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+        body.studio-theme-dark .stage-panel {
+            background: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
         /* 表单字段组 */
@@ -194,10 +205,43 @@
         }
         .image-card .img-wrap {
             background: var(--bg-2);
+            border-bottom: 1px solid var(--border);
         }
         .image-card .img-wrap img {
             width: 100%;
             display: block;
+        }
+
+        .online-empty {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            min-height: calc(100vh - 184px);
+            border: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.72);
+            color: var(--muted);
+            text-align: center;
+        }
+        .online-empty .image-placeholder {
+            width: 168px;
+            height: 168px;
+            aspect-ratio: auto;
+            border: 1px solid var(--border);
+        }
+        .online-empty .empty-copy {
+            padding: 8px 12px;
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+        }
+        body.studio-theme-dark .online-empty {
+            background: rgba(28, 28, 30, 0.72);
+            border-color: var(--dark-border);
+        }
+        body.studio-theme-dark .online-empty .empty-copy {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
         }
 
         /* 棋盘加载占位：在 image-grid 内复用 .image-placeholder */
@@ -413,11 +457,15 @@
 
             <!-- §16.2 image-grid -->
             <div id="imageGrid" class="image-grid"></div>
+            <div id="onlineEmptyState" class="stage-empty online-empty">
+                <div class="image-placeholder" aria-hidden="true"></div>
+                <span class="text-mono empty-copy">No online images yet</span>
+            </div>
 
             <!-- Load more 按钮：§7.3 下划线文字链 -->
             <div style="display:flex; justify-content:center; padding:24px 0;">
                 <button id="loadMoreBtn" class="btn-underline" type="button" onclick="loadHistory(1)">
-                    Load more
+                    <span>Load more</span>
                     <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-right"/></svg>
                 </button>
             </div>
@@ -720,9 +768,11 @@
                     </div>
                 </div>`;
             grid.prepend(card);
+            toggleOnlineEmpty();
         }
         function removePlaceholder(id) {
             document.getElementById(id)?.remove();
+            toggleOnlineEmpty();
         }
 
         function formatMeta(data) {
@@ -773,6 +823,14 @@
                     </div>
                 </div>`;
             isNew ? grid.prepend(card) : grid.appendChild(card);
+            toggleOnlineEmpty();
+        }
+
+        function toggleOnlineEmpty() {
+            const grid = document.getElementById('imageGrid');
+            const empty = document.getElementById('onlineEmptyState');
+            if (!grid || !empty) return;
+            empty.style.display = grid.children.length === 0 ? 'flex' : 'none';
         }
 
         function escapeHtml(s) {
@@ -805,8 +863,9 @@
             if (isLoading) return;
             isLoading = true;
             const more = document.getElementById('loadMoreBtn');
+            const moreText = more?.querySelector('span');
             if (page === 0) {
-                more.querySelector('span').textContent = 'Loading…';
+                if (moreText) moreText.textContent = 'Loading…';
                 allHistory = await fetch('/api/history?type=online').then(r => r.json());
                 document.getElementById('imageGrid').innerHTML = '';
                 currentIndex = 0;
@@ -814,9 +873,10 @@
             const next = allHistory.slice(currentIndex, currentIndex + PAGE_SIZE);
             next.forEach(item => renderImageCard(item));
             currentIndex += next.length;
-            more.style.display = currentIndex >= allHistory.length ? 'none' : 'inline-flex';
-            more.querySelector('span').textContent = 'Load more';
+            if (more) more.style.display = currentIndex >= allHistory.length ? 'none' : 'inline-flex';
+            if (moreText) moreText.textContent = 'Load more';
             updateHistoryCount();
+            toggleOnlineEmpty();
             isLoading = false;
         }
         function updateHistoryCount() {
@@ -834,6 +894,7 @@
                 document.getElementById(`history-${ts}`)?.remove();
                 allHistory = allHistory.filter(x => String(x.timestamp) !== String(ts));
                 updateHistoryCount();
+                toggleOnlineEmpty();
             }
         }
 

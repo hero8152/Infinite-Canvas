@@ -1,5 +1,5 @@
 /* ============================================================================
-   Infinite-Canvas Design System v2.1 — Mistral-faithful
+   Feebee Studios Design System v2.1 — Mistral-faithful
    规范来源: /DESIGN.md（v2.1，17 章节）
    组织顺序: tokens → typography → layout → components → media → override layer
    引入方式: <link rel="stylesheet" href="/static/design-system.css">
@@ -468,7 +468,7 @@ body.studio-theme-dark .select {
 }
 .number-input .num-btn {
   width: 24px; height: 24px;
-  background: var(--ink);
+  background: #0f0f0f;
   color: #fff;
   border: none;
   cursor: pointer;
@@ -485,11 +485,24 @@ body.studio-theme-dark .select {
   font-family: var(--font-mono);
   font-size: 14px;
   background: var(--stage-bg);
+  color: var(--ink);
   border: 1px solid var(--border);
   border-left: none; border-right: none;
   border-radius: 0;
   outline: none;
   -moz-appearance: textfield;
+}
+body.studio-theme-dark .number-input .num-btn {
+  background: #f2f2f2;
+  color: #0f0f0f;
+}
+body.studio-theme-dark .number-input .num-btn:hover {
+  background: #ffffff;
+}
+body.studio-theme-dark .number-input input {
+  background: var(--dark-elev);
+  color: var(--dark-text);
+  border-color: var(--dark-border);
 }
 .number-input input::-webkit-outer-spin-button,
 .number-input input::-webkit-inner-spin-button {

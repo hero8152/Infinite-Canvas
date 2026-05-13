@@ -4,19 +4,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/static/logo.png" type="image/png">
-    <title>Infinite Canvas</title>
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Feebee Studios</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/design-system.css?v=23">
-    <script src="/static/theme.js?v=20260512c"></script>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512g"></script>
     <style>
         /* ===== 项目级 shell 特化（设计 token 全部来自 design-system.css） ===== */
 
         body {
             margin: 0;
             overflow: hidden;
+            overflow-x: hidden;
             height: 100vh;
+            height: 100dvh;
+            width: 100%;
             font-family: var(--font-sans);
             color: var(--ink);
         }
@@ -24,7 +27,9 @@
         .app-shell {
             display: flex;
             width: 100%;
+            min-width: 0;
             height: 100vh;
+            height: 100dvh;
             position: relative;
             padding-bottom: 4px;
             background-color: var(--bg);
@@ -45,6 +50,8 @@
         .sidebar {
             width: 72px;
             min-width: 72px;
+            height: 100%;
+            max-height: 100%;
             background: transparent;
             display: flex;
             flex-direction: column;
@@ -53,6 +60,8 @@
             transition: width 0.3s ease;
             z-index: 50;
             overflow: hidden;
+            box-sizing: border-box;
+            min-height: 0;
         }
         .sidebar:hover { width: 240px; }
 
@@ -85,8 +94,14 @@
             display: flex;
             flex-direction: column;
             gap: 2px;
-            flex: 1;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-bottom: 12px;
+            scrollbar-width: none;
         }
+        nav::-webkit-scrollbar { display: none; }
 
         .nav-item {
             display: flex;
@@ -135,12 +150,13 @@
 
         /* ----- Sidebar 底部：nano monitor + theme toggle ----- */
         .sidebar-footer {
-            margin-top: auto;
+            flex: 0 0 auto;
             display: flex;
             flex-direction: column;
             gap: 8px;
             padding-top: 12px;
             border-top: 1px solid var(--border);
+            margin-top: auto;
         }
 
         .nano-monitor {
@@ -188,7 +204,7 @@
         }
         .nano-monitor.is-busy { background: var(--primary-deep); }
 
-        .theme-toggle {
+        .sidebar-action {
             display: flex;
             align-items: center;
             gap: 12px;
@@ -203,16 +219,33 @@
             font-weight: 500;
             cursor: pointer;
             transition: none;
+            width: 100%;
         }
-        .theme-toggle:hover { background: var(--bg); }
-        body.studio-theme-dark .theme-toggle { background: var(--dark-elev); color: var(--dark-text); }
-        body.studio-theme-dark .theme-toggle:hover { background: var(--dark-surface); }
-        .theme-toggle .nav-icon { width: 16px; height: 16px; color: var(--primary); flex-shrink: 0; }
-        .theme-toggle-text {
+        .sidebar-action:hover { background: var(--bg); }
+        .sidebar-action.active { background: var(--bg-2); color: var(--ink); }
+        body.studio-theme-dark .sidebar-action { background: var(--dark-elev); color: var(--dark-text); }
+        body.studio-theme-dark .sidebar-action:hover { background: var(--dark-surface); }
+        body.studio-theme-dark .sidebar-action.active { background: var(--dark-surface); }
+        .sidebar-action .nav-icon { width: 16px; height: 16px; color: var(--primary); flex-shrink: 0; }
+        .sidebar-action-text {
             opacity: 0;
             transition: opacity 0.2s;
         }
-        .sidebar:hover .theme-toggle-text { opacity: 1; }
+        .sidebar:hover .sidebar-action-text { opacity: 1; }
+        .sidebar-action-status {
+            width: 6px;
+            height: 6px;
+            margin-left: auto;
+            background: transparent;
+            border: 1px solid var(--border-strong);
+            opacity: 0;
+            flex-shrink: 0;
+        }
+        .sidebar:hover .sidebar-action-status { opacity: 1; }
+        .sidebar-action-status.is-on {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
 
         /* ----- Stage（主舞台 iframe 容器） ----- */
         .stage-wrapper {
@@ -222,6 +255,7 @@
             flex-direction: column;
             position: relative;
             min-width: 0;
+            overflow: hidden;
         }
         .stage {
             flex: 1;
@@ -282,7 +316,7 @@
                 <svg class="logo-icon pixel-icon" aria-hidden="true">
                     <use href="#ic-brand"/>
                 </svg>
-                <span class="logo-text">Infinite Canvas</span>
+                <span class="logo-text">Feebee Studios</span>
             </div>
 
             <nav>
@@ -309,6 +343,10 @@
                     <svg class="nav-icon pixel-icon"><use href="#nav-online"/></svg>
                     <span class="nav-text">Online generate</span>
                 </button>
+                <button class="nav-item" onclick="switchUI(this, 'batch-tryon')">
+                    <svg class="nav-icon pixel-icon"><use href="#nav-batch"/></svg>
+                    <span class="nav-text">Batch try-on</span>
+                </button>
                 <button class="nav-item" onclick="switchUI(this, 'gpt-chat')">
                     <svg class="nav-icon pixel-icon"><use href="#nav-chat"/></svg>
                     <span class="nav-text">Chat</span>
@@ -333,23 +371,31 @@
                     </div>
                 </div>
 
-                <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn">
+                <button class="sidebar-action" data-route="api-config" onclick="switchUI(this, 'api-config')" id="api-keys-btn" type="button">
+                    <svg class="nav-icon pixel-icon"><use href="#key"/></svg>
+                    <span class="sidebar-action-text">API / Models</span>
+                    <span class="sidebar-action-status" id="api-keys-status" aria-hidden="true"></span>
+                </button>
+
+                <button class="sidebar-action" onclick="toggleTheme()" id="theme-toggle-btn" type="button">
                     <svg id="icon-moon" class="nav-icon pixel-icon"><use href="#nav-moon"/></svg>
                     <svg id="icon-sun" class="nav-icon pixel-icon" style="display:none"><use href="#nav-sun"/></svg>
-                    <span class="theme-toggle-text">Appearance</span>
+                    <span class="sidebar-action-text">Appearance</span>
                 </button>
             </div>
         </aside>
 
         <main class="stage-wrapper">
             <div class="stage">
-                <iframe id="frame-zimage" src="/static/zimage.html?v=31" class="active"></iframe>
+                <iframe id="frame-zimage" src="/static/zimage.html?v=32" class="active"></iframe>
                 <iframe id="frame-enhance" data-src="/static/enhance.html?v=31"></iframe>
                 <iframe id="frame-klein" data-src="/static/klein.html?v=31"></iframe>
                 <iframe id="frame-angle" data-src="/static/angle.html?v=31"></iframe>
                 <iframe id="frame-online" data-src="/static/online.html?v=1"></iframe>
+                <iframe id="frame-batch-tryon" data-src="/static/batch-tryon.html?v=2"></iframe>
                 <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1"></iframe>
                 <iframe id="frame-canvas" data-src="/static/canvas.html?v=1"></iframe>
+                <iframe id="frame-api-config" data-src="/static/api-config.html?v=1"></iframe>
             </div>
         </main>
 
@@ -368,14 +414,39 @@
         }
         const CID = localStorage.getItem("client_id") || generateUUID();
         localStorage.setItem("client_id", CID);
+        const COMFLY_TOKEN_KEY = 'comfly_token';
+        const MODELSCOPE_TOKEN_KEY = 'modelscope_api_token';
+        const PROVIDER_MODEL_KEYS = 'provider_model_keys';
+
+        function hasApiKeys() {
+            const modelKeys = (() => {
+                try { return JSON.parse(localStorage.getItem(PROVIDER_MODEL_KEYS) || '{}'); }
+                catch (e) { return {}; }
+            })();
+            const hasModelKey = Object.values(modelKeys || {}).some(group => (
+                group && typeof group === 'object' && Object.values(group).some(value => String(value || '').trim())
+            ));
+            return Boolean((localStorage.getItem(COMFLY_TOKEN_KEY) || '').trim()
+                || (localStorage.getItem(MODELSCOPE_TOKEN_KEY) || '').trim()
+                || hasModelKey);
+        }
+
+        function updateApiKeyStatus() {
+            const status = document.getElementById('api-keys-status');
+            status?.classList.toggle('is-on', hasApiKeys());
+        }
 
         function switchUI(el, id) {
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.querySelectorAll('.nav-item, .sidebar-action[data-route]').forEach(n => n.classList.remove('active'));
             el.classList.add('active');
             document.querySelectorAll('iframe').forEach(f => f.classList.remove('active'));
             const target = document.getElementById('frame-' + id);
             target.classList.add('active');
-            if (!target.src) target.src = target.dataset.src;
+            const desiredSrc = target.dataset.src || '';
+            const currentSrc = target.getAttribute('src') || '';
+            if (!currentSrc || (desiredSrc && currentSrc !== desiredSrc)) {
+                target.src = desiredSrc;
+            }
             syncThemeToFrame(target);
         }
 
@@ -405,7 +476,7 @@
                 const data = JSON.parse(event.data);
                 if (data.type === 'stats') {
                     document.getElementById('online-val').innerText = data.online_count;
-                } else if (data.type === 'cloud_status') {
+                } else if (data.type === 'cloud_status' || data.type === 'task_status') {
                     const iframe = document.querySelector('iframe.active');
                     if (iframe && iframe.contentWindow) {
                         iframe.contentWindow.postMessage(data, '*');
@@ -451,9 +522,24 @@
             updateThemeIcon(e.detail.theme);
         });
 
-        window.addEventListener('DOMContentLoaded', () => {
+        function initShell() {
             const theme = window.StudioTheme ? window.StudioTheme.get() : 'light';
             updateThemeIcon(theme);
+            updateApiKeyStatus();
+            if (window.location.search.includes('api-models') || window.location.search.includes('settings')) {
+                const apiButton = document.getElementById('api-keys-btn');
+                if (apiButton) switchUI(apiButton, 'api-config');
+            }
+        }
+        if (document.readyState === 'loading') {
+            window.addEventListener('DOMContentLoaded', initShell);
+        } else {
+            initShell();
+        }
+
+        window.addEventListener('storage', updateApiKeyStatus);
+        window.addEventListener('message', event => {
+            if (event.data?.type === 'api-config-updated') updateApiKeyStatus();
         });
 
         document.querySelectorAll('iframe').forEach(f => {

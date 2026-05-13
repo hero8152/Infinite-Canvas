@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Infinite-Canvas — Sign in</title>
-    <link rel="icon" href="/static/logo.png" type="image/png">
+    <title>Feebee Studios — Sign in</title>
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/design-system.css?v=23">
-    <script src="/static/theme.js?v=20260512c"></script>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512g"></script>
     <style>
         body {
             margin: 0;
@@ -116,7 +116,7 @@
             <svg class="pixel-icon pixel-icon--md" aria-hidden="true">
                 <use href="#ic-brand"/>
             </svg>
-            <span>Infinite-Canvas</span>
+            <span>Feebee Studios</span>
         </div>
         <div class="timestamp" id="timer">—</div>
     </header>
@@ -179,18 +179,13 @@
             }
 
             try {
-                // 持久化到 localStorage，shell 内 fetch 调用时由前端注入
+                // Keep provider keys browser-local. theme.js attaches the Comfly
+                // token to same-origin AI requests without writing it to disk.
                 localStorage.setItem('comfly_token', token);
-                // 同步到服务端全局 token
-                await fetch('/api/config/token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token })
-                });
                 window.location.href = '/';
             } catch (e2) {
                 err.style.display = 'flex';
-                err.querySelector('span').textContent = 'Sync failed — saved locally.';
+                err.querySelector('span').textContent = 'Token could not be saved locally.';
                 setTimeout(() => { window.location.href = '/'; }, 800);
             }
             return false;

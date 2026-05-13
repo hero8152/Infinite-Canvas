@@ -10,6 +10,7 @@ import random
 import time
 import shutil
 import asyncio
+import sqlite3
 import requests
 from typing import List, Dict, Any, Optional
 from threading import Lock
@@ -20,15 +21,48 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
+from app_config import (
+    AI_API_KEY,
+    AI_BASE_URL,
+    AI_REQUEST_TIMEOUT,
+    APP_HOST,
+    APP_PORT,
+    CANVAS_DIR,
+    CANVAS_TRASH_RETENTION_MS,
+    CHAT_MODEL,
+    CHAT_MODELS,
+    COMFYUI_ADDRESS,
+    COMFYUI_INSTANCES,
+    CORS_ALLOW_HEADERS,
+    CONVERSATION_DIR,
+    CORS_ALLOW_ORIGINS,
+    DATA_DIR,
+    GLOBAL_CONFIG_FILE,
+    HISTORY_FILE,
+    IMAGE_MODEL,
+    IMAGE_MODELS,
+    IMAGE_POLL_INTERVAL,
+    MAX_HISTORY_MESSAGES,
+    MODELSCOPE_API_KEY,
+    MODELSCOPE_CHAT_BASE_URL,
+    MODELSCOPE_CHAT_MODELS,
+    OUTPUT_DIR,
+    STATIC_DIR,
+    SYSTEM_PROMPT,
+    WORKFLOW_DIR,
+    ensure_runtime_dirs,
+)
+from task_status import (
+    TASK_FAILED,
+    TASK_QUEUED,
+    TASK_RUNNING,
+    TASK_SUCCEEDED,
+    TASK_TIMEOUT,
+    cloud_status_payload,
+    normalize_modelscope_status,
+)
 
 app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # --- WebSocket 状态管理器 ---
 class ConnectionManager:
@@ -60,7 +94,8 @@ class ConnectionManager:
                 await connection.send_text(data)
             except Exception as e:
                 print(f"Broadcast error: {e}")
-                self.active_connections.remove(connection)
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
 
     async def broadcast_new_image(self, image_data: dict):
         data = json.dumps({"type": "new_image", "data": image_data})
@@ -69,7 +104,8 @@ class ConnectionManager:
                 await connection.send_text(data)
             except Exception as e:
                 print(f"Broadcast image error: {e}")
-                self.active_connections.remove(connection)
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
 
     async def send_personal_message(self, message: dict, client_id: str):
         ws = self.user_connections.get(client_id)
@@ -86,6 +122,8 @@ GLOBAL_LOOP = None
 async def startup_event():
     global GLOBAL_LOOP
     GLOBAL_LOOP = asyncio.get_running_loop()
+    init_batch_tryon_db()
+    recover_batch_tryon_state()
 
 @app.websocket("/ws/stats")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
@@ -104,18 +142,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
 # --- 配置区域 ---
 
 CLIENT_ID = str(uuid.uuid4())
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKFLOW_DIR = os.path.join(BASE_DIR, "workflows")
-WORKFLOW_PATH = os.path.join(WORKFLOW_DIR, "Z-Image.json")
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
-API_ENV_FILE = os.path.join(BASE_DIR, "API", ".env")
-DATA_DIR = os.path.join(BASE_DIR, "data")
-CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
-CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
-GLOBAL_CONFIG_FILE = os.path.join(BASE_DIR, "global_config.json")
-CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
 QUEUE = []
 QUEUE_LOCK = Lock()
@@ -123,62 +149,22 @@ HISTORY_LOCK = Lock()
 GLOBAL_CONFIG_LOCK = Lock()
 CONVERSATION_LOCK = Lock()
 CANVAS_LOCK = Lock()
+BATCH_TRYON_LOCK = Lock()
 LOAD_LOCK = Lock()
 NEXT_TASK_ID = 1
+BATCH_TRYON_DB = os.path.join(DATA_DIR, "batch_tryon.db")
+BATCH_TRYON_WORKERS: Dict[str, asyncio.Task] = {}
 
-def load_env_file():
-    if not os.path.exists(API_ENV_FILE):
-        return
-    try:
-        with open(API_ENV_FILE, 'r', encoding='utf-8-sig') as f:
-            for raw_line in f.read().splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                os.environ.setdefault(key, value)
-    except Exception as e:
-        print(f"加载 API/.env 失败: {e}")
-
-load_env_file()
-
-COMFYUI_INSTANCES = [s.strip() for s in os.getenv("COMFYUI_INSTANCES", "127.0.0.1:8188").split(",") if s.strip()]
-COMFYUI_ADDRESS = COMFYUI_INSTANCES[0]
-
-AI_BASE_URL = os.getenv("COMFLY_BASE_URL", "https://ai.comfly.chat").rstrip("/")
-AI_API_KEY = os.getenv("COMFLY_API_KEY", "")
-MODELSCOPE_API_KEY = os.getenv("MODELSCOPE_API_KEY", "")
-MODELSCOPE_CHAT_BASE_URL = "https://api-inference.modelscope.cn/v1"
-MODELSCOPE_CHAT_MODELS = [m.strip() for m in os.getenv("MODELSCOPE_CHAT_MODELS", "Qwen/Qwen3-235B-A22B,MiniMax/MiniMax-M2.7:MiniMax").split(",") if m.strip()]
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
-IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-2")
-SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
-MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "30"))
-AI_REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120"))
-IMAGE_POLL_INTERVAL = float(os.getenv("IMAGE_POLL_INTERVAL", "2"))
-
-def model_list(env_name, primary, defaults):
-    configured = os.getenv(env_name, "")
-    configured_values = [item.strip() for item in configured.split(",") if item.strip()]
-    values = configured_values or [primary, *defaults]
-    deduped = []
-    for value in values:
-        if value and value not in deduped:
-            deduped.append(value)
-    return deduped
-
-CHAT_MODELS = model_list("CHAT_MODELS", CHAT_MODEL, ["gpt-4o-mini", "gemini-3.1-flash-image-preview-2k"])
-IMAGE_MODELS = model_list("IMAGE_MODELS", IMAGE_MODEL, ["nano-banana-pro"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=CORS_ALLOW_HEADERS,
+)
 
 BACKEND_LOCAL_LOAD = {addr: 0 for addr in COMFYUI_INSTANCES}
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(STATIC_DIR, exist_ok=True)
-os.makedirs(WORKFLOW_DIR, exist_ok=True)
-os.makedirs(CONVERSATION_DIR, exist_ok=True)
-os.makedirs(CANVAS_DIR, exist_ok=True)
+ensure_runtime_dirs()
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
@@ -204,6 +190,7 @@ class TokenRequest(BaseModel):
 class CloudGenRequest(BaseModel):
     prompt: str
     api_key: str = ""
+    base_url: str = ""
     resolution: str = "1024*1024"
     type: str = "zimage"
     image_urls: List[str] = []
@@ -212,11 +199,38 @@ class CloudGenRequest(BaseModel):
 class CloudPollRequest(BaseModel):
     task_id: str
     api_key: str = ""
+    base_url: str = ""
     client_id: Optional[str] = None
 
 class AIReference(BaseModel):
     url: str = ""
     name: str = ""
+
+class BatchTryonImage(BaseModel):
+    url: str
+    name: str = ""
+    id: str = ""
+
+class BatchTryonGroup(BaseModel):
+    id: str = ""
+    name: str = "Group"
+    clothing_images: List[BatchTryonImage] = []
+    model_images: List[BatchTryonImage] = []
+
+class BatchTryonCreateRequest(BaseModel):
+    title: str = "Batch try-on"
+    prompt: str = Field(min_length=1, max_length=4000)
+    model: str = ""
+    size: str = "1024x1024"
+    quality: str = "auto"
+    pairing_mode: str = "pair"
+    groups: List[BatchTryonGroup] = []
+    clothing_images: List[BatchTryonImage] = []
+    model_images: List[BatchTryonImage] = []
+    autostart: bool = True
+
+class BatchTryonControlRequest(BaseModel):
+    model: str = ""
 
 class OnlineImageRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
@@ -236,10 +250,14 @@ class ChatRequest(BaseModel):
     reference_images: List[AIReference] = []
     provider: str = "comfly"
     ms_model: str = ""
+    ms_api_key: str = ""
+    ms_base_url: str = ""
 
 class MsGenerateRequest(BaseModel):
     prompt: str
     model: str = "black-forest-labs/FLUX.2-klein-9B"
+    api_key: str = ""
+    base_url: str = ""
     image_urls: List[str] = []
     width: int = 0
     height: int = 0
@@ -253,6 +271,8 @@ class CanvasLLMRequest(BaseModel):
     messages: List[Dict[str, str]] = []
     provider: str = "comfly"
     ms_model: str = ""
+    ms_api_key: str = ""
+    ms_base_url: str = ""
 
 class ConversationCreateRequest(BaseModel):
     title: str = "新对话"
@@ -357,6 +377,16 @@ def get_comfy_history(comfy_address, prompt_id):
             return json.loads(response.read())
     except Exception as e:
         return {}
+
+def resolve_workflow_path(workflow_json):
+    name = os.path.basename(workflow_json or "")
+    if not name or name != workflow_json or not name.endswith(".json"):
+        raise HTTPException(status_code=400, detail="无效的 workflow 文件名")
+    path = os.path.abspath(os.path.join(WORKFLOW_DIR, name))
+    workflow_root = os.path.abspath(WORKFLOW_DIR)
+    if os.path.commonpath([workflow_root, path]) != workflow_root or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Workflow file not found: {name}")
+    return path
 
 def safe_user_id(user_id, request: Request):
     candidate = (user_id or "").strip()
@@ -528,23 +558,60 @@ def display_title(text):
     title = re.sub(r"\s+", " ", text or "").strip()
     return title[:24] or "新对话"
 
-def resolve_chat_provider(provider: str, model: str, ms_model: str):
+def legacy_modelscope_token():
+    if not os.path.exists(GLOBAL_CONFIG_FILE):
+        return ""
+    with GLOBAL_CONFIG_LOCK:
+        try:
+            with open(GLOBAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            return str(config.get("modelscope_token", "")).strip()
+        except Exception:
+            return ""
+
+def modelscope_api_key(provided=""):
+    return (provided or "").strip() or MODELSCOPE_API_KEY.strip() or legacy_modelscope_token()
+
+def comfly_api_key(provided=""):
+    return (provided or "").strip() or AI_API_KEY.strip()
+
+def safe_base_url(provided: str, fallback: str):
+    candidate = (provided or fallback or "").strip().rstrip("/")
+    parsed = urllib.parse.urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail=f"API Base URL 不合法：{candidate}")
+    return candidate
+
+def comfly_base_url(provided=""):
+    return safe_base_url(provided, AI_BASE_URL)
+
+def modelscope_base_url(provided="", chat=False):
+    base = safe_base_url(provided, "https://api-inference.modelscope.cn")
+    if chat and not base.endswith("/v1"):
+        base = f"{base}/v1"
+    if not chat and base.endswith("/v1"):
+        base = base[:-3].rstrip("/")
+    return base
+
+def resolve_chat_provider(provider: str, model: str, ms_model: str, comfly_key: str = "", comfly_base: str = "", ms_key: str = "", ms_base: str = ""):
     if provider == "modelscope":
-        if not MODELSCOPE_API_KEY:
+        clean_ms_key = modelscope_api_key(ms_key)
+        if not clean_ms_key:
             raise HTTPException(status_code=400, detail="未配置 MODELSCOPE_API_KEY，请在 API/.env 中填写。")
-        base = MODELSCOPE_CHAT_BASE_URL
-        hdrs = {"Authorization": f"Bearer {MODELSCOPE_API_KEY}", "Content-Type": "application/json"}
+        base = modelscope_base_url(ms_base, chat=True) if ms_base else MODELSCOPE_CHAT_BASE_URL
+        hdrs = {"Authorization": f"Bearer {clean_ms_key}", "Content-Type": "application/json"}
         mdl = selected_model(ms_model or model, MODELSCOPE_CHAT_MODELS[0] if MODELSCOPE_CHAT_MODELS else "MiniMax/MiniMax-M2.7")
         return base, hdrs, mdl
-    base = AI_BASE_URL + "/v1"
-    hdrs = api_headers()
+    base = comfly_base_url(comfly_base) + "/v1"
+    hdrs = api_headers(api_key=comfly_key)
     mdl = selected_model(model, CHAT_MODEL)
     return base, hdrs, mdl
 
-def api_headers(json_body=True):
-    if not AI_API_KEY:
-        raise HTTPException(status_code=400, detail="未配置 COMFLY_API_KEY，请在 API/.env 中填写。")
-    headers = {"Accept": "application/json", "Authorization": f"Bearer {AI_API_KEY}"}
+def api_headers(json_body=True, api_key=""):
+    clean_key = comfly_api_key(api_key)
+    if not clean_key:
+        raise HTTPException(status_code=400, detail="未配置 COMFLY_API_KEY：请在登录页输入 Comfly API Key，或在 API/.env 中填写。")
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {clean_key}"}
     if json_body:
         headers["Content-Type"] = "application/json"
     return headers
@@ -615,11 +682,12 @@ def extract_task_id(data):
         return extract_task_id(nested)
     return None
 
-async def wait_for_image_task(client, task_id):
+async def wait_for_image_task(client, task_id, api_key="", base_url=""):
     deadline = time.monotonic() + AI_REQUEST_TIMEOUT
     last_payload = {}
+    base = comfly_base_url(base_url)
     while time.monotonic() < deadline:
-        response = await client.get(f"{AI_BASE_URL}/v1/images/tasks/{task_id}", headers=api_headers())
+        response = await client.get(f"{base}/v1/images/tasks/{task_id}", headers=api_headers(api_key=api_key))
         response.raise_for_status()
         last_payload = response.json()
         task_data = last_payload.get("data") if isinstance(last_payload.get("data"), dict) else last_payload
@@ -708,8 +776,9 @@ async def save_ai_image_to_output(image_data, prefix="online_"):
         print(f"保存上游图片失败: {e}")
         return value
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None):
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, api_key="", base_url=""):
     refs = [ref for ref in (reference_images or []) if ref.get("url")]
+    base = comfly_base_url(base_url)
     async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
         if refs:
             files = []
@@ -723,14 +792,14 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None)
                     opened.append(fh)
                     files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
                 data = {"model": model, "prompt": prompt, "size": size, "quality": quality, "response_format": "url", "n": "1"}
-                response = await client.post(f"{AI_BASE_URL}/v1/images/edits", headers=api_headers(json_body=False), data=data, files=files)
+                response = await client.post(f"{base}/v1/images/edits", headers=api_headers(json_body=False, api_key=api_key), data=data, files=files)
             finally:
                 for fh in opened:
                     fh.close()
         else:
             response = await client.post(
-                f"{AI_BASE_URL}/v1/images/generations",
-                headers=api_headers(),
+                f"{base}/v1/images/generations",
+                headers=api_headers(api_key=api_key),
                 json={"model": model, "prompt": prompt, "size": size, "quality": quality, "response_format": "url", "n": 1},
             )
         response.raise_for_status()
@@ -741,8 +810,548 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None)
             task_id = extract_task_id(raw)
             if not task_id:
                 raise
-        task_result = await wait_for_image_task(client, task_id)
+        task_result = await wait_for_image_task(client, task_id, api_key=api_key, base_url=base_url)
         return extract_image(task_result), task_result
+
+def batch_tryon_connect():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    conn = sqlite3.connect(BATCH_TRYON_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_batch_tryon_db():
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            conn.executescript(
+                """
+                PRAGMA journal_mode=WAL;
+                CREATE TABLE IF NOT EXISTS batch_tryon_batches (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    pairing_mode TEXT,
+                    prompt TEXT,
+                    model TEXT,
+                    size TEXT,
+                    quality TEXT,
+                    status TEXT,
+                    created_at REAL,
+                    updated_at REAL
+                );
+                CREATE TABLE IF NOT EXISTS batch_tryon_tasks (
+                    id TEXT PRIMARY KEY,
+                    batch_id TEXT NOT NULL,
+                    group_id TEXT,
+                    task_index INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    clothing_json TEXT NOT NULL,
+                    model_json TEXT NOT NULL,
+                    result_url TEXT,
+                    error_message TEXT,
+                    attempts INTEGER DEFAULT 0,
+                    created_at REAL,
+                    updated_at REAL,
+                    started_at REAL,
+                    completed_at REAL
+                );
+                CREATE TABLE IF NOT EXISTS batch_tryon_groups (
+                    id TEXT PRIMARY KEY,
+                    batch_id TEXT NOT NULL,
+                    group_index INTEGER NOT NULL,
+                    name TEXT,
+                    clothing_json TEXT NOT NULL,
+                    model_json TEXT NOT NULL,
+                    collapsed INTEGER DEFAULT 0,
+                    created_at REAL,
+                    updated_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_batch_tryon_tasks_batch ON batch_tryon_tasks(batch_id, task_index);
+                CREATE INDEX IF NOT EXISTS idx_batch_tryon_tasks_status ON batch_tryon_tasks(status);
+                CREATE INDEX IF NOT EXISTS idx_batch_tryon_groups_batch ON batch_tryon_groups(batch_id, group_index);
+                """
+            )
+            task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(batch_tryon_tasks)").fetchall()}
+            if "group_id" not in task_columns:
+                conn.execute("ALTER TABLE batch_tryon_tasks ADD COLUMN group_id TEXT")
+            conn.commit()
+        finally:
+            conn.close()
+
+def recover_batch_tryon_state():
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            now = time.time()
+            conn.execute(
+                """
+                UPDATE batch_tryon_tasks
+                SET status='pending', updated_at=?, error_message='Recovered after server restart.'
+                WHERE status='running'
+                """,
+                (now,),
+            )
+            conn.execute(
+                """
+                UPDATE batch_tryon_batches
+                SET status='paused', updated_at=?
+                WHERE status='running'
+                """,
+                (now,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+def batch_tryon_json(value):
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+def normalize_batch_tryon_image(image: BatchTryonImage):
+    item = image.model_dump()
+    url = (item.get("url") or "").strip()
+    if not output_file_from_url(url):
+        raise HTTPException(status_code=400, detail=f"图片必须先上传到本地输出目录：{url}")
+    return {
+        "id": (item.get("id") or uuid.uuid4().hex)[:80],
+        "url": url,
+        "name": (item.get("name") or os.path.basename(url))[:160],
+    }
+
+def normalize_batch_tryon_groups(payload: BatchTryonCreateRequest):
+    source_groups = payload.groups or [
+        BatchTryonGroup(
+            id="",
+            name=payload.title or "Batch try-on",
+            clothing_images=payload.clothing_images,
+            model_images=payload.model_images,
+        )
+    ]
+    groups = []
+    for index, group in enumerate(source_groups, start=1):
+        clothing = [normalize_batch_tryon_image(item) for item in group.clothing_images]
+        models = [normalize_batch_tryon_image(item) for item in group.model_images]
+        group_id = (group.id or f"btg_{uuid.uuid4().hex[:10]}").strip()[:80]
+        groups.append({
+            "id": group_id or f"btg_{uuid.uuid4().hex[:10]}",
+            "source_key": f"{index}:{group_id or uuid.uuid4().hex}",
+            "index": index,
+            "name": (group.name or f"Group {index}").strip()[:120] or f"Group {index}",
+            "clothing_images": clothing,
+            "model_images": models,
+        })
+    return groups
+
+def build_batch_tryon_pairs(clothing_images, model_images, pairing_mode):
+    mode = (pairing_mode or "pair").strip()
+    if not clothing_images or not model_images:
+        raise HTTPException(status_code=400, detail="请先添加服装和模特图片")
+
+    pairs = []
+    if mode == "pair":
+        if len(clothing_images) != len(model_images):
+            raise HTTPException(status_code=400, detail=f"1:1 模式要求服装和模特数量相同，当前 {len(clothing_images)} vs {len(model_images)}")
+        pairs = [([clothing], model) for clothing, model in zip(clothing_images, model_images)]
+    elif mode == "fixedModel":
+        pairs = [([clothing], model_images[0]) for clothing in clothing_images]
+    elif mode == "fixedClothing":
+        pairs = [([clothing_images[0]], model) for model in model_images]
+    elif mode == "matrix":
+        pairs = [([clothing], model) for clothing in clothing_images for model in model_images]
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的配对模式：{mode}")
+
+    if len(pairs) > 500:
+        raise HTTPException(status_code=400, detail="单个批次最多 500 个任务，请拆分后再生成")
+    return mode, pairs
+
+def batch_tryon_counts_for_conn(conn, batch_id):
+    rows = conn.execute(
+        "SELECT status, COUNT(*) AS count FROM batch_tryon_tasks WHERE batch_id=? GROUP BY status",
+        (batch_id,),
+    ).fetchall()
+    counts = {row["status"]: int(row["count"]) for row in rows}
+    total = sum(counts.values())
+    return {
+        "total": total,
+        "pending": counts.get("pending", 0),
+        "running": counts.get("running", 0),
+        "completed": counts.get("completed", 0),
+        "failed": counts.get("failed", 0),
+    }
+
+def batch_tryon_batch_record(row, counts=None):
+    data = dict(row)
+    data["counts"] = counts or {"total": 0, "pending": 0, "running": 0, "completed": 0, "failed": 0}
+    return data
+
+def batch_tryon_task_record(row):
+    data = dict(row)
+    try:
+        data["clothing_images"] = json.loads(data.pop("clothing_json") or "[]")
+    except Exception:
+        data["clothing_images"] = []
+    try:
+        data["model_image"] = json.loads(data.pop("model_json") or "{}")
+    except Exception:
+        data["model_image"] = {}
+    return data
+
+def batch_tryon_group_record(row):
+    data = dict(row)
+    try:
+        data["clothing_images"] = json.loads(data.pop("clothing_json") or "[]")
+    except Exception:
+        data["clothing_images"] = []
+    try:
+        data["model_images"] = json.loads(data.pop("model_json") or "[]")
+    except Exception:
+        data["model_images"] = []
+    data["collapsed"] = bool(data.get("collapsed"))
+    return data
+
+def list_batch_tryon_batches(limit=30):
+    limit = max(1, min(int(limit or 30), 100))
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM batch_tryon_batches ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [batch_tryon_batch_record(row, batch_tryon_counts_for_conn(conn, row["id"])) for row in rows]
+        finally:
+            conn.close()
+
+def get_batch_tryon_detail(batch_id):
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            batch = conn.execute("SELECT * FROM batch_tryon_batches WHERE id=?", (batch_id,)).fetchone()
+            if not batch:
+                raise HTTPException(status_code=404, detail="批次不存在")
+            tasks = conn.execute(
+                "SELECT * FROM batch_tryon_tasks WHERE batch_id=? ORDER BY task_index ASC",
+                (batch_id,),
+            ).fetchall()
+            groups = conn.execute(
+                "SELECT * FROM batch_tryon_groups WHERE batch_id=? ORDER BY group_index ASC",
+                (batch_id,),
+            ).fetchall()
+            return {
+                "batch": batch_tryon_batch_record(batch, batch_tryon_counts_for_conn(conn, batch_id)),
+                "groups": [batch_tryon_group_record(row) for row in groups],
+                "tasks": [batch_tryon_task_record(row) for row in tasks],
+            }
+        finally:
+            conn.close()
+
+def create_batch_tryon_batch(payload: BatchTryonCreateRequest):
+    groups = normalize_batch_tryon_groups(payload)
+    mode = (payload.pairing_mode or "pair").strip()
+    prepared_tasks = []
+    for group in groups:
+        mode, pairs = build_batch_tryon_pairs(group["clothing_images"], group["model_images"], mode)
+        for clothing_refs, model_ref in pairs:
+            prepared_tasks.append((group["source_key"], clothing_refs, model_ref))
+    if len(prepared_tasks) > 500:
+        raise HTTPException(status_code=400, detail="单个批次最多 500 个任务，请拆分后再生成")
+    model = selected_model(payload.model, IMAGE_MODEL)
+    batch_id = f"bt_{time.strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}"
+    now = time.time()
+    title = (payload.title or "Batch try-on").strip()[:120] or "Batch try-on"
+    stored_group_ids = {}
+    for group in groups:
+        stored_group_ids[group["source_key"]] = f"btg_{batch_id[3:]}_{uuid.uuid4().hex[:6]}"
+
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO batch_tryon_batches(id, title, pairing_mode, prompt, model, size, quality, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                (batch_id, title, mode, payload.prompt.strip(), model, payload.size, payload.quality, now, now),
+            )
+            for group in groups:
+                conn.execute(
+                    """
+                    INSERT INTO batch_tryon_groups(
+                        id, batch_id, group_index, name, clothing_json, model_json,
+                        collapsed, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                    """,
+                    (
+                        stored_group_ids[group["source_key"]],
+                        batch_id,
+                        group["index"],
+                        group["name"],
+                        batch_tryon_json(group["clothing_images"]),
+                        batch_tryon_json(group["model_images"]),
+                        now,
+                        now,
+                    ),
+                )
+            for index, (group_id, clothing_refs, model_ref) in enumerate(prepared_tasks, start=1):
+                conn.execute(
+                    """
+                    INSERT INTO batch_tryon_tasks(
+                        id, batch_id, group_id, task_index, status, clothing_json, model_json,
+                        result_url, error_message, attempts, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, 0, ?, ?)
+                    """,
+                    (
+                        f"btt_{uuid.uuid4().hex[:12]}",
+                        batch_id,
+                        stored_group_ids.get(group_id),
+                        index,
+                        batch_tryon_json(clothing_refs),
+                        batch_tryon_json(model_ref),
+                        now,
+                        now,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    return batch_id
+
+def set_batch_tryon_batch_status(batch_id, status):
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            row = conn.execute("SELECT id, status FROM batch_tryon_batches WHERE id=?", (batch_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="批次不存在")
+            conn.execute(
+                "UPDATE batch_tryon_batches SET status=?, updated_at=? WHERE id=?",
+                (status, time.time(), batch_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+def prepare_batch_tryon_run(batch_id):
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            batch = conn.execute("SELECT * FROM batch_tryon_batches WHERE id=?", (batch_id,)).fetchone()
+            if not batch:
+                raise HTTPException(status_code=404, detail="批次不存在")
+            counts = batch_tryon_counts_for_conn(conn, batch_id)
+            if counts["pending"] == 0:
+                final_status = "failed" if counts["failed"] and not counts["completed"] else "completed"
+                conn.execute(
+                    "UPDATE batch_tryon_batches SET status=?, updated_at=? WHERE id=?",
+                    (final_status, time.time(), batch_id),
+                )
+                conn.commit()
+                return False
+            conn.execute(
+                "UPDATE batch_tryon_batches SET status='running', updated_at=? WHERE id=?",
+                (time.time(), batch_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+def claim_next_batch_tryon_task(batch_id):
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            batch = conn.execute("SELECT * FROM batch_tryon_batches WHERE id=?", (batch_id,)).fetchone()
+            if not batch or batch["status"] != "running":
+                return None, None
+            task = conn.execute(
+                """
+                SELECT * FROM batch_tryon_tasks
+                WHERE batch_id=? AND status='pending'
+                ORDER BY task_index ASC
+                LIMIT 1
+                """,
+                (batch_id,),
+            ).fetchone()
+            if not task:
+                return dict(batch), None
+            now = time.time()
+            conn.execute(
+                """
+                UPDATE batch_tryon_tasks
+                SET status='running', attempts=attempts+1, started_at=?, updated_at=?, error_message=NULL
+                WHERE id=?
+                """,
+                (now, now, task["id"]),
+            )
+            conn.execute(
+                "UPDATE batch_tryon_batches SET updated_at=? WHERE id=?",
+                (now, batch_id),
+            )
+            conn.commit()
+            task = conn.execute("SELECT * FROM batch_tryon_tasks WHERE id=?", (task["id"],)).fetchone()
+            return dict(batch), batch_tryon_task_record(task)
+        finally:
+            conn.close()
+
+def complete_batch_tryon_task(task_id, result_url):
+    now = time.time()
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            conn.execute(
+                """
+                UPDATE batch_tryon_tasks
+                SET status='completed', result_url=?, error_message=NULL, completed_at=?, updated_at=?
+                WHERE id=?
+                """,
+                (result_url, now, now, task_id),
+            )
+            batch_id = conn.execute("SELECT batch_id FROM batch_tryon_tasks WHERE id=?", (task_id,)).fetchone()["batch_id"]
+            conn.execute("UPDATE batch_tryon_batches SET updated_at=? WHERE id=?", (now, batch_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+def fail_batch_tryon_task(task_id, error_message):
+    now = time.time()
+    clean_error = str(error_message or "生成失败")[:1000]
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            conn.execute(
+                """
+                UPDATE batch_tryon_tasks
+                SET status='failed', error_message=?, completed_at=?, updated_at=?
+                WHERE id=?
+                """,
+                (clean_error, now, now, task_id),
+            )
+            row = conn.execute("SELECT batch_id FROM batch_tryon_tasks WHERE id=?", (task_id,)).fetchone()
+            if row:
+                conn.execute("UPDATE batch_tryon_batches SET updated_at=? WHERE id=?", (now, row["batch_id"]))
+            conn.commit()
+        finally:
+            conn.close()
+
+def finalize_batch_tryon_if_idle(batch_id):
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            batch = conn.execute("SELECT status FROM batch_tryon_batches WHERE id=?", (batch_id,)).fetchone()
+            if not batch:
+                return
+            counts = batch_tryon_counts_for_conn(conn, batch_id)
+            if batch["status"] == "running" and counts["pending"] == 0 and counts["running"] == 0:
+                status = "failed" if counts["failed"] and not counts["completed"] else "completed"
+                conn.execute(
+                    "UPDATE batch_tryon_batches SET status=?, updated_at=? WHERE id=?",
+                    (status, time.time(), batch_id),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+def reset_batch_tryon_failed_tasks(batch_id):
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            row = conn.execute("SELECT id FROM batch_tryon_batches WHERE id=?", (batch_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="批次不存在")
+            conn.execute(
+                """
+                UPDATE batch_tryon_tasks
+                SET status='pending', result_url=NULL, error_message=NULL, completed_at=NULL, updated_at=?
+                WHERE batch_id=? AND status='failed'
+                """,
+                (time.time(), batch_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+def reset_batch_tryon_task(task_id):
+    with BATCH_TRYON_LOCK:
+        conn = batch_tryon_connect()
+        try:
+            row = conn.execute("SELECT batch_id FROM batch_tryon_tasks WHERE id=?", (task_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="任务不存在")
+            conn.execute(
+                """
+                UPDATE batch_tryon_tasks
+                SET status='pending', result_url=NULL, error_message=NULL, completed_at=NULL, updated_at=?
+                WHERE id=?
+                """,
+                (time.time(), task_id),
+            )
+            conn.commit()
+            return row["batch_id"]
+        finally:
+            conn.close()
+
+def error_detail(exc):
+    if isinstance(exc, HTTPException):
+        return exc.detail
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"上游接口错误 {exc.response.status_code}: {exc.response.text[:500]}"
+    return str(exc)
+
+async def run_batch_tryon_worker(batch_id, api_key="", base_url=""):
+    try:
+        while True:
+            batch, task = claim_next_batch_tryon_task(batch_id)
+            if not task:
+                finalize_batch_tryon_if_idle(batch_id)
+                return
+
+            refs = [*task.get("clothing_images", []), task.get("model_image", {})]
+            try:
+                image_data, raw = await generate_ai_image(
+                    batch.get("prompt") or "",
+                    batch.get("size") or "1024x1024",
+                    batch.get("quality") or "auto",
+                    selected_model(batch.get("model"), IMAGE_MODEL),
+                    refs,
+                    api_key=api_key,
+                    base_url=base_url,
+                )
+                local_url = await save_ai_image_to_output(image_data, prefix="batch_tryon_")
+                complete_batch_tryon_task(task["id"], local_url)
+                record = {
+                    "prompt": batch.get("prompt") or "",
+                    "images": [local_url],
+                    "timestamp": time.time(),
+                    "type": "batch_tryon",
+                    "model": batch.get("model"),
+                    "status": TASK_SUCCEEDED,
+                    "params": {
+                        "batch_id": batch_id,
+                        "group_id": task.get("group_id"),
+                        "task_id": task["id"],
+                        "pairing_mode": batch.get("pairing_mode"),
+                        "clothing_images": task.get("clothing_images", []),
+                        "model_image": task.get("model_image", {}),
+                    },
+                    "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
+                }
+                save_to_history(record)
+                await manager.broadcast_new_image(record)
+            except Exception as exc:
+                fail_batch_tryon_task(task["id"], error_detail(exc))
+            finally:
+                finalize_batch_tryon_if_idle(batch_id)
+    finally:
+        current = BATCH_TRYON_WORKERS.get(batch_id)
+        if current is asyncio.current_task():
+            BATCH_TRYON_WORKERS.pop(batch_id, None)
+
+def start_batch_tryon_worker(batch_id, api_key="", base_url=""):
+    current = BATCH_TRYON_WORKERS.get(batch_id)
+    if current and not current.done():
+        return
+    BATCH_TRYON_WORKERS[batch_id] = asyncio.create_task(run_batch_tryon_worker(batch_id, api_key=api_key, base_url=base_url))
 
 def upstream_message_from_record(item):
     role = item.get("role")
@@ -762,7 +1371,10 @@ def upstream_message_from_record(item):
 
 @app.get("/")
 async def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    return FileResponse(
+        os.path.join(STATIC_DIR, "index.html"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 @app.get("/api/view")
 def view_image(filename: str, type: str = "input", subfolder: str = ""):
@@ -832,17 +1444,17 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
     return {"files": uploaded}
 
 @app.get("/api/config")
-async def ai_config():
+async def ai_config(x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
     preferred_chat_model = next((m for m in CHAT_MODELS if m == "gpt-5.5"), CHAT_MODELS[0] if CHAT_MODELS else CHAT_MODEL)
     return {
-        "base_url": AI_BASE_URL,
+        "base_url": comfly_base_url(x_comfly_base_url),
         "chat_model": preferred_chat_model,
         "image_model": IMAGE_MODEL,
         "chat_models": CHAT_MODELS,
         "image_models": IMAGE_MODELS,
-        "has_api_key": bool(AI_API_KEY),
+        "has_api_key": bool(comfly_api_key(x_comfly_api_key)),
         "ms_chat_models": MODELSCOPE_CHAT_MODELS,
-        "has_ms_key": bool(MODELSCOPE_API_KEY),
+        "has_ms_key": bool(modelscope_api_key()),
     }
 
 @app.get("/api/models")
@@ -853,30 +1465,24 @@ async def ai_models():
 
 @app.get("/api/config/token")
 async def get_global_token():
-    # 优先读 env，回退到 global_config.json（兼容旧数据）
-    if MODELSCOPE_API_KEY:
-        return {"token": MODELSCOPE_API_KEY}
-    if os.path.exists(GLOBAL_CONFIG_FILE):
-        try:
-            with open(GLOBAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                return {"token": config.get("modelscope_token", "")}
-        except:
-            pass
-    return {"token": ""}
+    # Do not expose server-side secrets to the browser. Frontend callers use
+    # this only to decide whether the backend can fall back to its configured key.
+    return {"token": "", "has_token": bool(modelscope_api_key())}
 
 # --- 在线生图 (COMFLY) ---
 
 @app.post("/api/online-image")
-async def online_image(payload: OnlineImageRequest):
+async def online_image(payload: OnlineImageRequest, x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
     model = selected_model(payload.model, IMAGE_MODEL)
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     try:
-        image_data, raw = await generate_ai_image(payload.prompt, payload.size, payload.quality, model, refs)
+        image_data, raw = await generate_ai_image(payload.prompt, payload.size, payload.quality, model, refs, api_key=x_comfly_api_key, base_url=x_comfly_base_url)
         local_url = await save_ai_image_to_output(image_data, prefix="online_")
     except httpx.HTTPStatusError as exc:
+        print(f"Online image upstream error {exc.response.status_code}: {exc.response.text}")
         raise HTTPException(status_code=exc.response.status_code, detail=f"上游生图接口错误：{exc.response.text}") from exc
     except httpx.HTTPError as exc:
+        print(f"Online image request error: {exc}")
         raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
 
     result = {
@@ -885,6 +1491,7 @@ async def online_image(payload: OnlineImageRequest):
         "timestamp": time.time(),
         "type": "online",
         "model": model,
+        "status": TASK_SUCCEEDED,
         "params": {"model": model, "size": payload.size, "quality": payload.quality, "reference_images": refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
@@ -893,11 +1500,77 @@ async def online_image(payload: OnlineImageRequest):
         asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
     return result
 
+# --- 批量试穿 (COMFLY，持久化任务队列) ---
+
+@app.get("/api/batch-tryon/batches")
+async def batch_tryon_batches(limit: int = 30):
+    init_batch_tryon_db()
+    return {"batches": list_batch_tryon_batches(limit)}
+
+@app.post("/api/batch-tryon/batches")
+async def batch_tryon_create_batch(payload: BatchTryonCreateRequest, x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
+    init_batch_tryon_db()
+    if payload.autostart:
+        api_headers(json_body=False, api_key=x_comfly_api_key)
+    batch_id = create_batch_tryon_batch(payload)
+    if payload.autostart and prepare_batch_tryon_run(batch_id):
+        start_batch_tryon_worker(batch_id, api_key=x_comfly_api_key, base_url=x_comfly_base_url)
+    return get_batch_tryon_detail(batch_id)
+
+@app.get("/api/batch-tryon/batches/{batch_id}")
+async def batch_tryon_get_batch(batch_id: str):
+    init_batch_tryon_db()
+    return get_batch_tryon_detail(batch_id)
+
+@app.post("/api/batch-tryon/batches/{batch_id}/start")
+async def batch_tryon_start_batch(batch_id: str, payload: BatchTryonControlRequest, x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
+    init_batch_tryon_db()
+    api_headers(json_body=False, api_key=x_comfly_api_key)
+    if prepare_batch_tryon_run(batch_id):
+        start_batch_tryon_worker(batch_id, api_key=x_comfly_api_key, base_url=x_comfly_base_url)
+    return get_batch_tryon_detail(batch_id)
+
+@app.post("/api/batch-tryon/batches/{batch_id}/pause")
+async def batch_tryon_pause_batch(batch_id: str):
+    init_batch_tryon_db()
+    set_batch_tryon_batch_status(batch_id, "paused")
+    return get_batch_tryon_detail(batch_id)
+
+@app.post("/api/batch-tryon/batches/{batch_id}/resume")
+async def batch_tryon_resume_batch(batch_id: str, payload: BatchTryonControlRequest, x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
+    init_batch_tryon_db()
+    api_headers(json_body=False, api_key=x_comfly_api_key)
+    if prepare_batch_tryon_run(batch_id):
+        start_batch_tryon_worker(batch_id, api_key=x_comfly_api_key, base_url=x_comfly_base_url)
+    return get_batch_tryon_detail(batch_id)
+
+@app.post("/api/batch-tryon/batches/{batch_id}/retry-failed")
+async def batch_tryon_retry_failed(batch_id: str, payload: BatchTryonControlRequest, x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
+    init_batch_tryon_db()
+    api_headers(json_body=False, api_key=x_comfly_api_key)
+    reset_batch_tryon_failed_tasks(batch_id)
+    if prepare_batch_tryon_run(batch_id):
+        start_batch_tryon_worker(batch_id, api_key=x_comfly_api_key, base_url=x_comfly_base_url)
+    return get_batch_tryon_detail(batch_id)
+
+@app.post("/api/batch-tryon/tasks/{task_id}/retry")
+async def batch_tryon_retry_task(task_id: str, payload: BatchTryonControlRequest, x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
+    init_batch_tryon_db()
+    api_headers(json_body=False, api_key=x_comfly_api_key)
+    batch_id = reset_batch_tryon_task(task_id)
+    if prepare_batch_tryon_run(batch_id):
+        start_batch_tryon_worker(batch_id, api_key=x_comfly_api_key, base_url=x_comfly_base_url)
+    return get_batch_tryon_detail(batch_id)
+
 # --- Canvas LLM ---
 
 @app.post("/api/canvas-llm")
-async def canvas_llm(payload: CanvasLLMRequest):
-    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+async def canvas_llm(payload: CanvasLLMRequest, x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
+    chat_base, chat_hdrs, model = resolve_chat_provider(
+        payload.provider, payload.model, payload.ms_model,
+        comfly_key=x_comfly_api_key, comfly_base=x_comfly_base_url,
+        ms_key=payload.ms_api_key, ms_base=payload.ms_base_url,
+    )
     upstream_messages = [{"role": "system", "content": payload.system_prompt or SYSTEM_PROMPT}]
     for item in payload.messages[-MAX_HISTORY_MESSAGES:]:
         role = item.get("role")
@@ -1003,7 +1676,7 @@ async def purge_canvas(canvas_id: str):
 # --- GPT 对话 ---
 
 @app.post("/api/chat")
-async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
+async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(default=""), x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
     user_id = safe_user_id(x_user_id, request)
     conversation = (
         load_conversation(user_id, payload.conversation_id)
@@ -1029,7 +1702,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
     if payload.mode == "image":
         model = selected_model(payload.image_model or payload.model, IMAGE_MODEL)
         try:
-            image_data, raw = await generate_ai_image(payload.message, payload.size, payload.quality, model, refs)
+            image_data, raw = await generate_ai_image(payload.message, payload.size, payload.quality, model, refs, api_key=x_comfly_api_key, base_url=x_comfly_base_url)
             local_url = await save_ai_image_to_output(image_data, prefix="chat_")
         except httpx.HTTPStatusError as exc:
             raise HTTPException(status_code=exc.response.status_code, detail=f"上游生图接口错误：{exc.response.text}") from exc
@@ -1043,10 +1716,15 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             "image_url": local_url,
             "created_at": now_ms(),
             "model": model,
+            "status": TASK_SUCCEEDED,
             "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
         }
     else:
-        chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+        chat_base, chat_hdrs, model = resolve_chat_provider(
+            payload.provider, payload.model, payload.ms_model,
+            comfly_key=x_comfly_api_key, comfly_base=x_comfly_base_url,
+            ms_key=payload.ms_api_key, ms_base=payload.ms_base_url,
+        )
         history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
         upstream_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         for item in history:
@@ -1081,7 +1759,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
     return {"conversation": conversation, "message": assistant_message}
 
 @app.post("/api/chat/stream")
-async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
+async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = Header(default=""), x_comfly_api_key: str = Header(default=""), x_comfly_base_url: str = Header(default="")):
     if payload.mode == "image":
         raise HTTPException(status_code=400, detail="图片模式请使用 /api/chat")
 
@@ -1107,7 +1785,11 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
     conversation["updated_at"] = now_ms()
     save_conversation(user_id, conversation)
 
-    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+    chat_base, chat_hdrs, model = resolve_chat_provider(
+        payload.provider, payload.model, payload.ms_model,
+        comfly_key=x_comfly_api_key, comfly_base=x_comfly_base_url,
+        ms_key=payload.ms_api_key, ms_base=payload.ms_base_url,
+    )
     history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
     upstream_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     for item in history:
@@ -1198,7 +1880,8 @@ async def get_queue_status(client_id: str):
         total = len(QUEUE)
         positions = [i + 1 for i, t in enumerate(QUEUE) if t["client_id"] == client_id]
         position = positions[0] if positions else 0
-    return {"total": total, "position": position}
+    status = TASK_QUEUED if position else TASK_RUNNING if total else TASK_SUCCEEDED
+    return {"total": total, "position": position, "status": status}
 
 @app.post("/api/history/delete")
 async def delete_history(req: DeleteHistoryRequest):
@@ -1247,8 +1930,8 @@ async def delete_history(req: DeleteHistoryRequest):
 
 @app.post("/api/angle/poll_status")
 async def poll_angle_cloud(req: CloudPollRequest):
-    base_url = 'https://api-inference.modelscope.cn/'
-    clean_token = (req.api_key or MODELSCOPE_API_KEY).strip()
+    base_url = modelscope_base_url(req.base_url) + "/"
+    clean_token = modelscope_api_key(req.api_key)
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -1292,27 +1975,29 @@ async def poll_angle_cloud(req: CloudPollRequest):
                         record = {"timestamp": time.time(), "prompt": f"Resumed {task_id}", "images": [local_path], "type": "angle"}
                         save_to_history(record)
                         if req.client_id:
-                            await manager.send_personal_message({"type": "cloud_status", "status": "SUCCEED", "task_id": task_id}, req.client_id)
-                        return {"url": local_path}
+                            await manager.send_personal_message(cloud_status_payload("modelscope-angle", "SUCCEED", task_id), req.client_id)
+                        return {"url": local_path, "task_id": task_id, "status": TASK_SUCCEEDED}
 
                     elif status == "FAILED":
                         if req.client_id:
-                            await manager.send_personal_message({"type": "cloud_status", "status": "FAILED", "task_id": task_id}, req.client_id)
-                        raise Exception(f"ModelScope task failed: {data}")
+                            await manager.send_personal_message(cloud_status_payload("modelscope-angle", "FAILED", task_id), req.client_id)
+                        raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
 
                     if i % 5 == 0 and req.client_id:
-                        await manager.send_personal_message({
-                            "type": "cloud_status", "status": f"{status} ({i}/300)",
-                            "task_id": task_id, "progress": i, "total": 300
-                        }, req.client_id)
+                        await manager.send_personal_message(
+                            cloud_status_payload("modelscope-angle", status, task_id, progress=i, total=300),
+                            req.client_id,
+                        )
 
+                except HTTPException:
+                    raise
                 except Exception as loop_e:
                     print(f"Angle polling error: {loop_e}")
                     continue
 
             if req.client_id:
-                await manager.send_personal_message({"type": "cloud_status", "status": "TIMEOUT", "task_id": task_id}, req.client_id)
-            return {"status": "timeout", "task_id": task_id, "message": "Task still pending"}
+                await manager.send_personal_message(cloud_status_payload("modelscope-angle", "TIMEOUT", task_id), req.client_id)
+            return {"status": TASK_TIMEOUT, "task_id": task_id, "message": "Task still pending"}
 
     except Exception as e:
         print(f"Angle polling error: {e}")
@@ -1320,8 +2005,8 @@ async def poll_angle_cloud(req: CloudPollRequest):
 
 @app.post("/api/angle/generate")
 async def generate_angle_cloud(req: CloudGenRequest):
-    base_url = 'https://api-inference.modelscope.cn/'
-    clean_token = (req.api_key or MODELSCOPE_API_KEY).strip()
+    base_url = modelscope_base_url(req.base_url) + "/"
+    clean_token = modelscope_api_key(req.api_key)
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -1347,6 +2032,8 @@ async def generate_angle_cloud(req: CloudGenRequest):
                 raise HTTPException(status_code=submit_res.status_code, detail=detail)
 
             task_id = submit_res.json().get("task_id")
+            if not task_id:
+                raise HTTPException(status_code=502, detail=f"ModelScope did not return task_id: {submit_res.text}")
             print(f"Angle Task submitted, ID: {task_id}")
 
             for i in range(300):
@@ -1379,29 +2066,31 @@ async def generate_angle_cloud(req: CloudGenRequest):
                         record = {"timestamp": time.time(), "prompt": req.prompt, "images": [local_path], "type": "angle"}
                         save_to_history(record)
                         if req.client_id:
-                            await manager.send_personal_message({"type": "cloud_status", "status": "SUCCEED", "task_id": task_id}, req.client_id)
+                            await manager.send_personal_message(cloud_status_payload("modelscope-angle", "SUCCEED", task_id), req.client_id)
                         if GLOBAL_LOOP:
                             asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(record), GLOBAL_LOOP)
-                        return {"url": local_path, "task_id": task_id}
+                        return {"url": local_path, "task_id": task_id, "status": TASK_SUCCEEDED}
 
                     elif status == "FAILED":
                         if req.client_id:
-                            await manager.send_personal_message({"type": "cloud_status", "status": "FAILED", "task_id": task_id}, req.client_id)
-                        raise Exception(f"ModelScope task failed: {data}")
+                            await manager.send_personal_message(cloud_status_payload("modelscope-angle", "FAILED", task_id), req.client_id)
+                        raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
 
                     if i % 5 == 0 and req.client_id:
-                        await manager.send_personal_message({
-                            "type": "cloud_status", "status": f"{status} ({i}/300)",
-                            "task_id": task_id, "progress": i, "total": 300
-                        }, req.client_id)
+                        await manager.send_personal_message(
+                            cloud_status_payload("modelscope-angle", status, task_id, progress=i, total=300),
+                            req.client_id,
+                        )
 
+                except HTTPException:
+                    raise
                 except Exception as loop_e:
                     print(f"Angle polling error: {loop_e}")
                     continue
 
             if req.client_id:
-                await manager.send_personal_message({"type": "cloud_status", "status": "TIMEOUT", "task_id": task_id}, req.client_id)
-            return {"status": "timeout", "task_id": task_id, "message": "Task still pending"}
+                await manager.send_personal_message(cloud_status_payload("modelscope-angle", "TIMEOUT", task_id), req.client_id)
+            return {"status": TASK_TIMEOUT, "task_id": task_id, "message": "Task still pending"}
 
     except HTTPException:
         raise
@@ -1413,8 +2102,8 @@ async def generate_angle_cloud(req: CloudGenRequest):
 
 @app.post("/generate")
 async def generate_cloud(req: CloudGenRequest):
-    base_url = 'https://api-inference.modelscope.cn/'
-    clean_token = (req.api_key or MODELSCOPE_API_KEY).strip()
+    base_url = modelscope_base_url(req.base_url) + "/"
+    clean_token = modelscope_api_key(req.api_key)
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -1444,6 +2133,8 @@ async def generate_cloud(req: CloudGenRequest):
                 raise HTTPException(status_code=submit_res.status_code, detail=detail)
 
             task_id = submit_res.json().get("task_id")
+            if not task_id:
+                raise HTTPException(status_code=502, detail=f"ModelScope did not return task_id: {submit_res.text}")
             print(f"Z-Image Task submitted, ID: {task_id}")
 
             for i in range(200):
@@ -1477,17 +2168,19 @@ async def generate_cloud(req: CloudGenRequest):
                             print(f"Download error: {dl_e}")
                             local_path = img_url
 
-                        record = {"timestamp": time.time(), "prompt": req.prompt, "images": [local_path], "type": "cloud"}
+                        record = {"timestamp": time.time(), "prompt": req.prompt, "images": [local_path], "type": "cloud", "status": TASK_SUCCEEDED}
                         save_to_history(record)
                         try:
                             await manager.broadcast_new_image(record)
                         except Exception:
                             pass
-                        return {"url": local_path}
+                        return {"url": local_path, "task_id": task_id, "status": TASK_SUCCEEDED}
 
                     elif status == "FAILED":
-                        raise Exception(f"ModelScope task failed: {data}")
+                        raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
 
+                except HTTPException:
+                    raise
                 except Exception as loop_e:
                     print(f"Polling error (retrying): {loop_e}")
                     continue
@@ -1504,8 +2197,8 @@ async def generate_cloud(req: CloudGenRequest):
 
 @app.post("/api/ms/generate")
 async def ms_generate(req: MsGenerateRequest):
-    base_url = 'https://api-inference.modelscope.cn/'
-    clean_token = MODELSCOPE_API_KEY.strip()
+    base_url = modelscope_base_url(req.base_url) + "/"
+    clean_token = modelscope_api_key(req.api_key)
     if not clean_token:
         raise HTTPException(status_code=400, detail="未配置 MODELSCOPE_API_KEY，请在 API/.env 中填写。")
 
@@ -1541,6 +2234,8 @@ async def ms_generate(req: MsGenerateRequest):
                 raise HTTPException(status_code=submit_res.status_code, detail=detail)
 
             task_id = submit_res.json().get("task_id")
+            if not task_id:
+                raise HTTPException(status_code=502, detail=f"ModelScope did not return task_id: {submit_res.text}")
             print(f"MS Generate Task submitted ({req.model}), ID: {task_id}")
 
             TERMINAL_FAILED_STATUSES = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}
@@ -1579,11 +2274,12 @@ async def ms_generate(req: MsGenerateRequest):
                             "images": [local_path],
                             "type": "klein",
                             "model": req.model,
+                            "status": TASK_SUCCEEDED,
                         }
                         save_to_history(record)
                         if GLOBAL_LOOP:
                             asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(record), GLOBAL_LOOP)
-                        return {"url": local_path, "task_id": task_id}
+                        return {"url": local_path, "task_id": task_id, "status": TASK_SUCCEEDED}
 
                     elif status in TERMINAL_FAILED_STATUSES:
                         error_info = data.get("error_info") or data.get("message") or data.get("detail") or str(data)
@@ -1610,6 +2306,7 @@ def generate(req: GenerateRequest):
     global NEXT_TASK_ID
     current_task = None
     target_backend = None
+    workflow_path = resolve_workflow_path(req.workflow_json)
     with QUEUE_LOCK:
         task_id = NEXT_TASK_ID
         NEXT_TASK_ID += 1
@@ -1659,12 +2356,6 @@ def generate(req: GenerateRequest):
                         requests.post(f"http://{target_backend}/upload/image", files=files, timeout=10)
                     except Exception as e:
                         print(f"Sync upload failed: {e}")
-
-        workflow_path = os.path.join(WORKFLOW_DIR, req.workflow_json)
-        if not os.path.exists(workflow_path) and req.workflow_json == "Z-Image.json":
-            workflow_path = WORKFLOW_PATH
-        if not os.path.exists(workflow_path):
-            raise Exception(f"Workflow file not found: {req.workflow_json}")
 
         with open(workflow_path, 'r', encoding='utf-8') as f:
             workflow = json.load(f)
@@ -1740,6 +2431,7 @@ def generate(req: GenerateRequest):
             "seed": seed,
             "timestamp": current_timestamp,
             "type": req.type,
+            "status": TASK_SUCCEEDED,
             "params": req.params
         }
         save_to_history(result)
@@ -1747,8 +2439,10 @@ def generate(req: GenerateRequest):
             asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"images": [], "error": str(e)}
+        return {"images": [], "status": TASK_FAILED, "error": str(e)}
     finally:
         if target_backend:
             with LOAD_LOCK:
@@ -1761,4 +2455,4 @@ def generate(req: GenerateRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=3000)
+    uvicorn.run(app, host=APP_HOST, port=APP_PORT)
