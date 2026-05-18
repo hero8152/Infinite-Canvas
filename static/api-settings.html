@@ -18,7 +18,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="/static/theme.js?v=20260516-theme-sync"></script>
-    <script src="/static/i18n.js?v=20260515-image-editor-i18n"></script>
+    <script src="/static/i18n.js?v=20260518-agent-provider-setup"></script>
     <link rel="stylesheet" href="/static/theme.css?v=20260514-api-lora-i18n">
     <style>
         :root { --bg:#f7f8fa; --panel:#fff; --soft:#f1f4f8; --line:#e8ecf2; --line-strong:#dbe1ea; --text:#0f172a; --muted:#64748b; --faint:#94a3b8; --accent:#0f172a; }
@@ -242,8 +242,19 @@
         body.show-ms .protocol-selector-wrap { display:none !important; }
         .ms-hint .ms-line { display:block; }
         .ms-hint .inline-code { display:inline-flex; align-items:center; min-height:20px; padding:0 7px; border-radius:6px; background:var(--panel); color:var(--text); border:1px solid var(--line); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; font-weight:700; vertical-align:middle; }
+        .agent-setup-block { gap:12px; }
+        .agent-command-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:stretch; }
+        .agent-command { min-width:0; display:flex; align-items:center; min-height:42px; padding:9px 12px; border:1px solid var(--line); border-radius:11px; background:var(--soft); color:var(--text); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; line-height:1.45; font-weight:750; white-space:nowrap; overflow:auto; }
+        body.studio-theme-dark .agent-command,
+        html.studio-theme-dark body .agent-command { background:var(--panel); border-color:var(--line-strong); }
+        .agent-meta-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+        .agent-meta { min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:11px; background:var(--panel); }
+        body.studio-theme-dark .agent-meta,
+        html.studio-theme-dark body .agent-meta { background:var(--soft); border-color:var(--line-strong); }
+        .agent-meta-label { color:var(--faint); font-size:10px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+        .agent-meta-value { margin-top:3px; color:var(--text); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; line-height:1.4; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .empty { padding:18px; border:1px dashed var(--line); border-radius:11px; color:var(--faint); text-align:center; font-size:11.5px; font-weight:700; }
-        @media (max-width:860px) { .page{padding:24px 16px 60px}.layout{grid-template-columns:1fr;gap:28px}.sidebar{position:static}.form,.model-grid{grid-template-columns:1fr}.models-toolbar{align-items:flex-start;flex-direction:column}.models-toolbar-actions{width:100%;justify-content:flex-end}.lora-row{grid-template-columns:1fr}.lora-row .icon-btn{width:100%;} }
+        @media (max-width:860px) { .page{padding:24px 16px 60px}.layout{grid-template-columns:1fr;gap:28px}.sidebar{position:static}.form,.model-grid,.agent-meta-grid{grid-template-columns:1fr}.models-toolbar{align-items:flex-start;flex-direction:column}.models-toolbar-actions{width:100%;justify-content:flex-end}.lora-row{grid-template-columns:1fr}.lora-row .icon-btn{width:100%;}.agent-command-row{grid-template-columns:1fr}.agent-command-row .action-btn{width:100%;} }
     </style>
 </head>
 <body>
@@ -328,6 +339,35 @@
                                 </div>
                             </div>
                             <div id="verifyResult" style="display:none;padding:2px 0;grid-column:1/-1"></div>
+                        </div>
+                    </section>
+
+                    <section id="agentSetupBlock" class="block agent-setup-block">
+                        <div class="block-head">
+                            <div>
+                                <div class="block-title" data-i18n="api.agentSetupTitle">Agent 配置</div>
+                                <div class="block-desc" data-i18n="api.agentSetupDesc">给未来 agent 和贡献者使用的安全配置命令。命令只引用 Key 环境变量，不显示真实 Key。</div>
+                            </div>
+                        </div>
+                        <div class="agent-command-row">
+                            <code id="agentSetupCommand" class="agent-command">python3 scripts/configure_provider.py</code>
+                            <button class="action-btn" type="button" onclick="copyAgentSetupCommand()">
+                                <i data-lucide="copy" class="w-3.5 h-3.5"></i><span data-i18n="api.copyCommand">复制命令</span>
+                            </button>
+                        </div>
+                        <div class="agent-meta-grid">
+                            <div class="agent-meta">
+                                <div class="agent-meta-label" data-i18n="api.agentKeyEnv">Key 环境变量</div>
+                                <div id="agentSetupKeyEnv" class="agent-meta-value">—</div>
+                            </div>
+                            <div class="agent-meta">
+                                <div class="agent-meta-label" data-i18n="api.agentProviderFile">平台配置</div>
+                                <div class="agent-meta-value">data/api_providers.json</div>
+                            </div>
+                            <div class="agent-meta">
+                                <div class="agent-meta-label" data-i18n="api.agentEnvFile">本地密钥</div>
+                                <div class="agent-meta-value">API/.env</div>
+                            </div>
                         </div>
                     </section>
 
@@ -454,6 +494,8 @@
         const videoModelList = document.getElementById('videoModelList');
         const msLoraBlock = document.getElementById('msLoraBlock');
         const msLoraList = document.getElementById('msLoraList');
+        const agentSetupCommand = document.getElementById('agentSetupCommand');
+        const agentSetupKeyEnv = document.getElementById('agentSetupKeyEnv');
         const MS_BUILTIN_IMAGE_MODELS = [
             'Tongyi-MAI/Z-Image-Turbo',
             'Qwen/Qwen-Image-2512',
@@ -466,6 +508,69 @@
         function setStatus(text){ statusEl.textContent = text || ''; }
         function normalizeId(value){
             return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '').replace(/-+/g, '-').slice(0, 40);
+        }
+        function providerKeyEnv(id){
+            const safe = String(id || 'custom-api').replace(/[^A-Za-z0-9]/g, '_').toUpperCase();
+            if(id === 'comfly') return 'COMFLY_API_KEY';
+            if(id === 'modelscope') return 'MODELSCOPE_API_KEY';
+            return `API_PROVIDER_${safe}_KEY`;
+        }
+        function shellQuote(value){
+            return `'${String(value || '').replace(/'/g, `'\\''`)}'`;
+        }
+        function setupModelFlags(flag, values){
+            const parts = [];
+            unique(values || []).forEach(model => {
+                if(model) parts.push(flag, shellQuote(model));
+            });
+            return parts;
+        }
+        function buildAgentSetupCommand(item){
+            if(!item) return 'python3 scripts/configure_provider.py';
+            const parts = [
+                'python3',
+                'scripts/configure_provider.py',
+                '--id', shellQuote(item.id || 'custom-api'),
+                '--name', shellQuote(item.name || item.id || 'Custom API'),
+                '--base-url', shellQuote(item.base_url || 'https://api.example.com'),
+                '--protocol', shellQuote(item.protocol || 'openai'),
+                '--api-key-env', shellQuote(item.key_env || 'API_PROVIDER_CUSTOM_API_KEY')
+            ];
+            parts.push(
+                ...setupModelFlags('--image-model', item.image_models),
+                ...setupModelFlags('--chat-model', item.chat_models),
+                ...setupModelFlags('--video-model', item.video_models)
+            );
+            if(item.primary) parts.push('--set-primary');
+            return parts.join(' ');
+        }
+        function draftAgentItem(){
+            const item = provider();
+            if(!item) return null;
+            const isBuiltin = item.id === 'comfly' || item.id === 'modelscope';
+            return {
+                ...item,
+                id: isBuiltin ? item.id : deriveIdFromName(nameInput.value, item.id),
+                name: nameInput.value.trim() || item.name || item.id,
+                base_url: baseInput.value.trim() || item.base_url || '',
+                protocol: item.id === 'modelscope' ? 'openai' : (protocolInput?.value || item.protocol || 'openai'),
+                key_env: providerKeyEnv(isBuiltin ? item.id : deriveIdFromName(nameInput.value, item.id))
+            };
+        }
+        function renderAgentSetup(){
+            const item = draftAgentItem();
+            if(agentSetupCommand) agentSetupCommand.textContent = buildAgentSetupCommand(item);
+            if(agentSetupKeyEnv) agentSetupKeyEnv.textContent = item?.key_env || 'API_PROVIDER_CUSTOM_API_KEY';
+        }
+        async function copyAgentSetupCommand(){
+            const command = agentSetupCommand?.textContent || '';
+            if(!command) return;
+            try {
+                await navigator.clipboard.writeText(command);
+                setStatus(tr('api.commandCopied') || '命令已复制');
+            } catch(e) {
+                setStatus(command);
+            }
         }
         // 从平台名生成稳定的 ID；含中文等非 ASCII 会被去掉，剩下为空时自动追加随机后缀
         function deriveIdFromName(name, existingId){
@@ -575,6 +680,7 @@
             renderModels('video');
             if(isModelScope) renderMsLoras();
             else if(msLoraList) msLoraList.innerHTML = '';
+            renderAgentSetup();
             renderProviderList();
         }
         function showVerifyResult(html){ const el = document.getElementById('verifyResult'); if(el){ el.style.display = 'block'; el.innerHTML = html; } }
@@ -801,6 +907,7 @@
             item.video_models = video;
             renderModels('image'); renderModels('chat'); renderModels('video');
             renderMsLoras();
+            renderAgentSetup();
             setStatus(`已应用 · 生图 ${image.length} / LLM ${chat.length} / 视频 ${video.length}，点保存生效`);
             closeModelPicker();
         }
@@ -939,12 +1046,14 @@
             const key = kind === 'image' ? 'image_models' : kind === 'video' ? 'video_models' : 'chat_models';
             item[key] = [...(item[key] || []), ''];
             renderModels(kind);
+            renderAgentSetup();
             if(kind === 'image') renderMsLoras();
         }
         function updateModel(kind, index, value){
             const item = provider();
             const key = kind === 'image' ? 'image_models' : kind === 'video' ? 'video_models' : 'chat_models';
             item[key][index] = value;
+            renderAgentSetup();
             if(kind === 'image') renderMsLoras();
         }
         function removeModel(kind, index){
@@ -952,6 +1061,7 @@
             const key = kind === 'image' ? 'image_models' : kind === 'video' ? 'video_models' : 'chat_models';
             item[key].splice(index, 1);
             renderModels(kind);
+            renderAgentSetup();
             if(kind === 'image') renderMsLoras();
         }
         async function loadProviders(){
@@ -998,7 +1108,7 @@
                         base_url:item.base_url,
                         protocol:(item.id === 'modelscope') ? 'openai' : (item.protocol || 'openai'),
                         enabled:item.enabled !== false,
-                        primary:false,
+                        primary:!!item.primary,
                         image_models:item.image_models || [],
                         chat_models:item.chat_models || [],
                         video_models:item.video_models || [],
@@ -1038,7 +1148,9 @@
             if(window.StudioI18n) window.StudioI18n.apply();
             loadProviders();
             // 平台名输入时实时预览生成的 ID
-            if(nameInput) nameInput.addEventListener('input', updateIdPreview);
+            if(nameInput) nameInput.addEventListener('input', () => { updateIdPreview(); renderAgentSetup(); });
+            if(baseInput) baseInput.addEventListener('input', renderAgentSetup);
+            if(protocolInput) protocolInput.addEventListener('change', renderAgentSetup);
         };
     </script>
 </body>

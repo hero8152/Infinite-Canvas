@@ -4134,9 +4134,7 @@
                 else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
             };
             const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
-            // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-            const showStatus = ['generator','msgen','comfy','llm'].includes(node.type) && node.runStatus
-                && (node.runStatus !== 'failed' || node._cascadeFailed);
+            const showStatus = ['generator','msgen','comfy','llm'].includes(node.type) && node.runStatus;
             const statusHtml = showStatus ? (() => {
                 const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
                 return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
@@ -6298,8 +6296,7 @@
             return `<button class="gen-cascade-btn" type="button" data-cascade="${node.id}" title="一键运行整条工作流（追溯所有上游生成节点）"><i data-lucide="play-circle" class="w-4 h-4"></i><span>一键运行 ${order.length} 个节点${suffix}</span></button>`;
         }
         function retryBarHtml(node){
-            // 只在一键运行模式中失败才显示；普通单节点失败直接弹 alert，不显示这条
-            if(node.runStatus !== 'failed' || !node._cascadeFailed) return '';
+            if(node.runStatus !== 'failed') return '';
             return `<div class="node-retry-bar" data-retry-bar>
                 <span class="node-retry-msg" title="${escapeAttr(node.runError||'')}">${escapeHtml((node.runError||tr('canvas.generationFailed')).slice(0,60))}</span>
                 <button class="node-retry-btn" type="button" data-retry="${node.id}">重试</button>

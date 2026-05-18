@@ -681,23 +681,27 @@
                     const prompt = document.getElementById('msPromptInput').value.trim()
                         || 'masterpiece, best quality, ultra-detailed, high resolution';
                     let token = localStorage.getItem('modelscope_api_token') || '';
+                    let hasServerToken = false;
                     if (!token) {
                         try {
                             const tokenRes = await fetch('/api/config/token');
                             if (tokenRes.ok) {
                                 const tokenData = await tokenRes.json();
-                                token = tokenData.token || '';
+                                hasServerToken = !!tokenData.has_token;
                             }
                         } catch (e) {
                             console.warn('Failed to fetch ModelScope token', e);
                         }
+                    }
+                    if (!token && !hasServerToken) {
+                        throw new Error('请先在 API 设置中配置 ModelScope API Key');
                     }
                     const msRes = await fetch('/api/ms/generate', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             prompt,
-                            api_key: token,
+                            api_key: token || '',
                             model: 'black-forest-labs/FLUX.2-klein-9B',
                             image_urls: [previewSrc],
                             loras: { 'Daniel8152/Klein-enhance': strength },

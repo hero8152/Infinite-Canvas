@@ -1,6 +1,24 @@
 # Infinite-Canvas
 Supports comfyui/API calls/modelscope calls
 
+## Agent-friendly custom API setup
+
+This repo supports custom OpenAI-compatible and APIMart-style API providers from both the web UI and an agent-safe CLI.
+
+```bash
+export API_PROVIDER_CUSTOM_API_KEY="sk-..."
+python3 scripts/configure_provider.py \
+  --id custom-api \
+  --name "Custom API" \
+  --base-url "https://api.example.com/v1" \
+  --protocol openai \
+  --api-key-env API_PROVIDER_CUSTOM_API_KEY \
+  --image-model gpt-image-2 \
+  --chat-model gpt-5.5
+```
+
+Secrets are written to ignored `API/.env`; provider metadata is written to ignored `data/api_providers.json`. Remote provider URLs should use `https://`; the CLI and backend only allow `http://` for local endpoints like `127.0.0.1`. See `docs/AGENT_PROVIDER_SETUP.md` and `docs/API.md`.
+
 详细教程：[https://youtu.be/1y9ShTvgC_w](https://youtu.be/r_y_9ALr7fg)
 
 由于最近很多API网址关停，我找到一个稳定的网址：

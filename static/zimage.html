@@ -20,7 +20,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="/static/theme.js?v=20260516-theme-sync"></script>
-    <script src="/static/i18n.js?v=20260512-pages2"></script>
+    <script src="/static/i18n.js?v=20260518-api-engine"></script>
     <script src="/static/image-preview.js?v=20260516"></script>
     <script src="/static/history-bulk-manager.js?v=20260517"></script>
     <style>
@@ -92,7 +92,7 @@
             padding: 4px;
             border-radius: 14px;
             display: flex;
-            width: 260px;
+            width: 390px;
         }
 
         .mode-btn {
@@ -116,12 +116,76 @@
         .mode-glider {
             position: absolute;
             height: calc(100% - 8px);
-            width: calc(50% - 4px);
+            width: calc(33.333% - 4px);
             background: #fff;
             border-radius: 11px;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
             transition: transform 0.3s var(--easing);
             z-index: 1;
+        }
+
+        .api-provider-panel {
+            display: none;
+            min-width: 260px;
+        }
+
+        .api-provider-panel.visible {
+            display: flex;
+        }
+
+        .api-select {
+            width: 128px;
+            height: 28px;
+            border: 1px solid #edf2f7;
+            border-radius: 12px;
+            background: #fff;
+            color: #111827;
+            outline: none;
+            padding: 0 10px;
+            font-size: 10px;
+            font-weight: 800;
+        }
+
+        .api-select:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .size-select {
+            height: 28px;
+            border: 1px solid #edf2f7;
+            border-radius: 12px;
+            background: #fff;
+            color: #111827;
+            outline: none;
+            padding: 0 9px;
+            font-size: 10px;
+            font-weight: 800;
+        }
+
+        .size-preview {
+            min-width: 82px;
+            color: #9ca3af;
+            font-size: 10px;
+            font-weight: 850;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        @media (max-width: 768px) {
+            .mode-switcher {
+                width: min(390px, calc(100vw - 96px));
+            }
+
+            .api-provider-panel {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .api-select {
+                flex: 1;
+                min-width: 0;
+            }
         }
 
         .masonry-grid {
@@ -208,6 +272,11 @@
                                     <i data-lucide="monitor" class="w-3 h-3"></i>
                                     <span data-i18n="studio.local">Local</span>
                                 </div>
+                                <div id="modeApi" class="mode-btn flex items-center justify-center gap-1.5"
+                                    onclick="switchEngine('api')">
+                                    <i data-lucide="wand-sparkles" class="w-3 h-3"></i>
+                                    <span>API</span>
+                                </div>
                                 <div id="modeCloud" class="mode-btn flex items-center justify-center gap-1.5"
                                     onclick="switchEngine('cloud')">
                                     <i data-lucide="cloud" class="w-3 h-3"></i>
@@ -221,15 +290,34 @@
 
                         <div class="flex flex-col">
                             <span class="text-[9px] font-bold text-gray-400 uppercase mb-1" data-i18n="studio.dimensions">Dimensions</span>
-                            <div class="flex items-center gap-2 text-xs font-bold">
-                                <input id="width" type="number" value="1024"
-                                    class="w-10 bg-transparent outline-none border-b border-transparent focus:border-black">
-                                <span class="text-gray-200">×</span>
-                                <input id="height" type="number" value="1024"
-                                    class="w-10 bg-transparent outline-none border-b border-transparent focus:border-black">
+                            <div class="flex items-center gap-2">
+                                <select id="ratioSelect" class="size-select" onchange="updateSizePreview()">
+                                    <option value="square">1:1</option>
+                                    <option value="landscape">3:2</option>
+                                    <option value="portrait">2:3</option>
+                                    <option value="wide">16:9</option>
+                                    <option value="story">9:16</option>
+                                    <option value="landscape43">4:3</option>
+                                    <option value="portrait43">3:4</option>
+                                </select>
+                                <select id="resolutionSelect" class="size-select" onchange="updateSizePreview()">
+                                    <option value="1k">1K</option>
+                                    <option value="2k">2K</option>
+                                    <option value="4k">4K</option>
+                                </select>
+                                <span id="sizePreview" class="size-preview">1024 × 1024</span>
                             </div>
                         </div>
 
+                        <div id="apiProviderDivider" class="h-8 w-px bg-gray-100 hidden"></div>
+
+                        <div id="apiProviderPanel" class="api-provider-panel flex-col">
+                            <span class="text-[9px] font-bold text-gray-400 uppercase mb-1" data-i18n="studio.apiProvider">API Provider</span>
+                            <div class="flex items-center gap-2">
+                                <select id="apiProviderSelect" class="api-select" onchange="setApiProvider(this.value)"></select>
+                                <select id="apiModelSelect" class="api-select" onchange="setApiModel(this.value)"></select>
+                            </div>
+                        </div>
 
                     </div>
 
@@ -316,14 +404,29 @@
         let allHistory = [];
         let currentIndex = 0;
         const PAGE_SIZE = 15;
+        const HISTORY_TYPES = ['zimage', 'online', 'cloud'];
+        const LIVE_HISTORY_TYPES = HISTORY_TYPES;
         let isLoading = false;
+        let apiProviders = [];
+        let apiProvider = '';
+        let apiModel = '';
+        let activeApiTasks = 0;
+        const SIZE_MAP = {
+            square:{'1k':'1024x1024','2k':'2048x2048','4k':'2880x2880'},
+            portrait:{'1k':'1024x1536','2k':'1360x2048','4k':'2352x3520'},
+            landscape:{'1k':'1536x1024','2k':'2048x1360','4k':'3520x2352'},
+            wide:{'1k':'1280x720','2k':'2048x1152','4k':'3840x2160'},
+            story:{'1k':'720x1280','2k':'1152x2048','4k':'2160x3840'},
+            portrait43:{'1k':'1008x1344','2k':'1536x2048','4k':'2448x3264'},
+            landscape43:{'1k':'1344x1008','2k':'2048x1536','4k':'3264x2448'}
+        };
 
         // WebSocket 
         const socket = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/stats?client_id=${encodeURIComponent(CLIENT_ID)}`);
         socket.onmessage = (e) => {
             try {
                 const msg = JSON.parse(e.data);
-                if (msg.type === 'new_image' && msg.data?.type === 'zimage') {
+                if (msg.type === 'new_image' && LIVE_HISTORY_TYPES.includes(msg.data?.type)) {
                     if (!document.getElementById(`history-${msg.data.timestamp}`)) {
                         allHistory.unshift(msg.data);
                         renderImageCard(msg.data, true);
@@ -338,28 +441,133 @@
         const ENGINE_MODE_KEY = 'zimage_engine_mode';
 
         // 1. Token handled via index.html sidebar
+        function escapeHtml(str){
+            return String(str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+        }
+
+        function uniqueModels(list){
+            const seen = new Set();
+            return (list || []).map(item => String(item || '').trim()).filter(item => item && !seen.has(item) && seen.add(item));
+        }
+
+        function apiImageProviders(){
+            return (apiProviders || []).filter(p => p.id !== 'modelscope' && p.enabled !== false && (p.image_models || []).length);
+        }
+
+        function apiProviderById(id){
+            const providers = apiImageProviders();
+            return providers.find(p => p.id === id) || providers[0] || null;
+        }
+
+        function apiProviderModels(id){
+            return uniqueModels(apiProviderById(id)?.image_models || []);
+        }
+
+        function preferredApiImageModel(models){
+            const list = uniqueModels(models);
+            return list.find(m => /^gpt-image/i.test(m))
+                || list.find(m => /nano|image/i.test(m) && !/gemini/i.test(m))
+                || list[0]
+                || '';
+        }
+
+        function apiImageSize(){
+            const ratio = document.getElementById('ratioSelect')?.value || 'square';
+            const resolution = document.getElementById('resolutionSelect')?.value || '1k';
+            return SIZE_MAP[ratio]?.[resolution] || SIZE_MAP.square[resolution] || SIZE_MAP.square['1k'];
+        }
+
+        function selectedSizeParts(){
+            const [width, height] = apiImageSize().split('x').map(v => parseInt(v, 10));
+            return {
+                width: Number.isFinite(width) ? width : 1024,
+                height: Number.isFinite(height) ? height : 1024
+            };
+        }
+
+        function updateSizePreview(){
+            const preview = document.getElementById('sizePreview');
+            if(preview) preview.innerText = apiImageSize().replace('x', ' × ');
+        }
+
+        function renderApiControls(){
+            const providerSelect = document.getElementById('apiProviderSelect');
+            const modelSelect = document.getElementById('apiModelSelect');
+            if(!providerSelect || !modelSelect) return;
+            const providers = apiImageProviders();
+            if(!providers.length){
+                apiProvider = '';
+                apiModel = '';
+                providerSelect.disabled = true;
+                modelSelect.disabled = true;
+                providerSelect.innerHTML = `<option value="">${escapeHtml(tr('studio.noApiProviders'))}</option>`;
+                modelSelect.innerHTML = `<option value="">${escapeHtml(tr('studio.noApiModels'))}</option>`;
+                return;
+            }
+            if(!providers.some(p => p.id === apiProvider)) apiProvider = providers[0].id;
+            const models = apiProviderModels(apiProvider);
+            if(!models.includes(apiModel)) apiModel = preferredApiImageModel(models);
+            providerSelect.disabled = false;
+            modelSelect.disabled = !models.length;
+            providerSelect.innerHTML = providers.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === apiProvider ? 'selected' : ''}>${escapeHtml(p.name || p.id)}</option>`).join('');
+            modelSelect.innerHTML = models.length
+                ? models.map(m => `<option value="${escapeHtml(m)}" ${m === apiModel ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')
+                : `<option value="">${escapeHtml(tr('studio.noApiModels'))}</option>`;
+        }
+
+        async function initApiProviders(){
+            try {
+                const cfg = await fetch('/api/config').then(r => r.json());
+                apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
+            } catch (e) {
+                apiProviders = [];
+            }
+            renderApiControls();
+            switchEngine(currentEngine || localStorage.getItem(ENGINE_MODE_KEY) || 'local');
+        }
+
+        function setApiProvider(next){
+            apiProvider = next;
+            apiModel = preferredApiImageModel(apiProviderModels(apiProvider));
+            renderApiControls();
+        }
+
+        function setApiModel(next){
+            apiModel = next;
+        }
+
+        function updateRenderButtonText(){
+            const btnText = document.getElementById('btnText');
+            if(!btnText) return;
+            if(currentEngine === 'api') {
+                btnText.innerText = activeApiTasks > 0
+                    ? `${tr('studio.renderApi')} · ${activeApiTasks}`
+                    : tr('studio.renderApi');
+            }
+            else if(currentEngine === 'cloud') btnText.innerText = tr('studio.renderCloud');
+            else btnText.innerText = tr('studio.renderLocal');
+        }
 
         // 2. 切换引擎逻辑
         function switchEngine(mode) {
+            if (!['local', 'api', 'cloud'].includes(mode)) mode = 'local';
             currentEngine = mode;
             localStorage.setItem(ENGINE_MODE_KEY, mode); // Save state
 
             const glider = document.getElementById('glider');
             const localBtn = document.getElementById('modeLocal');
+            const apiBtn = document.getElementById('modeApi');
             const cloudBtn = document.getElementById('modeCloud');
-            const btnText = document.getElementById('btnText');
-
-            if (mode === 'local') {
-                glider.style.transform = 'translateX(0)';
-                localBtn.classList.add('active');
-                cloudBtn.classList.remove('active');
-                btnText.innerText = tr('studio.renderLocal');
-            } else {
-                glider.style.transform = 'translateX(100%)';
-                cloudBtn.classList.add('active');
-                localBtn.classList.remove('active');
-                btnText.innerText = tr('studio.renderCloud');
-            }
+            const apiPanel = document.getElementById('apiProviderPanel');
+            const apiDivider = document.getElementById('apiProviderDivider');
+            const index = mode === 'api' ? 1 : mode === 'cloud' ? 2 : 0;
+            glider.style.transform = `translateX(${index * 100}%)`;
+            localBtn.classList.toggle('active', mode === 'local');
+            apiBtn.classList.toggle('active', mode === 'api');
+            cloudBtn.classList.toggle('active', mode === 'cloud');
+            apiPanel?.classList.toggle('visible', mode === 'api');
+            apiDivider?.classList.toggle('hidden', mode !== 'api');
+            updateRenderButtonText();
         }
 
         // Initialize Engine Mode
@@ -375,22 +583,87 @@
 
             if (currentEngine === 'local') {
                 runLocalTask(prompt);
+            } else if (currentEngine === 'api') {
+                runApiTask(prompt);
             } else {
                 runCloudTask(prompt);
             }
         }
 
-        // 4. ModelScope 云端逻辑
+        // 4. API 平台生图逻辑
+        async function runApiTask(prompt) {
+            renderApiControls();
+            if (!apiProvider || !apiModel) return alert(tr('studio.noApiProviders'));
+            const placeholder = createPlaceholder(tr('studio.apiQueued'));
+            document.getElementById('masonry').prepend(placeholder);
+            activeApiTasks++;
+            updateRenderButtonText();
+
+            try {
+                const res = await fetch('/api/canvas-image-tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt,
+                        provider_id:apiProvider,
+                        model:apiModel,
+                        size:apiImageSize(),
+                        reference_images: []
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.task_id) {
+                    setPlaceholderText(placeholder, tr('studio.apiRendering'));
+                    pollApiTask(data.task_id, placeholder);
+                } else {
+                    throw new Error(data.detail || "API generation failed");
+                }
+            } catch (e) {
+                activeApiTasks = Math.max(0, activeApiTasks - 1);
+                updateRenderButtonText();
+                placeholder.remove();
+                alert(e.message || "API generation failed");
+            }
+        }
+
+        async function pollApiTask(taskId, placeholder){
+            try {
+                while(true){
+                    await new Promise(r => setTimeout(r, 1400));
+                    const res = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
+                    const data = await res.json();
+                    if(!res.ok) throw new Error(data.detail || "API generation failed");
+                    if(data.status === 'succeeded' && data.result){
+                        placeholder.remove();
+                        renderImageCard(data.result, true);
+                        return;
+                    }
+                    if(data.status === 'failed'){
+                        throw new Error(data.error || "API generation failed");
+                    }
+                    setPlaceholderText(placeholder, tr('studio.apiRendering'));
+                }
+            } catch(e) {
+                setPlaceholderText(placeholder, e.message || tr('studio.apiFailed'));
+                placeholder.classList.add('border-red-200', 'bg-red-50');
+            } finally {
+                activeApiTasks = Math.max(0, activeApiTasks - 1);
+                updateRenderButtonText();
+            }
+        }
+
+        // 5. ModelScope 云端逻辑
         async function runCloudTask(prompt) {
             let apiKey = localStorage.getItem(MS_TOKEN_KEY);
+            let hasServerToken = false;
             if (!apiKey) {
                 try {
                     const res = await fetch('/api/config/token');
                     const data = await res.json();
-                    if (data.token) apiKey = data.token;
+                    hasServerToken = !!data.has_token;
                 } catch (e) { }
             }
-            if (!apiKey) return alert(tr('studio.modelscopeTokenRequired'));
+            if (!apiKey && !hasServerToken) return alert(tr('studio.modelscopeTokenRequired'));
 
             const btn = document.getElementById('mainGenBtn');
             setLoading(true);
@@ -404,8 +677,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         prompt: prompt,
-                        api_key: apiKey,
-                        resolution: `${document.getElementById('width').value}x${document.getElementById('height').value}`
+                        api_key: apiKey || '',
+                        resolution: apiImageSize()
                     })
                 });
                 const data = await res.json();
@@ -423,20 +696,21 @@
             }
         }
 
-        // 5. 本地任务逻辑
+        // 6. 本地任务逻辑
         async function runLocalTask(prompt) {
             setLoading(true);
             const placeholder = createPlaceholder("Local Rendering");
             document.getElementById('masonry').prepend(placeholder);
 
             try {
+                const size = selectedSizeParts();
                 const res = await fetch('/api/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         prompt,
-                        width: parseInt(document.getElementById('width').value),
-                        height: parseInt(document.getElementById('height').value),
+                        width: size.width,
+                        height: size.height,
                         type: "zimage",
                         client_id: CLIENT_ID
                     })
@@ -455,7 +729,7 @@
         // 工具函数
         function setLoading(isLoading) {
             const btn = document.getElementById('mainGenBtn');
-            btn.disabled = isLoading;
+            btn.disabled = Boolean(isLoading && currentEngine !== 'api');
 
             if (isLoading) {
                 // Active state: Dark gray bg, filled yellow pulsing icon
@@ -464,15 +738,21 @@
             } else {
                 // Reset state: Original bg (via CSS), outline yellow icon
                 btn.style.backgroundColor = '';
-                btn.innerHTML = `<i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i><span id="btnText">Render Art (${currentEngine.toUpperCase()})</span>`;
+                btn.innerHTML = `<i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i><span id="btnText"></span>`;
+                updateRenderButtonText();
             }
             lucide.createIcons();
+        }
+
+        function setPlaceholderText(placeholder, text) {
+            const label = placeholder?.querySelector('[data-placeholder-label]');
+            if (label) label.innerText = text;
         }
 
         function createPlaceholder(text) {
             const div = document.createElement('div');
             div.className = 'masonry-item bg-gray-50 flex flex-col items-center justify-center border-dashed border-2 border-gray-200';
-            div.innerHTML = `<div class="w-6 h-6 border-2 border-gray-100 border-t-black rounded-full animate-spin mb-3"></div><span class="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">${text}</span>`;
+            div.innerHTML = `<div class="w-6 h-6 border-2 border-gray-100 border-t-black rounded-full animate-spin mb-3"></div><span data-placeholder-label class="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">${text}</span>`;
             return div;
         }
 
@@ -487,6 +767,7 @@
             card.innerHTML = `
             <img src="${data.images[0]}" class="w-full h-full object-cover" loading="lazy">
             ${data.type === 'cloud' ? '<div class="absolute top-3 left-3 z-10"><img src="/static/modelscope.gif" class="h-4 w-auto object-contain bg-white/90 rounded-full p-0.5 shadow-sm"></div>' : ''}
+            ${data.type === 'online' ? '<div class="absolute top-3 left-3 z-10 bg-black/85 text-white px-2 py-1 rounded-full text-[8px] font-black tracking-widest">API</div>' : ''}
         `;
             isNew ? masonry.prepend(card) : masonry.appendChild(card);
             lucide.createIcons();
@@ -506,8 +787,10 @@
                     trigger.classList.remove('hidden');
                     trigger.innerText = tr('studio.loadingArchives');
 
-                    const res = await fetch('/api/history?type=zimage');
-                    allHistory = await res.json();
+                    const batches = await Promise.all(HISTORY_TYPES.map(type =>
+                        fetch(`/api/history?type=${type}`).then(r => r.ok ? r.json() : []).catch(() => [])
+                    ));
+                    allHistory = batches.flat().sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
                 } else {
                     trigger.innerText = "Loading...";
                     await new Promise(r => setTimeout(r, 400));
@@ -549,6 +832,8 @@
         }, { threshold: 0.1 });
 
         window.onload = () => {
+            updateSizePreview();
+            initApiProviders();
             loadHistory(0).then(() => {
                 window.HistoryBulkManager?.attach({masonry:'#masonry'});
                 const trigger = document.getElementById('loadMoreTrigger');

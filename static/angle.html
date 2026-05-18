@@ -906,20 +906,21 @@
 
             // Get token from centralized management (Personal -> Global)
             let token = localStorage.getItem('modelscope_api_token');
+            let hasServerToken = false;
             
             if (!token) {
                 try {
                     const res = await fetch('/api/config/token');
                     if (res.ok) {
                         const data = await res.json();
-                        if (data.token) token = data.token;
+                        hasServerToken = !!data.has_token;
                     }
                 } catch (e) {
                     console.warn("Failed to fetch global token", e);
                 }
             }
 
-            if (!token) {
+            if (!token && !hasServerToken) {
                 if (window.parent && typeof window.parent.openTokenModal === 'function') {
                     window.parent.openTokenModal();
                     // Allow the error to propagate so user sees the message
@@ -952,7 +953,7 @@
 
             const payload = {
                 "prompt": promptInput.value,
-                "api_key": token,
+                "api_key": token || '',
                 "type": "angle",
                 "model": "Qwen/Qwen-Image-Edit-2511",
                 "image_urls": [dataUri],
@@ -993,7 +994,7 @@
                          // Call poll endpoint
                          const pollPayload = {
                              "task_id": taskId,
-                             "api_key": token,
+                             "api_key": token || '',
                              "client_id": clientId
                          };
                          

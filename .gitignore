@@ -1,0 +1,29 @@
+# Local secrets
+API/.env
+.env
+.env.*
+!.env.example
+!API/.env.example
+
+# Runtime/user data
+data/
+output/
+assets/input/
+assets/output/
+history.json
+global_config.json
+
+# Python/cache state
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Agent and code-intelligence generated state
+.gitnexus/
+.claude/skills/generated/
+.claude/skills/gitnexus/
+
+# OS/editor noise
+.DS_Store
+*.swp

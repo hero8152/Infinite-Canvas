@@ -1,6 +1,7 @@
 import json
 import uuid
 import base64
+import ipaddress
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -13,6 +14,7 @@ import asyncio
 import logging
 import requests
 import zipfile
+import tempfile
 from typing import List, Dict, Any, Optional
 from threading import Lock
 import httpx
@@ -186,22 +188,57 @@ LOAD_LOCK = Lock()
 NEXT_TASK_ID = 1
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
+API_ENV_BOOTSTRAP_VALUES = {}
 
 def load_env_file():
+    global API_ENV_BOOTSTRAP_VALUES
     if not os.path.exists(API_ENV_FILE):
         return
     try:
-        with open(API_ENV_FILE, 'r', encoding='utf-8-sig') as f:
-            for raw_line in f.read().splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                os.environ.setdefault(key, value)
+        values = read_api_env_values()
+        API_ENV_BOOTSTRAP_VALUES = dict(values)
+        for key, value in values.items():
+            os.environ.setdefault(key, value)
     except Exception as e:
         print(f"加载 API/.env 失败: {e}")
+
+def read_api_env_values():
+    values = {}
+    if not os.path.exists(API_ENV_FILE):
+        return values
+    with open(API_ENV_FILE, 'r', encoding='utf-8-sig') as f:
+        for raw_line in f.read().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+def runtime_env_value(key, default=""):
+    values = read_api_env_values()
+    if key in os.environ:
+        env_value = os.environ.get(key, "")
+        bootstrap_value = API_ENV_BOOTSTRAP_VALUES.get(key)
+        if key in values and bootstrap_value is not None and env_value == bootstrap_value and values[key] != bootstrap_value:
+            return values[key]
+        return env_value
+    if key in values:
+        return values[key]
+    return os.getenv(key, default)
+
+def legacy_modelscope_token():
+    if not os.path.exists(GLOBAL_CONFIG_FILE):
+        return ""
+    try:
+        with open(GLOBAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        return str(config.get("modelscope_token") or "").strip()
+    except Exception:
+        return ""
+
+def modelscope_runtime_key(default=""):
+    return runtime_env_value("MODELSCOPE_API_KEY", default).strip() or legacy_modelscope_token()
 
 load_env_file()
 
@@ -316,9 +353,9 @@ def reload_env_globals():
     避免保存后需要重启才能生效。"""
     global MODELSCOPE_API_KEY, AI_API_KEY, AI_BASE_URL
     global IMAGE_MODELS, CHAT_MODELS, VIDEO_MODELS, MODELSCOPE_CHAT_MODELS
-    MODELSCOPE_API_KEY = os.getenv("MODELSCOPE_API_KEY", "")
-    AI_API_KEY = os.getenv("COMFLY_API_KEY", "")
-    AI_BASE_URL = os.getenv("COMFLY_BASE_URL", "https://ai.comfly.chat").rstrip("/")
+    MODELSCOPE_API_KEY = modelscope_runtime_key("")
+    AI_API_KEY = runtime_env_value("COMFLY_API_KEY", "")
+    AI_BASE_URL = runtime_env_value("COMFLY_BASE_URL", "https://ai.comfly.chat").rstrip("/")
     IMAGE_MODELS = model_list("IMAGE_MODELS", os.getenv("IMAGE_MODEL", IMAGE_MODEL), ["nano-banana-pro"])
     CHAT_MODELS = model_list("CHAT_MODELS", os.getenv("CHAT_MODEL", CHAT_MODEL), ["gpt-4o-mini", "gemini-3.1-flash-image-preview-2k"])
     VIDEO_MODELS = model_list("VIDEO_MODELS", "veo3-fast", [
@@ -367,6 +404,48 @@ def provider_key_env(provider_id):
     if provider_id == "modelscope":
         return "MODELSCOPE_API_KEY"
     return f"API_PROVIDER_{re.sub(r'[^A-Za-z0-9]', '_', provider_id).upper()}_KEY"
+
+def has_explicit_process_env(key):
+    if key not in os.environ:
+        return False
+    bootstrap_value = API_ENV_BOOTSTRAP_VALUES.get(key)
+    return bootstrap_value is None or os.environ.get(key, "") != bootstrap_value
+
+def sync_process_env_from_file_update(key, value):
+    global API_ENV_BOOTSTRAP_VALUES
+    if key not in os.environ or not has_explicit_process_env(key):
+        os.environ[key] = str(value or "")
+        API_ENV_BOOTSTRAP_VALUES[key] = str(value or "")
+
+def effective_provider_key(provider_id):
+    if provider_id == "modelscope":
+        return modelscope_runtime_key(MODELSCOPE_API_KEY)
+    return runtime_env_value(provider_key_env(provider_id), "")
+
+def is_loopback_http_url(url):
+    parsed = urllib.parse.urlparse(str(url or ""))
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "http":
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+def validate_provider_base_url(base_url, label="请求地址", allow_empty=False):
+    value = str(base_url or "").strip().rstrip("/")
+    if not value:
+        if allow_empty:
+            return ""
+        raise HTTPException(status_code=400, detail=f"请先填写{label}")
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail=f"{label}必须以 http:// 或 https:// 开头")
+    if parsed.scheme == "http" and not is_loopback_http_url(value):
+        raise HTTPException(status_code=400, detail=f"{label}使用远程平台时必须使用 https://；http:// 只允许 localhost 或 127.0.0.1")
+    return value
 
 def mask_secret(value):
     if not value:
@@ -462,9 +541,7 @@ def normalize_provider(item):
     if not PROVIDER_ID_RE.fullmatch(provider_id):
         raise HTTPException(status_code=400, detail=f"API 平台 ID 不合法：{provider_id or '(empty)'}")
     name = re.sub(r"\s+", " ", str(item.get("name") or provider_id).strip())[:60] or provider_id
-    base_url = str(item.get("base_url") or "").strip().rstrip("/")
-    if base_url and not re.match(r"^https?://", base_url):
-        raise HTTPException(status_code=400, detail=f"{name} 的 Base URL 需要以 http:// 或 https:// 开头")
+    base_url = validate_provider_base_url(item.get("base_url") or "", f"{name} 的 Base URL", allow_empty=True)
     protocol = str(item.get("protocol") or "openai").strip().lower()
     if protocol not in {"openai", "apimart"}:
         protocol = "openai"
@@ -502,7 +579,7 @@ def save_api_providers(providers):
             json.dump(providers, f, ensure_ascii=False, indent=2)
 
 def public_provider(provider):
-    key = os.getenv(provider_key_env(provider["id"]), "")
+    key = modelscope_runtime_key("") if provider["id"] == "modelscope" else runtime_env_value(provider_key_env(provider["id"]), "")
     return {
         **provider,
         "has_key": bool(key),
@@ -566,16 +643,23 @@ def update_env_values(updates):
         key = line.split("=", 1)[0].strip()
         if key in updates:
             next_lines.append(f"{key}={env_quote(updates[key])}")
-            os.environ[key] = str(updates[key] or "")
+            sync_process_env_from_file_update(key, updates[key])
             seen.add(key)
         else:
             next_lines.append(line)
     for key, value in updates.items():
         if key not in seen:
             next_lines.append(f"{key}={env_quote(value)}")
-            os.environ[key] = str(value or "")
-    with open(API_ENV_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(next_lines).rstrip() + "\n")
+            sync_process_env_from_file_update(key, value)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=os.path.dirname(API_ENV_FILE), delete=False) as tmp:
+        tmp.write("\n".join(next_lines).rstrip() + "\n")
+        tmp_name = tmp.name
+    os.chmod(tmp_name, 0o600)
+    os.replace(tmp_name, API_ENV_FILE)
+    try:
+        os.chmod(API_ENV_FILE, 0o600)
+    except OSError:
+        pass
 
 BACKEND_LOCAL_LOAD = {addr: 0 for addr in COMFYUI_INSTANCES}
 
@@ -1028,10 +1112,11 @@ def display_title(text):
 
 def resolve_chat_provider(provider: str, model: str, ms_model: str):
     if provider == "modelscope":
-        if not MODELSCOPE_API_KEY:
+        modelscope_api_key = modelscope_runtime_key("")
+        if not modelscope_api_key:
             raise HTTPException(status_code=400, detail="未配置 MODELSCOPE_API_KEY，请在 API/.env 中填写。")
         base = MODELSCOPE_CHAT_BASE_URL
-        hdrs = {"Authorization": f"Bearer {MODELSCOPE_API_KEY}", "Content-Type": "application/json"}
+        hdrs = {"Authorization": f"Bearer {modelscope_api_key}", "Content-Type": "application/json"}
         mdl = selected_model(ms_model or model, MODELSCOPE_CHAT_MODELS[0] if MODELSCOPE_CHAT_MODELS else "MiniMax/MiniMax-M2.7")
         return base, hdrs, mdl
     api_provider = get_api_provider(provider or "")
@@ -1047,12 +1132,12 @@ def resolve_chat_provider(provider: str, model: str, ms_model: str):
 def api_headers(json_body=True, provider=None):
     if provider:
         key_env = provider_key_env(provider["id"])
-        api_key = os.getenv(key_env, "")
+        api_key = runtime_env_value(key_env, "")
         provider_name = provider.get("name") or provider["id"]
         if not api_key:
             raise HTTPException(status_code=400, detail=f"未配置 {provider_name} 的 API Key，请在 API 平台管理中填写。")
     else:
-        api_key = AI_API_KEY
+        api_key = runtime_env_value("COMFLY_API_KEY", AI_API_KEY)
         if not api_key:
             raise HTTPException(status_code=400, detail="未配置 COMFLY_API_KEY，请在 API/.env 中填写。")
     headers = {"Accept": "application/json", "Authorization": f"Bearer {api_key}"}
@@ -1489,8 +1574,6 @@ def normalize_gpt_image_2_size(size):
     width, height = parse_size_pair(size)
     if not width or not height:
         return size or "auto"
-    if width == height and (width > 2048 or width * height > 4_194_304):
-        return "3840x2160"
     ratio = width / height
     if ratio > 3:
         width = height * 3
@@ -1537,7 +1620,7 @@ def apimart_size_resolution(size):
     return best[2], resolution
 
 async def generate_modelscope_provider_image(prompt, size, model, reference_images=None, provider=None):
-    clean_token = MODELSCOPE_API_KEY.strip()
+    clean_token = modelscope_runtime_key(MODELSCOPE_API_KEY)
     if not clean_token:
         raise HTTPException(status_code=400, detail="未配置 ModelScope API Key，请在 API 设置中填写。")
     width, height = parse_size_pair(size)
@@ -1630,7 +1713,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             if image_refs:
                 body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:14]]
             response = await client.post(gen_url, headers=api_headers(provider=provider), json=body)
-        elif is_gpt2 and not mask_refs:
+        elif is_gpt2 and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
             if quality:
                 body["quality"] = quality
@@ -1644,20 +1727,26 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             edit_failed_status = None
             edit_failed_text = ""
             try:
+                image_field = "image[]" if is_gpt2 else "image"
                 for ref in image_refs[:4]:
                     path = output_file_from_url(ref.get("url", ""))
                     if not path:
                         continue
                     fh = open(path, "rb")
                     opened.append(fh)
-                    files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
+                    files.append((image_field, (os.path.basename(path), fh, content_type_for_path(path))))
                 if mask_refs:
                     mask_path = output_file_from_url(mask_refs[0].get("url", ""))
                     if mask_path:
                         fh = open(mask_path, "rb")
                         opened.append(fh)
                         files.append(("mask", (os.path.basename(mask_path), fh, content_type_for_path(mask_path))))
-                data = {"model": model, "prompt": prompt, "size": size, "quality": quality, "response_format": "url", "n": "1"}
+                data = {"model": model, "prompt": prompt, "size": size, "quality": quality, "n": "1"}
+                if is_gpt2:
+                    data["background"] = "auto"
+                    data["output_format"] = "png"
+                else:
+                    data["response_format"] = "url"
                 try:
                     response = await client.post(edit_url, headers=api_headers(json_body=False, provider=provider), data=data, files=files)
                     if response.status_code >= 400:
@@ -1808,9 +1897,9 @@ async def ai_config():
         "video_models": VIDEO_MODELS,
         "comfy_instances": COMFYUI_INSTANCES,
         "api_providers": providers,
-        "has_api_key": bool(AI_API_KEY),
+        "has_api_key": bool(runtime_env_value("COMFLY_API_KEY", AI_API_KEY)),
         "ms_chat_models": MODELSCOPE_CHAT_MODELS,
-        "has_ms_key": bool(MODELSCOPE_API_KEY),
+        "has_ms_key": bool(modelscope_runtime_key(MODELSCOPE_API_KEY)),
     }
 
 @app.get("/api/models")
@@ -1825,15 +1914,32 @@ async def api_providers():
 async def save_providers(payload: List[ApiProviderPayload]):
     providers = []
     env_updates = {}
+    existing_by_id = {p["id"]: p for p in load_api_providers()}
     # 收集每个 item 的 primary 字段
     raw_primary_flags = [bool(getattr(item, "primary", False)) for item in payload]
     for item in payload:
-        provider = normalize_provider(item.dict(exclude={"api_key"}))
+        provider = normalize_provider(item.model_dump(exclude={"api_key"}))
         if any(existing["id"] == provider["id"] for existing in providers):
             raise HTTPException(status_code=400, detail=f"API 平台 ID 重复：{provider['id']}")
+        existing_provider = existing_by_id.get(provider["id"])
+        key_env = provider_key_env(provider["id"])
+        submitted_key = item.api_key.strip() if item.api_key is not None else None
+        if existing_provider and existing_provider.get("base_url") and provider["base_url"] != existing_provider.get("base_url"):
+            existing_key = effective_provider_key(provider["id"])
+            if existing_key:
+                if has_explicit_process_env(key_env):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{provider['name']} 的请求地址已变化，但 {key_env} 来自进程环境变量。为避免把已有 Key 发送到新地址，请先更新环境变量或使用新的平台 ID。",
+                    )
+                if not submitted_key:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{provider['name']} 的请求地址已变化。为保护已保存 Key，请重新输入 API Key 后保存，或使用新的平台 ID。",
+                    )
         providers.append(provider)
         if item.api_key is not None:
-            env_updates[provider_key_env(provider["id"])] = item.api_key.strip()
+            env_updates[key_env] = submitted_key or ""
         if provider["id"] == "comfly":
             env_updates["COMFLY_BASE_URL"] = provider["base_url"]
             env_updates["IMAGE_MODELS"] = ",".join(provider["image_models"])
@@ -1859,17 +1965,17 @@ async def save_providers(payload: List[ApiProviderPayload]):
 
 @app.get("/api/config/token")
 async def get_global_token():
-    # 优先读 env，回退到 global_config.json（兼容旧数据）
-    if MODELSCOPE_API_KEY:
-        return {"token": MODELSCOPE_API_KEY}
+    modelscope_api_key = modelscope_runtime_key(MODELSCOPE_API_KEY)
+    if modelscope_api_key:
+        return {"token": "", "has_token": True}
     if os.path.exists(GLOBAL_CONFIG_FILE):
         try:
             with open(GLOBAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                return {"token": config.get("modelscope_token", "")}
+                return {"token": "", "has_token": bool(config.get("modelscope_token", ""))}
         except:
             pass
-    return {"token": ""}
+    return {"token": "", "has_token": False}
 
 # --- 在线生图 (COMFLY) ---
 
@@ -1878,19 +1984,26 @@ class TestConnectionPayload(BaseModel):
     api_key: str = ""
     provider_id: str = ""
 
+def resolve_upstream_probe_credentials(payload: TestConnectionPayload):
+    requested_base_url = validate_provider_base_url(payload.base_url, "请求地址")
+    api_key = (payload.api_key or "").strip()
+    if api_key:
+        return requested_base_url, api_key
+    if not payload.provider_id:
+        raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
+    provider = get_api_provider_exact(payload.provider_id)
+    saved_base_url = validate_provider_base_url(provider.get("base_url") or "", f"{provider.get('name') or provider['id']} 的请求地址")
+    if requested_base_url != saved_base_url:
+        raise HTTPException(status_code=400, detail="使用已保存 Key 验证时只能请求该平台已保存的地址；测试新地址请临时输入 API Key")
+    api_key = runtime_env_value(provider_key_env(provider["id"]), "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
+    return saved_base_url, api_key
+
 @app.post("/api/providers/test-connection")
 async def test_provider_connection(payload: TestConnectionPayload):
     """测试请求地址是否可用：调上游 /v1/models。验证通过时同时把模型清单按类别返回，避免再调一次拉取接口。"""
-    base_url = (payload.base_url or "").strip().rstrip("/")
-    if not base_url:
-        raise HTTPException(status_code=400, detail="请先填写请求地址")
-    if not re.match(r"^https?://", base_url):
-        raise HTTPException(status_code=400, detail="请求地址必须以 http:// 或 https:// 开头")
-    api_key = (payload.api_key or "").strip()
-    if not api_key and payload.provider_id:
-        api_key = os.getenv(provider_key_env(payload.provider_id), "")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
+    base_url, api_key = resolve_upstream_probe_credentials(payload)
     url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -1930,14 +2043,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
 async def probe_async_endpoint(payload: TestConnectionPayload):
     """验证异步协议：用假 task_id 请求 GET /v1/tasks/{fake_id}。
     收到 400 Invalid task ID = 端点存在且 Key 有效；401/403 = Key 无效；404/连接失败 = 不支持异步端点。"""
-    base_url = (payload.base_url or "").strip().rstrip("/")
-    if not base_url:
-        raise HTTPException(status_code=400, detail="请先填写请求地址")
-    api_key = (payload.api_key or "").strip()
-    if not api_key and payload.provider_id:
-        api_key = os.getenv(provider_key_env(payload.provider_id), "")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
+    base_url, api_key = resolve_upstream_probe_credentials(payload)
     tasks_base = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
     probe_url = f"{tasks_base}/tasks/healthcheck_probe_do_not_submit"
     try:
@@ -1977,11 +2083,7 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
 
 async def fetch_models_from_upstream(base_url: str, api_key: str):
     """从 OpenAI 兼容 /v1/models 端点拉取模型，并按名称做轻量分类。"""
-    base_url = (base_url or "").strip().rstrip("/")
-    if not base_url:
-        raise HTTPException(status_code=400, detail="请先填写请求地址")
-    if not re.match(r"^https?://", base_url):
-        raise HTTPException(status_code=400, detail="请求地址必须以 http:// 或 https:// 开头")
+    base_url = validate_provider_base_url(base_url, "请求地址")
     api_key = (api_key or "").strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
@@ -2027,16 +2129,14 @@ async def fetch_models_from_upstream(base_url: str, api_key: str):
 @app.post("/api/providers/fetch-models")
 async def fetch_upstream_models_from_payload(payload: TestConnectionPayload):
     """按页面当前表单值拉取模型，支持新增平台未保存时直接使用临时 Base URL / Key。"""
-    api_key = (payload.api_key or "").strip()
-    if not api_key and payload.provider_id:
-        api_key = os.getenv(provider_key_env(payload.provider_id), "")
-    return await fetch_models_from_upstream(payload.base_url, api_key)
+    base_url, api_key = resolve_upstream_probe_credentials(payload)
+    return await fetch_models_from_upstream(base_url, api_key)
 
 @app.get("/api/providers/{provider_id}/fetch-models")
 async def fetch_upstream_models(provider_id: str):
     """从已保存的上游 OpenAI 兼容接口拉取 /v1/models 列表，按名称智能分类为 image/chat/video。"""
     provider = get_api_provider_exact(provider_id)
-    api_key = os.getenv(provider_key_env(provider["id"]), "")
+    api_key = runtime_env_value(provider_key_env(provider["id"]), "")
     if not api_key:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider_id} 未配置 API Key")
     return await fetch_models_from_upstream(provider.get("base_url") or "", api_key)
@@ -2065,6 +2165,8 @@ async def build_online_image_result(payload: OnlineImageRequest):
             friendly = "API Key 无效或已过期，请到「API 设置」检查 Key。"
         elif "model_not_found" in text or "channel not found" in text:
             friendly = f"上游平台找不到模型「{model}」可用通道。可能该模型未在此账号开通，请换一个已开通的模型。"
+        elif "Unknown parameter" in text and "'image'" in text:
+            friendly = "上游不接受 /images/generations 的 image 参数。带参考图生成应使用 /images/edits 图片编辑接口。"
         detail = friendly or f"上游生图接口错误：{text[:300]}"
         raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
     except httpx.HTTPError as exc:
@@ -2228,7 +2330,7 @@ async def canvas_video(payload: CanvasVideoRequest):
     base_url = video_api_root(provider)
     if not base_url:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
-    api_key = os.getenv(provider_key_env(provider["id"]), "")
+    api_key = runtime_env_value(provider_key_env(provider["id"]), "")
     if not api_key:
         raise HTTPException(status_code=400, detail=f"未配置 {provider.get('name') or provider['id']} 的 API Key，请在 API 设置中填写。")
     is_apimart = is_apimart_provider(provider)
@@ -2832,7 +2934,7 @@ async def delete_history(req: DeleteHistoryRequest):
 @app.post("/api/angle/poll_status")
 async def poll_angle_cloud(req: CloudPollRequest):
     base_url = 'https://api-inference.modelscope.cn/'
-    clean_token = (req.api_key or MODELSCOPE_API_KEY).strip()
+    clean_token = (req.api_key or modelscope_runtime_key(MODELSCOPE_API_KEY)).strip()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -2905,7 +3007,7 @@ async def poll_angle_cloud(req: CloudPollRequest):
 @app.post("/api/angle/generate")
 async def generate_angle_cloud(req: CloudGenRequest):
     base_url = 'https://api-inference.modelscope.cn/'
-    clean_token = (req.api_key or MODELSCOPE_API_KEY).strip()
+    clean_token = (req.api_key or modelscope_runtime_key(MODELSCOPE_API_KEY)).strip()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -3003,7 +3105,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
 @app.post("/generate")
 async def generate_cloud(req: CloudGenRequest):
     base_url = 'https://api-inference.modelscope.cn/'
-    clean_token = (req.api_key or MODELSCOPE_API_KEY).strip()
+    clean_token = (req.api_key or modelscope_runtime_key(MODELSCOPE_API_KEY)).strip()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -3096,7 +3198,7 @@ async def generate_cloud(req: CloudGenRequest):
 @app.post("/api/ms/generate")
 async def ms_generate(req: MsGenerateRequest):
     base_url = 'https://api-inference.modelscope.cn/'
-    clean_token = (req.api_key or MODELSCOPE_API_KEY).strip()
+    clean_token = (req.api_key or modelscope_runtime_key(MODELSCOPE_API_KEY)).strip()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未配置 ModelScope API Key，请在 API 设置中填写，或重新保存 ModelScope Token。")
 
