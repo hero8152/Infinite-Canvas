@@ -315,6 +315,12 @@
                                     <div class="title-edit-row">
                                         <input id="workflowTitleInput" class="workflow-title-input" type="text" placeholder="工作流名称" data-i18n-placeholder="comfy.workflowName" oninput="updateWorkflowTitle(this.value)">
                                     </div>
+                                    <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                                        <label style="font-size:11px;color:var(--faint);white-space:nowrap;font-weight:600">运行后端</label>
+                                        <select id="workflowBackendSelect" style="flex:1;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text)" onchange="onWorkflowBackendChange(this.value)">
+                                            <option value="">自动选择</option>
+                                        </select>
+                                    </div>
                                     <div id="editorSub" class="editor-sub" data-i18n="comfy.editorSubDefault">从左侧列表选择，或上传新的 API 工作流</div>
                                 </div>
                                 <div class="content-actions">
@@ -576,6 +582,7 @@
                 const data = await res.json();
                 comfyInstances = data.instances || cleaned;
                 renderComfyInstances();
+                renderBackendSelect();
                 setStatus('ComfyUI 后端地址已保存');
             } catch(e){
                 alert(e.message || '保存失败');
@@ -628,6 +635,7 @@
                 isBuiltin = !!data.builtin;
                 miniCards = {...defaultMiniCards(), ...currentConfig.mini_cards};
                 currentConfig.mini_cards = miniCards;
+                renderBackendSelect();
                 // 释放上一次的图片 blob URL
                 Object.values(previewImageUrls).forEach(u => { try { URL.revokeObjectURL(u); } catch(e){} });
                 previewImageUrls = {};
@@ -749,6 +757,22 @@
             const item = workflows.find(w => w.name === selectedName);
             if(item) item.title = value || selectedName.replace('.json','');
             renderList();
+        }
+
+        function renderBackendSelect(){
+            const sel = document.getElementById('workflowBackendSelect');
+            if(!sel) return;
+            sel.innerHTML = '<option value="">自动选择</option>' +
+                comfyInstances.filter(a => a && a.trim()).map(a =>
+                    `<option value="${a}">${a}</option>`
+                ).join('');
+            const cur = (currentConfig && currentConfig.backend) || '';
+            sel.value = comfyInstances.includes(cur) ? cur : '';
+        }
+
+        function onWorkflowBackendChange(value){
+            if(!currentConfig) return;
+            currentConfig.backend = value || '';
         }
 
         function setWorkspaceMode(mode){

@@ -1,0 +1,11 @@
+data/
+api/
+assets/
+history.json
+workflows/custom/
+python/Lib/
+python/Scripts/
+CLAUDE.md
+docs/
+.claude/
+__pycache__/

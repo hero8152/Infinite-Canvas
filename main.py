@@ -3574,6 +3574,17 @@ def generate(req: GenerateRequest):
         QUEUE.append(current_task)
 
     try:
+        # 检查工作流是否指定了首选后端
+        preferred_backend = ""
+        try:
+            cfg_path = workflow_config_path(req.workflow_json)
+            if os.path.exists(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    wf_cfg = json.load(f) or {}
+                preferred_backend = (wf_cfg.get("backend") or "").strip()
+        except Exception:
+            pass
+
         required_images = []
         for node_id, node_inputs in req.params.items():
             if isinstance(node_inputs, dict) and "image" in node_inputs:
@@ -3581,7 +3592,15 @@ def generate(req: GenerateRequest):
                 if isinstance(image_name, str) and image_name:
                     required_images.append(image_name)
 
-        target_backend = get_best_backend(required_images)
+        if preferred_backend and preferred_backend in COMFYUI_INSTANCES:
+            try:
+                with urllib.request.urlopen(f"http://{preferred_backend}/queue", timeout=1) as response:
+                    pass
+                target_backend = preferred_backend
+            except Exception:
+                target_backend = get_best_backend(required_images)
+        else:
+            target_backend = get_best_backend(required_images)
         with LOAD_LOCK:
             BACKEND_LOCAL_LOAD[target_backend] += 1
 
@@ -3756,6 +3775,7 @@ class WorkflowConfig(BaseModel):
     title: str = ""
     fields: List[WorkflowField] = []
     mini_cards: Dict[str, Any] = {}
+    backend: str = ""
 
 class WorkflowUploadRequest(BaseModel):
     name: str
