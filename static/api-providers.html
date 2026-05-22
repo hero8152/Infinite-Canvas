@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>API Providers · Feebee Studios</title>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512h"></script>
+    <script src="/static/i18n.js?v=1"></script>
+    <style>
+        body { margin:0; min-height:100vh; background:var(--stage-bg); color:var(--ink); font-family:var(--font-sans); }
+        .page { min-height:100vh; padding:28px; background-image:linear-gradient(to right, rgba(230,213,168,.24) 1px, transparent 1px), linear-gradient(to bottom, rgba(230,213,168,.24) 1px, transparent 1px); background-size:80px 80px; }
+        body.studio-theme-dark .page { background-image:linear-gradient(to right, rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,.03) 1px, transparent 1px); }
+        .head { display:flex; justify-content:space-between; gap:18px; align-items:flex-start; margin-bottom:18px; }
+        h1 { margin:0; font-size:26px; font-weight:600; display:flex; align-items:center; gap:10px; }
+        .sub { margin-top:8px; color:var(--muted); font-size:13px; max-width:760px; }
+        .layout { display:grid; grid-template-columns:280px minmax(420px, 1fr); gap:14px; align-items:start; }
+        .panel { border:1px solid var(--border); background:rgba(255,255,255,.78); }
+        body.studio-theme-dark .panel { background:rgba(28,28,30,.94); border-color:var(--dark-border); }
+        .panel-head { height:44px; padding:0 12px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); font-weight:700; }
+        body.studio-theme-dark .panel-head { border-bottom-color:var(--dark-border); }
+        .provider-list { display:grid; gap:8px; padding:10px; }
+        .provider-item { border:1px solid var(--border); background:var(--bg); padding:10px; text-align:left; cursor:pointer; color:var(--ink); display:grid; gap:5px; }
+        .provider-item.active { background:#111; color:#fff; border-color:#111; }
+        body.studio-theme-dark .provider-item { background:#242426; border-color:var(--dark-border); color:var(--dark-text); }
+        body.studio-theme-dark .provider-item.active { background:#f2f2f2; color:#111; border-color:#f2f2f2; }
+        .provider-name { font-weight:700; font-size:13px; }
+        .provider-meta { font-family:var(--font-mono); font-size:10px; color:var(--muted); overflow-wrap:anywhere; }
+        .provider-item.active .provider-meta { color:rgba(255,255,255,.68); }
+        body.studio-theme-dark .provider-item.active .provider-meta { color:#555; }
+        .body { padding:14px; display:grid; gap:12px; }
+        .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .field { display:grid; gap:6px; }
+        label, .label { font-family:var(--font-mono); font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+        input, select, textarea { width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:0; background:var(--stage-bg); color:var(--ink); font-family:var(--font-mono); font-size:12px; outline:none; }
+        input, select { height:38px; padding:0 10px; }
+        textarea { min-height:96px; padding:9px 10px; resize:vertical; }
+        input:focus, select:focus, textarea:focus { border-color:var(--primary); }
+        body.studio-theme-dark input, body.studio-theme-dark select, body.studio-theme-dark textarea { background:var(--dark-surface); border-color:var(--dark-border); color:var(--dark-text); }
+        .checks { display:flex; gap:8px; flex-wrap:wrap; }
+        .check { height:32px; border:1px solid var(--border); background:var(--bg-2); color:var(--ink); padding:0 10px; cursor:pointer; font-weight:700; }
+        .check.active { background:#111; color:#fff; border-color:#111; }
+        body.studio-theme-dark .check { background:var(--dark-surface); border-color:var(--dark-border); color:var(--dark-text); }
+        body.studio-theme-dark .check.active { background:#f2f2f2; color:#111; border-color:#f2f2f2; }
+        .actions { display:flex; flex-wrap:wrap; gap:8px; }
+        .btn { height:38px; border:1px solid var(--border); border-radius:0; padding:0 12px; background:var(--bg-2); color:var(--ink); cursor:pointer; font-weight:700; display:inline-flex; align-items:center; gap:7px; }
+        .btn.primary { background:#111; color:#fff; border-color:#111; }
+        .btn.danger { color:#b42318; }
+        body.studio-theme-dark .btn { background:var(--dark-surface); border-color:var(--dark-border); color:var(--dark-text); }
+        body.studio-theme-dark .btn.primary { background:#f2f2f2; color:#111; border-color:#f2f2f2; }
+        .status { min-height:18px; color:var(--muted); font-family:var(--font-mono); font-size:12px; }
+        .pixel-icon { width:14px; height:14px; color:var(--primary); }
+        @media (max-width:900px){ .page{padding:16px}.layout,.grid{grid-template-columns:1fr}.head{display:grid} }
+    </style>
+</head>
+<body>
+<main class="page">
+    <header class="head">
+        <div>
+            <h1><svg class="pixel-icon"><use href="#key"></use></svg><span>API Providers</span></h1>
+            <div class="sub">统一管理兼容 OpenAI / APIMart 的上游 API。密钥保存到本机 API/.env；Canvas 的 API、LLM、Video 节点按这里的 provider 和模型列表路由。</div>
+        </div>
+        <button class="btn primary" type="button" id="saveBtn"><svg class="pixel-icon"><use href="#download"></use></svg>Save</button>
+    </header>
+    <section class="layout">
+        <aside class="panel">
+            <div class="panel-head"><span>Providers</span><button class="btn" type="button" id="addBtn"><svg class="pixel-icon"><use href="#plus"></use></svg>Add</button></div>
+            <div class="provider-list" id="providerList"></div>
+        </aside>
+        <section class="panel">
+            <div class="panel-head"><span id="editorTitle">Provider</span><span id="keyState" class="provider-meta"></span></div>
+            <div class="body">
+                <div class="grid">
+                    <div class="field"><label>ID</label><input id="providerId" spellcheck="false"></div>
+                    <div class="field"><label>Name</label><input id="providerName" spellcheck="false"></div>
+                </div>
+                <div class="grid">
+                    <div class="field"><label>Base URL</label><input id="baseUrl" spellcheck="false" placeholder="https://..."></div>
+                    <div class="field"><label>Protocol</label><select id="protocol"><option value="openai">OpenAI compatible</option><option value="apimart">APIMart async</option></select></div>
+                </div>
+                <div class="grid">
+                    <div class="field"><label>Image generation endpoint</label><input id="imageGenerationEndpoint" spellcheck="false" placeholder="/v1/images/generations"></div>
+                    <div class="field"><label>Image edit endpoint</label><input id="imageEditEndpoint" spellcheck="false" placeholder="/v1/images/edits"></div>
+                </div>
+                <div class="field"><label>API Key</label><input id="apiKey" type="password" spellcheck="false" autocomplete="off" placeholder="留空表示不修改已有密钥"></div>
+                <div class="checks">
+                    <button class="check" type="button" data-toggle="enabled">Enabled</button>
+                    <button class="check" type="button" data-toggle="primary">Primary</button>
+                </div>
+                <div class="grid">
+                    <div class="field"><label>Image Models</label><textarea id="imageModels" spellcheck="false"></textarea></div>
+                    <div class="field"><label>Chat Models</label><textarea id="chatModels" spellcheck="false"></textarea></div>
+                </div>
+                <div class="field"><label>Video Models</label><textarea id="videoModels" spellcheck="false"></textarea></div>
+                <div class="grid">
+                    <div class="field"><label>ModelScope LoRA JSON</label><textarea id="msLoras" spellcheck="false" placeholder='{"model/id":{"lora/id":1}}'></textarea></div>
+                    <div class="field"><label>Model defaults version</label><input id="msDefaultsVersion" spellcheck="false" placeholder="1"></div>
+                </div>
+                <div class="actions">
+                    <button class="btn" type="button" id="testBtn"><svg class="pixel-icon"><use href="#check"></use></svg>Test</button>
+                    <button class="btn" type="button" id="fetchBtn"><svg class="pixel-icon"><use href="#refresh"></use></svg>Fetch models</button>
+                    <button class="btn" type="button" id="probeBtn"><svg class="pixel-icon"><use href="#info"></use></svg>Probe async</button>
+                    <button class="btn danger" type="button" id="clearKeyBtn"><svg class="pixel-icon"><use href="#cross"></use></svg>Clear key</button>
+                    <button class="btn danger" type="button" id="deleteBtn"><svg class="pixel-icon"><use href="#trash"></use></svg>Delete</button>
+                </div>
+                <div class="status" id="status"></div>
+            </div>
+        </section>
+    </section>
+</main>
+<script>
+    const state = { providers: [], selected: '' };
+    const $ = id => document.getElementById(id);
+    const lines = value => String(value || '').split(/\n|,/).map(v => v.trim()).filter(Boolean);
+    const textLines = list => (list || []).join('\n');
+    const setStatus = text => $('status').textContent = text || '';
+    function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function current(){ return state.providers.find(p => p.id === state.selected) || state.providers[0] || null; }
+    function normalizeDraft(){
+        const p = current();
+        if(!p) return;
+        const oldId = p.id;
+        p.id = $('providerId').value.trim().toLowerCase();
+        p.name = $('providerName').value.trim() || p.id;
+        p.base_url = $('baseUrl').value.trim();
+        p.protocol = $('protocol').value;
+        p.image_generation_endpoint = $('imageGenerationEndpoint').value.trim();
+        p.image_edit_endpoint = $('imageEditEndpoint').value.trim();
+        p.image_models = lines($('imageModels').value);
+        p.chat_models = lines($('chatModels').value);
+        p.video_models = lines($('videoModels').value);
+        p.ms_defaults_version = $('msDefaultsVersion').value.trim();
+        try {
+            p.ms_loras = $('msLoras').value.trim() ? JSON.parse($('msLoras').value) : {};
+        } catch (e) {
+            throw new Error('ModelScope LoRA JSON 格式不正确');
+        }
+        const key = $('apiKey').value.trim();
+        if(key) p.api_key = key;
+        if(oldId !== p.id) state.selected = p.id;
+    }
+    function renderList(){
+        $('providerList').innerHTML = state.providers.map(p => `
+            <button class="provider-item ${p.id === state.selected ? 'active' : ''}" type="button" data-id="${esc(p.id)}">
+                <span class="provider-name">${esc(p.name || p.id)}${p.primary ? ' · primary' : ''}</span>
+                <span class="provider-meta">${esc(p.id)} · ${esc(p.protocol || 'openai')} · ${p.has_key ? 'key set' : 'no key'}</span>
+            </button>`).join('') || '<div class="provider-meta">No providers.</div>';
+        document.querySelectorAll('.provider-item').forEach(btn => btn.onclick = () => { normalizeDraft(); state.selected = btn.dataset.id; render(); });
+    }
+    function renderEditor(){
+        const p = current();
+        if(!p) return;
+        $('editorTitle').textContent = p.name || p.id || 'Provider';
+        $('keyState').textContent = p.key_preview || (p.has_key ? 'key set' : 'no key');
+        $('providerId').value = p.id || '';
+        $('providerName').value = p.name || '';
+        $('baseUrl').value = p.base_url || '';
+        $('protocol').value = p.protocol || 'openai';
+        $('imageGenerationEndpoint').value = p.image_generation_endpoint || '';
+        $('imageEditEndpoint').value = p.image_edit_endpoint || '';
+        $('apiKey').value = '';
+        $('imageModels').value = textLines(p.image_models);
+        $('chatModels').value = textLines(p.chat_models);
+        $('videoModels').value = textLines(p.video_models);
+        $('msLoras').value = p.ms_loras && Object.keys(p.ms_loras).length ? JSON.stringify(p.ms_loras, null, 2) : '';
+        $('msDefaultsVersion').value = p.ms_defaults_version || '';
+        document.querySelectorAll('[data-toggle]').forEach(btn => btn.classList.toggle('active', Boolean(p[btn.dataset.toggle])));
+        $('deleteBtn').disabled = p.id === 'comfly' || p.id === 'modelscope';
+    }
+    function render(){ renderList(); renderEditor(); }
+    async function load(){
+        const data = await fetch('/api/providers').then(r => r.json());
+        state.providers = data.providers || [];
+        state.selected = data.primary_provider_id || state.providers[0]?.id || '';
+        render();
+    }
+    async function save(){
+        normalizeDraft();
+        const payload = state.providers.map(p => ({...p}));
+        const res = await fetch('/api/providers', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.detail || '保存失败');
+        state.providers = data.providers || [];
+        state.selected = data.primary_provider_id || state.selected;
+        render();
+        setStatus('Saved.');
+        parent.postMessage({type:'providers-changed'}, '*');
+    }
+    async function providerAction(path){
+        normalizeDraft();
+        const p = current();
+        const payload = {...p, api_key:$('apiKey').value.trim()};
+        const res = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.detail || '请求失败');
+        if(data.image_models?.length) p.image_models = data.image_models;
+        if(data.chat_models?.length) p.chat_models = data.chat_models;
+        if(data.video_models?.length) p.video_models = data.video_models;
+        render();
+        return data;
+    }
+    $('addBtn').onclick = () => {
+        normalizeDraft();
+        const id = `provider_${Date.now().toString(36)}`;
+        state.providers.push({id, name:'New Provider', base_url:'', protocol:'openai', enabled:true, primary:false, image_generation_endpoint:'', image_edit_endpoint:'', image_models:[], chat_models:[], video_models:[], ms_loras:{}, ms_defaults_version:''});
+        state.selected = id;
+        render();
+    };
+    $('saveBtn').onclick = () => save().catch(e => setStatus(e.message));
+    $('testBtn').onclick = () => providerAction('/api/providers/test-connection').then(d => setStatus(`Connected. ${d.raw_count || 0} models found.`)).catch(e => setStatus(e.message));
+    $('fetchBtn').onclick = () => providerAction('/api/providers/fetch-models').then(d => setStatus(`Fetched ${(d.models || []).length} models.`)).catch(e => setStatus(e.message));
+    $('probeBtn').onclick = () => providerAction('/api/providers/probe-async').then(d => setStatus(d.ok ? `Async protocol OK (${d.status_code}).` : `Async protocol unavailable: ${d.detail || d.status_code}`)).catch(e => setStatus(e.message));
+    $('clearKeyBtn').onclick = async () => {
+        normalizeDraft();
+        const p = current();
+        if(!p) return;
+        p.clear_key = true;
+        p.api_key = '';
+        await save().catch(e => setStatus(e.message));
+        delete p.clear_key;
+        setStatus('Key cleared.');
+    };
+    $('deleteBtn').onclick = () => {
+        const p = current();
+        if(!p || p.id === 'comfly' || p.id === 'modelscope') return;
+        state.providers = state.providers.filter(item => item !== p);
+        state.selected = state.providers[0]?.id || '';
+        render();
+        setStatus('Deleted from draft. Save to apply.');
+    };
+    document.querySelectorAll('[data-toggle]').forEach(btn => btn.onclick = () => {
+        normalizeDraft();
+        const p = current();
+        const key = btn.dataset.toggle;
+        p[key] = !p[key];
+        if(key === 'primary' && p.primary) state.providers.forEach(item => { if(item !== p) item.primary = false; });
+        render();
+    });
+    window.addEventListener('message', event => { if(event.data?.type === 'theme') document.body.classList.toggle('studio-theme-dark', event.data.theme === 'dark'); });
+    load().catch(e => setStatus(e.message));
+</script>
+</body>
+</html>

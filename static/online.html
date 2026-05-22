@@ -8,6 +8,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/design-system.css?v=24">
     <script src="/static/theme.js?v=20260512g"></script>
+    <script src="/static/i18n.js?v=1"></script>
+    <script src="/static/image-preview.js?v=1"></script>
+    <script src="/static/history-bulk-manager.js?v=1"></script>
     <style>
         /* 页面级布局：左 380px 参数面板 + 右侧 grid 主区，参照 DESIGN.md §17.2 统一模板 */
         body {
@@ -349,14 +352,18 @@
                 <textarea id="promptInput" class="textarea" rows="6" placeholder="Describe what you want to generate..."></textarea>
             </div>
 
-            <!-- 模型选择：§15.3 select（保留 provider 切换 nano/gpt 的逻辑） -->
+            <!-- API 平台 + 模型选择：来自 /api/config.api_providers -->
             <div class="field-group">
-                <label for="providerSelect">Model</label>
+                <label for="providerSelect">Provider</label>
                 <div class="select-wrap">
-                    <select id="providerSelect" class="select" onchange="setProvider(this.value)">
-                        <option value="gpt">GPT image</option>
-                        <option value="nano">Nano banana pro</option>
-                    </select>
+                    <select id="providerSelect" class="select" onchange="setProvider(this.value)"></select>
+                    <svg class="pixel-icon pixel-icon--sm pixel-chevron-down"><use href="#chevron-down"/></svg>
+                </div>
+            </div>
+            <div class="field-group">
+                <label for="modelSelect">Model</label>
+                <div class="select-wrap">
+                    <select id="modelSelect" class="select" onchange="setModel(this.value)"></select>
                     <svg class="pixel-icon pixel-icon--sm pixel-chevron-down"><use href="#chevron-down"/></svg>
                 </div>
             </div>
@@ -497,13 +504,13 @@
         // 数据态：与原实现保持一致（不改 API 调用 schema）
         // ====================================================================
         let refs = [];                          // 已上传参考图，最多 3 张
-        let provider = 'gpt';                   // 当前模型 provider
+        let apiProviders = [];
+        let provider = 'comfly';                // 当前 API provider
+        let currentModel = 'gpt-image-2';       // 当前模型
         let ratio = 'square';                   // 当前比例
         let resolution = '1k';                  // 当前分辨率档
         let customRatioWidth = '', customRatioHeight = '';
         let customWidth = '', customHeight = '';
-        // provider -> model 名称（动态从 /api/config 拉取，保持原行为）
-        let models = { gpt: 'gpt-image-2', nano: 'nano-banana-pro' };
 
         // 历史列表分页
         let allHistory = [], currentIndex = 0, isLoading = false;
@@ -528,16 +535,37 @@
         async function initModels() {
             try {
                 const cfg = await fetch('/api/config').then(r => r.json());
-                const imageModels = cfg.image_models || [];
-                models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
-                models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
+                apiProviders = Array.isArray(cfg.api_providers) && cfg.api_providers.length
+                    ? cfg.api_providers.filter(p => p.enabled !== false && Array.isArray(p.image_models) && p.image_models.length)
+                    : [{id:'comfly', name:'Comfly', image_models:cfg.image_models || [cfg.image_model || 'gpt-image-2']}];
+                provider = cfg.primary_provider_id || apiProviders[0]?.id || 'comfly';
+                const p = apiProviders.find(item => item.id === provider) || apiProviders[0];
+                currentModel = p?.image_models?.[0] || cfg.image_model || currentModel;
+                renderProviderModelSelects();
             } catch (e) { /* ignore */ }
         }
 
+        function providerById(id) {
+            return apiProviders.find(p => p.id === id) || apiProviders[0] || {id:'comfly', name:'Comfly', image_models:[currentModel]};
+        }
+        function renderProviderModelSelects() {
+            const providerEl = document.getElementById('providerSelect');
+            const modelEl = document.getElementById('modelSelect');
+            if (!providerEl || !modelEl) return;
+            providerEl.innerHTML = apiProviders.map(p => `<option value="${p.id}">${p.name || p.id}</option>`).join('');
+            providerEl.value = providerById(provider).id;
+            const models = providerById(provider).image_models || [];
+            if (!models.includes(currentModel)) currentModel = models[0] || currentModel;
+            modelEl.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+            modelEl.value = currentModel;
+        }
         function setProvider(next) {
             provider = next;
-            const el = document.getElementById('providerSelect');
-            if (el) el.value = next;
+            currentModel = providerById(next).image_models?.[0] || currentModel;
+            renderProviderModelSelects();
+        }
+        function setModel(next) {
+            currentModel = next;
         }
 
         // ====================================================================
@@ -722,7 +750,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         prompt,
-                        model: models[provider],
+                        provider_id: provider,
+                        model: currentModel,
                         size: currentSize(),
                         reference_images: refs
                     })
@@ -764,7 +793,7 @@
                 <div class="image-meta">
                     <div class="meta-text">
                         <div class="meta-prompt">In progress…</div>
-                        <div class="meta-info">${currentSize()} · ${models[provider] || ''}</div>
+                        <div class="meta-info">${currentSize()} · ${currentModel || ''}</div>
                     </div>
                 </div>`;
             grid.prepend(card);

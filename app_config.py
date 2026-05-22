@@ -68,6 +68,14 @@ MODELSCOPE_CHAT_MODELS = [
 ]
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
 IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-2")
+VIDEO_MODEL = os.getenv("VIDEO_MODEL", "veo3-fast")
+FLATLAY_VISION_MODEL = os.getenv("FLATLAY_VISION_MODEL", os.getenv("COMFLY_VISION_MODEL", "gpt-5.5"))
+FLATLAY_GENERATE_MODEL = os.getenv("FLATLAY_GENERATE_MODEL", os.getenv("COMFLY_GENERATE_MODEL", IMAGE_MODEL))
+RMBG_PROVIDER = os.getenv("RMBG_PROVIDER", "none").strip().lower()
+RMBG_BASE_URL = os.getenv("RMBG_BASE_URL", "").rstrip("/")
+RMBG_API_KEY = os.getenv("RMBG_API_KEY", "")
+RMBG_LOCAL_BASE_URL = os.getenv("RMBG_LOCAL_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+RMBG_DEFAULT_VARIANT = os.getenv("RMBG_DEFAULT_VARIANT", "lite").strip().lower()
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "30"))
 AI_REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120"))
@@ -75,6 +83,21 @@ IMAGE_POLL_INTERVAL = float(os.getenv("IMAGE_POLL_INTERVAL", "2"))
 
 CHAT_MODELS = model_list("CHAT_MODELS", CHAT_MODEL, ["gpt-4o-mini", "gemini-3.1-flash-image-preview-2k"])
 IMAGE_MODELS = model_list("IMAGE_MODELS", IMAGE_MODEL, ["nano-banana-pro"])
+VIDEO_MODELS = model_list(
+    "VIDEO_MODELS",
+    VIDEO_MODEL,
+    [
+        "veo3-fast",
+        "veo3",
+        "veo2-fast",
+        "sora-2",
+        "sora-2-pro",
+        "wan2.5-t2v-preview",
+        "wan2.5-i2v-preview",
+        "doubao-seedance-1-0-lite-t2v-250428",
+        "doubao-seedance-1-0-lite-i2v-250428",
+    ],
+)
 
 
 def ensure_runtime_dirs():

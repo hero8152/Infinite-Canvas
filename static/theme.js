@@ -68,7 +68,7 @@
 
     function shouldAttachComflyToken(input) {
         const path = sameOriginPath(input);
-        return COMFLY_TOKEN_ENDPOINTS.has(path) || path.startsWith('/api/batch-tryon/');
+        return COMFLY_TOKEN_ENDPOINTS.has(path) || path.startsWith('/api/batch-tryon/') || path.startsWith('/api/flatlay/');
     }
 
     function localValue(key) {
@@ -118,6 +118,7 @@
 
     function comflyModelFor(path, payload) {
         if (path === '/api/online-image' || path.startsWith('/api/batch-tryon/')) return payload?.model || localValue('comfly_image_model');
+        if (path.startsWith('/api/flatlay/')) return payload?.generate_model || localValue('comfly_image_model');
         if (path === '/api/chat') {
             if (payload?.provider === 'modelscope') return '';
             return payload?.mode === 'image'
@@ -241,7 +242,7 @@
        从外层 host 文档继承过来，效果就是图标渲染不出。我们把整个 sprite 同
        步抓回来，inline 注入到 body 起始位置，引用方就能用同文档 <use href="#id">。
     */
-    const SPRITE_URL = '/static/icons/pixel.svg?v=26';
+    const SPRITE_URL = '/static/icons/pixel.svg?v=31';
     let SPRITE_HTML = null;
 
     function injectSprite() {

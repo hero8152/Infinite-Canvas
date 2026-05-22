@@ -1,0 +1,1967 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Flatlay · Feebee Studios</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260513-flatlay2"></script>
+    <script src="/static/i18n.js?v=1"></script>
+    <script src="/static/image-preview.js?v=1"></script>
+    <script src="/static/history-bulk-manager.js?v=1"></script>
+    <style>
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: var(--font-sans);
+        }
+
+        button,
+        input,
+        select,
+        textarea {
+            font: inherit;
+        }
+
+        .page-shell {
+            height: 100vh;
+            height: 100dvh;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.42) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.42) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+
+        body.studio-theme-dark .page-shell {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        }
+
+        .topbar {
+            flex: 0 0 auto;
+            min-height: 76px;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.92);
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 18px;
+        }
+
+        body.studio-theme-dark .topbar {
+            background: rgba(14, 14, 16, 0.92);
+            border-bottom-color: var(--dark-border);
+        }
+
+        .section-tag {
+            height: 42px;
+            padding: 0 16px;
+            background: #0f0f0f;
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+
+        .section-tag .pixel-icon,
+        .btn-primary .pixel-icon {
+            color: var(--primary);
+        }
+
+        .top-copy {
+            min-width: 0;
+        }
+
+        .top-copy h1 {
+            margin: 0;
+            font-size: 22px;
+            line-height: 1.15;
+            font-weight: 600;
+        }
+
+        .top-copy p {
+            margin: 5px 0 0;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .top-actions,
+        .inline-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            min-width: 0;
+            flex-wrap: wrap;
+        }
+
+        .btn-primary,
+        .plain-btn,
+        .icon-btn,
+        .select-control {
+            height: 42px;
+            border: 1px solid var(--border);
+            border-radius: 0;
+            background: var(--stage-bg);
+            color: var(--ink);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 0 16px;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: #0f0f0f;
+            border-color: #0f0f0f;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .btn-primary:disabled,
+        .plain-btn:disabled,
+        .icon-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+
+        .btn-primary:not(:disabled):hover,
+        .plain-btn:not(:disabled):hover,
+        .icon-btn:not(:disabled):hover {
+            border-color: var(--primary);
+        }
+
+        .icon-btn {
+            width: 42px;
+            padding: 0;
+        }
+
+        .plain-btn {
+            background: var(--bg-2);
+        }
+
+        .select-control {
+            min-width: min(340px, 100%);
+            justify-content: flex-start;
+        }
+
+        .select-native-hidden {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            overflow: hidden !important;
+        }
+
+        .custom-select {
+            position: relative;
+            width: 100%;
+            min-width: 0;
+            z-index: 1;
+        }
+
+        .top-actions .custom-select {
+            width: min(340px, 100%);
+        }
+
+        .custom-select.is-open {
+            z-index: 80;
+        }
+
+        .custom-select-trigger {
+            width: 100%;
+            min-width: 0;
+            height: 40px;
+            border: 1px solid var(--border);
+            border-radius: 0;
+            background: var(--stage-bg);
+            color: var(--ink);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 0 12px;
+            box-sizing: border-box;
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .select-control + .custom-select,
+        .custom-select.is-top {
+            min-width: min(340px, 100%);
+        }
+
+        .custom-select.is-top .custom-select-trigger {
+            height: 42px;
+            padding: 0 16px;
+        }
+
+        .custom-select-trigger:hover,
+        .custom-select.is-open .custom-select-trigger {
+            border-color: var(--primary);
+        }
+
+        .custom-select-value {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .custom-select-chevron {
+            flex: 0 0 auto;
+            width: 12px;
+            height: 12px;
+            color: var(--ink);
+        }
+
+        .custom-select-menu {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(100% - 1px);
+            max-height: 220px;
+            overflow: auto;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            display: none;
+            box-sizing: border-box;
+        }
+
+        .custom-select.is-open .custom-select-menu {
+            display: block;
+        }
+
+        .custom-select-option {
+            width: 100%;
+            min-height: 38px;
+            border: 0;
+            border-bottom: 1px solid var(--border);
+            background: var(--stage-bg);
+            color: var(--ink);
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 10px;
+            padding: 0 12px;
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .custom-select-option span {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .custom-select-option:last-child {
+            border-bottom: 0;
+        }
+
+        .custom-select-option:hover,
+        .custom-select-option.is-selected {
+            background: #0f0f0f;
+            color: #fff;
+        }
+
+        .custom-select-option.is-selected::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            background: var(--primary);
+            flex: 0 0 auto;
+        }
+
+        .custom-select-option:not(.is-selected)::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            flex: 0 0 auto;
+        }
+
+        .file-input-hidden {
+            display: none;
+        }
+
+        body.studio-theme-dark .plain-btn,
+        body.studio-theme-dark .icon-btn,
+        body.studio-theme-dark .select-control,
+        body.studio-theme-dark .custom-select-trigger,
+        body.studio-theme-dark .custom-select-menu,
+        body.studio-theme-dark .custom-select-option {
+            background: var(--dark-elev);
+            color: var(--dark-text);
+            border-color: var(--dark-border);
+        }
+
+        .workspace {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: minmax(300px, 340px) minmax(420px, 1fr) minmax(320px, 380px);
+            gap: 18px;
+            padding: 24px;
+        }
+
+        .panel {
+            min-height: 0;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.86);
+            display: flex;
+            flex-direction: column;
+        }
+
+        body.studio-theme-dark .panel {
+            background: rgba(28, 28, 30, 0.94);
+            border-color: var(--dark-border);
+        }
+
+        .panel-head {
+            flex: 0 0 auto;
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        body.studio-theme-dark .panel-head {
+            border-bottom-color: var(--dark-border);
+        }
+
+        .title-block h2 {
+            margin: 0;
+            font-size: 20px;
+            line-height: 1.1;
+        }
+
+        .title-block p {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .panel-scroll {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: auto;
+            padding: 16px;
+            scrollbar-gutter: stable;
+        }
+
+        .panel-footer {
+            flex: 0 0 auto;
+            border-top: 1px solid var(--border);
+            padding: 12px 16px;
+            background: rgba(255, 250, 235, 0.94);
+            display: grid;
+            gap: 10px;
+        }
+
+        body.studio-theme-dark .panel-footer {
+            background: rgba(28, 28, 30, 0.94);
+            border-top-color: var(--dark-border);
+        }
+
+        .form-grid {
+            display: grid;
+            gap: 13px;
+        }
+
+        .field,
+        .field-row {
+            display: grid;
+            gap: 7px;
+        }
+
+        .field-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .label {
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .input,
+        .textarea,
+        select {
+            width: 100%;
+            min-width: 0;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            color: var(--ink);
+            border-radius: 0;
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        .input,
+        select {
+            height: 40px;
+            padding: 0 12px;
+            font-family: var(--font-mono);
+            font-size: 13px;
+        }
+
+        .textarea {
+            min-height: 74px;
+            resize: vertical;
+            padding: 10px 12px;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .input:focus,
+        .textarea:focus,
+        select:focus {
+            border-color: var(--primary);
+        }
+
+        body.studio-theme-dark .input,
+        body.studio-theme-dark .textarea,
+        body.studio-theme-dark select {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+            color: var(--dark-text);
+        }
+
+        .dropzone {
+            min-height: 150px;
+            border: 1px dashed var(--border);
+            background: rgba(255, 244, 214, 0.55);
+            display: grid;
+            place-items: center;
+            text-align: center;
+            cursor: pointer;
+            padding: 18px;
+        }
+
+        .dropzone.has-uploads {
+            min-height: 94px;
+        }
+
+        .dropzone.is-over {
+            border-color: var(--primary);
+            background: rgba(250, 82, 15, 0.08);
+        }
+
+        .drop-inner {
+            display: grid;
+            justify-items: center;
+            gap: 9px;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .drop-inner strong {
+            color: var(--ink);
+            font-family: var(--font-sans);
+            font-size: 15px;
+        }
+
+        .upload-toolbar {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        .upload-toolbar .plain-btn {
+            white-space: nowrap;
+        }
+
+        .upload-summary {
+            min-height: 38px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.72);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 0 10px;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .upload-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+            gap: 8px;
+            max-height: 168px;
+            overflow: auto;
+        }
+
+        .upload-thumb {
+            position: relative;
+            aspect-ratio: 1 / 1;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            overflow: hidden;
+        }
+
+        .upload-thumb img,
+        .item-media img,
+        .preview-frame img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .upload-thumb button {
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 26px;
+            height: 26px;
+            border: 0;
+            background: #0f0f0f;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .upload-thumb span {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            min-height: 22px;
+            padding: 4px 5px;
+            box-sizing: border-box;
+            background: rgba(15, 15, 15, 0.78);
+            color: #fff;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .status-line,
+        .note {
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-2);
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .status-line.is-error {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .overview {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .metric {
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.84);
+            min-height: 78px;
+            padding: 12px;
+            display: grid;
+            align-content: space-between;
+        }
+
+        body.studio-theme-dark .metric {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+
+        .metric span {
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .metric strong {
+            font-family: var(--font-mono);
+            font-size: 22px;
+        }
+
+        .batch-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .filter-bar {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+
+        .filter-bar button {
+            min-height: 34px;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            color: var(--ink);
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .filter-bar button.is-active {
+            background: #0f0f0f;
+            border-color: #0f0f0f;
+            color: #fff;
+        }
+
+        .item-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+            gap: 10px;
+        }
+
+        .item-card {
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.84);
+            padding: 0;
+            cursor: pointer;
+            text-align: left;
+            color: inherit;
+        }
+
+        body.studio-theme-dark .item-card {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+
+        .item-card.is-active {
+            border-color: var(--primary);
+            background: rgba(255, 248, 224, 0.96);
+        }
+
+        .item-media {
+            aspect-ratio: 4 / 3;
+            background: var(--bg-2);
+            border-bottom: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .item-copy {
+            display: grid;
+            gap: 6px;
+            padding: 10px;
+        }
+
+        .item-title {
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .item-meta,
+        .step-row,
+        .artifact-link,
+        .preview-meta,
+        .prompt-details {
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .item-progress {
+            height: 4px;
+            background: var(--bg-2);
+            border-top: 1px solid var(--border);
+        }
+
+        .item-progress span {
+            display: block;
+            height: 100%;
+            width: var(--progress, 0%);
+            background: var(--primary);
+        }
+
+        .pill {
+            display: inline-flex;
+            width: max-content;
+            align-items: center;
+            min-height: 22px;
+            padding: 0 7px;
+            border: 1px solid var(--border);
+            background: var(--bg-2);
+            color: var(--ink);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .pill.is-hot,
+        .item-card[data-status="failed"] .pill {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .pill.is-done {
+            border-color: #6fa84a;
+            color: #3f7f2a;
+        }
+
+        .pill.is-processing {
+            border-color: var(--accent-amber);
+            color: var(--primary-deep);
+        }
+
+        .risk-badge {
+            width: max-content;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            background: rgba(250, 82, 15, 0.08);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 3px 6px;
+        }
+
+        .preview-tabs {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .preview-tabs button {
+            height: 34px;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .preview-tabs button.is-active {
+            background: #0f0f0f;
+            color: #fff;
+            border-color: #0f0f0f;
+        }
+
+        .preview-tabs button:disabled {
+            opacity: 0.36;
+            cursor: not-allowed;
+        }
+
+        .preview-frame {
+            height: clamp(220px, 36vh, 420px);
+            border: 1px solid var(--border);
+            background: var(--bg-2);
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .preview-frame img {
+            object-fit: contain;
+            background: #fff;
+        }
+
+        .preview-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin: -4px 0 12px;
+        }
+
+        .compare-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .compare-tile {
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            min-height: 132px;
+            display: grid;
+            grid-template-rows: 1fr auto;
+        }
+
+        .compare-tile img {
+            width: 100%;
+            height: 160px;
+            object-fit: contain;
+            background: #fff;
+        }
+
+        .compare-tile span {
+            border-top: 1px solid var(--border);
+            padding: 7px 8px;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .empty-state {
+            min-height: 180px;
+            border: 1px dashed var(--border);
+            display: grid;
+            place-items: center;
+            text-align: center;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            padding: 18px;
+        }
+
+        .item-grid > .empty-state {
+            grid-column: 1 / -1;
+        }
+
+        .artifact-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin: 10px 0 14px;
+        }
+
+        .artifact-link {
+            min-height: 34px;
+            border: 1px solid var(--border);
+            background: var(--bg-2);
+            color: var(--ink);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .artifact-link.is-missing {
+            color: var(--muted);
+        }
+
+        .phrase-risk {
+            margin: 10px 0 0;
+            border: 1px solid var(--primary);
+            background: rgba(250, 82, 15, 0.08);
+            color: var(--primary);
+            padding: 9px 10px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            line-height: 1.45;
+        }
+
+        .prompt-details {
+            border: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.62);
+            margin-top: 12px;
+        }
+
+        .prompt-details summary {
+            cursor: pointer;
+            color: var(--ink);
+            padding: 9px 10px;
+        }
+
+        .prompt-details p {
+            margin: 0;
+            padding: 0 10px 10px;
+            line-height: 1.5;
+            color: var(--muted);
+        }
+
+        .steps {
+            display: grid;
+            gap: 7px;
+            margin-top: 12px;
+        }
+
+        .step-row {
+            border: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.62);
+            padding: 8px 10px;
+            display: grid;
+            gap: 4px;
+        }
+
+        .step-row strong {
+            color: var(--ink);
+        }
+
+        .is-hidden {
+            display: none !important;
+        }
+
+        body.studio-theme-dark .step-row {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+
+        @media (max-width: 1360px) {
+            .workspace {
+                grid-template-columns: minmax(280px, 320px) minmax(390px, 1fr);
+            }
+
+            .detail-panel {
+                grid-column: 1 / -1;
+                min-height: 460px;
+            }
+        }
+
+        @media (max-width: 1120px) {
+            body {
+                overflow: auto;
+            }
+
+            .page-shell {
+                min-height: 100vh;
+                height: auto;
+            }
+
+            .workspace {
+                display: flex;
+                flex-direction: column;
+            }
+
+            .workspace {
+                overflow: visible;
+                padding: 14px;
+            }
+
+            .panel {
+                min-height: 0;
+            }
+
+            .overview {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .filter-bar,
+            .preview-tabs {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .select-control {
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .topbar {
+                display: flex;
+                flex-direction: column;
+                align-items: stretch;
+                padding: 14px;
+            }
+
+            .top-actions,
+            .inline-actions {
+                justify-content: flex-start;
+            }
+
+            .top-actions .plain-btn,
+            .select-control {
+                width: 100%;
+            }
+
+            .workspace {
+                padding: 10px;
+                gap: 12px;
+            }
+
+            .panel-head {
+                flex-direction: column;
+            }
+
+            .overview,
+            .filter-bar,
+            .preview-tabs {
+                grid-template-columns: 1fr;
+            }
+
+            .upload-toolbar,
+            .field-grid,
+            .compare-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page-shell">
+        <header class="topbar">
+            <div class="section-tag">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#nav-flatlay"></use></svg>
+                <span>Flatlay</span>
+            </div>
+            <div class="top-copy">
+                <h1>Model image to flatlay</h1>
+                <p>Upload model shots, generate white-background front/back flatlay assets, then review and rerun per item.</p>
+            </div>
+            <div class="top-actions">
+                <select id="batchSelect" class="select-control"></select>
+                <button class="plain-btn" type="button" data-action="refresh">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#refresh"></use></svg>
+                    Refresh
+                </button>
+            </div>
+        </header>
+
+        <main class="workspace">
+            <section class="panel intake-panel">
+                <div class="panel-head">
+                    <div class="title-block">
+                        <h2>Intake</h2>
+                        <p>Batch source images and generation rules.</p>
+                    </div>
+                </div>
+                <div class="panel-scroll">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label class="label" for="batchTitle">Batch name</label>
+                            <input id="batchTitle" class="input" type="text" value="Flatlay batch">
+                        </div>
+                        <div class="field-grid">
+                            <div class="field">
+                                <label class="label" for="targetCategory">Target</label>
+                                <select id="targetCategory">
+                                    <option value="auto">auto</option>
+                                    <option value="upper">upper</option>
+                                    <option value="lower">lower</option>
+                                    <option value="onepiece">onepiece</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label class="label" for="imageSize">Size</label>
+                                <select id="imageSize">
+                                    <option value="1536x1024">1536x1024</option>
+                                    <option value="1024x1024">1024x1024</option>
+                                    <option value="1792x1024">1792x1024</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="field-grid">
+                            <div class="field">
+                                <label class="label" for="visionModel">Vision model</label>
+                                <input id="visionModel" class="input" type="text">
+                            </div>
+                            <div class="field">
+                                <label class="label" for="generateModel">Image model</label>
+                                <input id="generateModel" class="input" type="text">
+                            </div>
+                        </div>
+                        <div class="field-grid">
+                            <div class="field">
+                                <label class="label" for="quality">Quality</label>
+                                <select id="quality">
+                                    <option value="auto">auto</option>
+                                    <option value="medium">medium</option>
+                                    <option value="high">high</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label class="label" for="rmbgProvider">RMBG</label>
+                                <select id="rmbgProvider">
+                                    <option value="none">off</option>
+                                    <option value="local_birefnet">local BiRefNet</option>
+                                    <option value="remove_bg">remove.bg/API</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="field-grid is-hidden" id="rmbgFields">
+                            <div class="field">
+                                <label class="label" for="rmbgBase">RMBG base</label>
+                                <input id="rmbgBase" class="input" type="text" placeholder="http://127.0.0.1:8000">
+                            </div>
+                            <div class="field">
+                                <label class="label" for="rmbgVariant">RMBG model</label>
+                                <select id="rmbgVariant">
+                                    <option value="lite">lite</option>
+                                    <option value="base">base</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="field is-hidden" id="rmbgKeyField">
+                            <label class="label" for="rmbgKey">RMBG key</label>
+                            <input id="rmbgKey" class="input" type="password" autocomplete="off">
+                        </div>
+                        <div class="field">
+                            <label class="label">Import</label>
+                            <div class="upload-toolbar">
+                                <label class="plain-btn" for="folderInput" role="button" tabindex="0">
+                                    <svg class="pixel-icon pixel-icon--sm"><use href="#folder"></use></svg>
+                                    Folder
+                                </label>
+                                <button class="plain-btn" type="button" data-action="clear-uploads">Clear</button>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="label">Model shots</label>
+                            <label id="dropzone" class="dropzone" for="fileInput" role="button" tabindex="0">
+                                <div class="drop-inner">
+                                    <svg class="pixel-icon pixel-icon--md"><use href="#upload"></use></svg>
+                                    <strong>Drop or click to upload</strong>
+                                    <span>JPG, PNG, WEBP · multi-select supported</span>
+                                </div>
+                            </label>
+                            <input id="fileInput" class="file-input-hidden" type="file" accept="image/*" multiple>
+                            <input id="folderInput" class="file-input-hidden" type="file" accept="image/*" multiple webkitdirectory directory>
+                        </div>
+                        <div id="uploadSummary" class="upload-summary">
+                            <span>No images selected</span>
+                            <span>0 tasks</span>
+                        </div>
+                        <div id="uploadStrip" class="upload-strip"></div>
+                    </div>
+                </div>
+                <div class="panel-footer">
+                        <button id="startBtn" class="btn-primary" type="button" data-action="start" style="height:52px;">
+                            <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-right"></use></svg>
+                            Start Flatlay Batch
+                        </button>
+                        <div id="statusLine" class="status-line">Ready.</div>
+                </div>
+            </section>
+
+            <section class="panel batch-panel">
+                <div class="panel-head">
+                    <div class="title-block">
+                        <h2>Active Batch</h2>
+                        <p id="batchSubtitle">No batch selected.</p>
+                    </div>
+                    <div class="inline-actions">
+                        <button class="plain-btn" type="button" data-action="pause">Pause</button>
+                        <button class="plain-btn" type="button" data-action="resume">Resume</button>
+                        <button class="plain-btn" type="button" data-action="retry-failed">Retry failed</button>
+                    </div>
+                </div>
+                <div class="panel-scroll">
+                    <section id="overview" class="overview"></section>
+                    <div id="filterBar" class="filter-bar" role="group" aria-label="Filter flatlay items"></div>
+                    <div id="itemGrid" class="item-grid"></div>
+                </div>
+            </section>
+
+            <section class="panel detail-panel">
+                <div class="panel-head">
+                    <div class="title-block">
+                        <h2>Review</h2>
+                        <p id="detailSubtitle">Select an item to inspect outputs.</p>
+                    </div>
+                </div>
+                <div id="detailBody" class="panel-scroll"></div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        (() => {
+            const API = '/api/flatlay';
+            const RMBG_KEY = 'flatlay_rmbg_api_key';
+            const RMBG_BASE_KEY = 'flatlay_rmbg_base_url';
+            const state = {
+                uploads: [],
+                batches: [],
+                activeBatchId: '',
+                detail: null,
+                selectedItemId: '',
+                previewKind: 'front',
+                filter: 'all',
+                pollTimer: null
+            };
+
+            const refs = {
+                batchSelect: document.getElementById('batchSelect'),
+                batchTitle: document.getElementById('batchTitle'),
+                targetCategory: document.getElementById('targetCategory'),
+                imageSize: document.getElementById('imageSize'),
+                visionModel: document.getElementById('visionModel'),
+                generateModel: document.getElementById('generateModel'),
+                quality: document.getElementById('quality'),
+                rmbgProvider: document.getElementById('rmbgProvider'),
+                rmbgVariant: document.getElementById('rmbgVariant'),
+                rmbgFields: document.getElementById('rmbgFields'),
+                rmbgKeyField: document.getElementById('rmbgKeyField'),
+                rmbgBase: document.getElementById('rmbgBase'),
+                rmbgKey: document.getElementById('rmbgKey'),
+                dropzone: document.getElementById('dropzone'),
+                fileInput: document.getElementById('fileInput'),
+                folderInput: document.getElementById('folderInput'),
+                uploadSummary: document.getElementById('uploadSummary'),
+                uploadStrip: document.getElementById('uploadStrip'),
+                startBtn: document.getElementById('startBtn'),
+                statusLine: document.getElementById('statusLine'),
+                batchSubtitle: document.getElementById('batchSubtitle'),
+                overview: document.getElementById('overview'),
+                filterBar: document.getElementById('filterBar'),
+                itemGrid: document.getElementById('itemGrid'),
+                detailSubtitle: document.getElementById('detailSubtitle'),
+                detailBody: document.getElementById('detailBody')
+            };
+
+            const STATUS_LABELS = {
+                pending: 'Pending',
+                running: 'Queued',
+                analyzing: 'Analyzing',
+                generating: 'Generating',
+                rmbg: 'RMBG',
+                splitting: 'Splitting',
+                completed: 'Done',
+                failed: 'Failed'
+            };
+            const BATCH_LABELS = {
+                pending: 'Pending',
+                running: 'Running',
+                paused: 'Paused',
+                completed: 'Completed',
+                partial: 'Partial',
+                failed: 'Failed'
+            };
+            const CATEGORY_LABELS = {
+                auto: 'Auto',
+                upper: 'Upper',
+                lower: 'Lower',
+                onepiece: 'Onepiece'
+            };
+            const STEP_LABELS = {
+                analyze: 'Analyze',
+                generate: 'Generate',
+                rmbg: 'RMBG',
+                split: 'Split'
+            };
+            const PREVIEW_LABELS = {
+                source: 'source',
+                combined: 'combined',
+                rmbg: 'rmbg',
+                front: 'front',
+                back: 'back'
+            };
+            const FILTERS = [
+                ['all', 'All'],
+                ['pending', 'Pending'],
+                ['processing', 'Processing'],
+                ['completed', 'Done'],
+                ['failed', 'Failed']
+            ];
+            const PROCESSING_STATUSES = new Set(['running', 'analyzing', 'generating', 'rmbg', 'splitting']);
+            const MULTI_ITEM_MARKERS = ['和', '以及', '搭配', '配上', '配有', '并且', '+', '/', '套装', '两件'];
+
+            function icon(id, size = 'sm') {
+                return `<svg class="pixel-icon pixel-icon--${size}"><use href="#${id}"></use></svg>`;
+            }
+
+            function escapeHtml(value) {
+                return String(value ?? '').replace(/[&<>"']/g, char => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                }[char]));
+            }
+
+            function label(table, value) {
+                return table[value] || value || '';
+            }
+
+            function isProcessingStatus(status) {
+                return PROCESSING_STATUSES.has(status);
+            }
+
+            function statusTone(status) {
+                if (status === 'completed') return 'is-done';
+                if (status === 'failed') return 'is-hot';
+                if (isProcessingStatus(status)) return 'is-processing';
+                return '';
+            }
+
+            function itemProgress(status) {
+                if (status === 'completed') return 100;
+                if (status === 'splitting') return 86;
+                if (status === 'rmbg') return 72;
+                if (status === 'generating') return 56;
+                if (status === 'analyzing') return 28;
+                if (status === 'running') return 12;
+                if (status === 'failed') return 100;
+                return 4;
+            }
+
+            function isRiskyPhrase(phrase) {
+                const text = String(phrase || '').trim();
+                return Boolean(text) && MULTI_ITEM_MARKERS.some(marker => text.includes(marker));
+            }
+
+            function formatTimestamp(value) {
+                if (!value) return '';
+                const date = new Date(Number(value) * 1000);
+                if (Number.isNaN(date.getTime())) return '';
+                return new Intl.DateTimeFormat('zh-CN', {
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }).format(date);
+            }
+
+            function setStatus(text, isError = false) {
+                refs.statusLine.textContent = text;
+                refs.statusLine.classList.toggle('is-error', Boolean(isError));
+            }
+
+            function optionText(option) {
+                return option?.textContent?.trim() || option?.value || '';
+            }
+
+            function closeCustomSelects(except = null) {
+                document.querySelectorAll('.custom-select.is-open').forEach(wrapper => {
+                    if (wrapper !== except) wrapper.classList.remove('is-open');
+                });
+            }
+
+            function syncCustomSelect(select) {
+                const wrapper = select.dataset.customSelectId
+                    ? document.querySelector(`[data-select-wrapper="${select.dataset.customSelectId}"]`)
+                    : null;
+                if (!wrapper) return;
+                const selectedOption = select.selectedOptions?.[0] || select.options[select.selectedIndex] || select.options[0];
+                const value = wrapper.querySelector('.custom-select-value');
+                const menu = wrapper.querySelector('.custom-select-menu');
+                value.textContent = optionText(selectedOption);
+                menu.innerHTML = Array.from(select.options).map(option => `
+                    <button class="custom-select-option ${option.value === select.value ? 'is-selected' : ''}" type="button" data-select-value="${escapeHtml(option.value)}">
+                        <span>${escapeHtml(optionText(option))}</span>
+                    </button>
+                `).join('');
+            }
+
+            function syncAllCustomSelects() {
+                document.querySelectorAll('select[data-custom-select-id]').forEach(syncCustomSelect);
+            }
+
+            function enhanceSelect(select) {
+                if (select.dataset.customSelectId) return;
+                const id = `cs_${select.id || crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+                select.dataset.customSelectId = id;
+                select.classList.add('select-native-hidden');
+                const wrapper = document.createElement('div');
+                wrapper.className = `custom-select ${select.classList.contains('select-control') ? 'is-top' : ''}`;
+                wrapper.dataset.selectWrapper = id;
+                wrapper.innerHTML = `
+                    <button class="custom-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="custom-select-value"></span>
+                        <svg class="custom-select-chevron pixel-icon pixel-icon--sm"><use href="#chevron-down"></use></svg>
+                    </button>
+                    <div class="custom-select-menu" role="listbox"></div>
+                `;
+                select.insertAdjacentElement('afterend', wrapper);
+                syncCustomSelect(select);
+            }
+
+            function enhanceSelects() {
+                document.querySelectorAll('select').forEach(enhanceSelect);
+            }
+
+            async function fetchJson(url, options = {}) {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    let detail = '';
+                    try {
+                        const data = await response.json();
+                        detail = data.detail || JSON.stringify(data);
+                    } catch (err) {
+                        detail = await response.text();
+                    }
+                    throw new Error(detail || `Request failed: ${response.status}`);
+                }
+                return response.json();
+            }
+
+            function imageForItem(item, preferred = state.previewKind) {
+                const exact = artifactForItem(item, preferred);
+                if (exact) return exact;
+                return artifactForItem(item, 'front')
+                    || artifactForItem(item, 'combined')
+                    || artifactForItem(item, 'rmbg')
+                    || artifactForItem(item, 'source')
+                    || artifactForItem(item, 'back');
+            }
+
+            function artifactForItem(item, kind) {
+                const source = item.source_image?.url || '';
+                const map = {
+                    source,
+                    combined: item.combined_url,
+                    rmbg: item.rmbg_url,
+                    front: item.front_url,
+                    back: item.back_url
+                };
+                return map[kind] || '';
+            }
+
+            function preferredPreviewKind(item) {
+                if (item.front_url) return 'front';
+                if (item.combined_url) return 'combined';
+                if (item.rmbg_url) return 'rmbg';
+                return 'source';
+            }
+
+            function filteredItems() {
+                const items = state.detail?.items || [];
+                if (state.filter === 'all') return items;
+                if (state.filter === 'processing') return items.filter(item => isProcessingStatus(item.status));
+                return items.filter(item => item.status === state.filter);
+            }
+
+            function counts() {
+                return state.detail?.batch?.counts || { total: 0, pending: 0, processing: 0, completed: 0, failed: 0 };
+            }
+
+            function selectedItem() {
+                const visible = filteredItems();
+                const all = state.detail?.items || [];
+                return visible.find(item => item.id === state.selectedItemId)
+                    || visible[0]
+                    || all.find(item => item.id === state.selectedItemId)
+                    || all[0]
+                    || null;
+            }
+
+            function stepsFor(itemId) {
+                return (state.detail?.steps || []).filter(step => step.item_id === itemId);
+            }
+
+            function renderBatchSelect() {
+                const options = ['<option value="">Select batch</option>'].concat(state.batches.map(batch => {
+                    const total = batch.counts?.total || 0;
+                    const labelText = `${batch.title || batch.id} · ${label(BATCH_LABELS, batch.status)} · ${total}`;
+                    return `<option value="${escapeHtml(batch.id)}" ${batch.id === state.activeBatchId ? 'selected' : ''}>${escapeHtml(labelText)}</option>`;
+                }));
+                refs.batchSelect.innerHTML = options.join('');
+                syncCustomSelect(refs.batchSelect);
+            }
+
+            function renderUploads() {
+                const count = state.uploads.length;
+                refs.startBtn.disabled = !count;
+                refs.startBtn.innerHTML = `${icon('chevron-right', 'sm')} ${count ? `Start ${count} item batch` : 'Start Flatlay Batch'}`;
+                refs.dropzone.classList.toggle('has-uploads', Boolean(count));
+                refs.uploadSummary.innerHTML = `
+                    <span>${count ? `${count} model image${count === 1 ? '' : 's'} ready` : 'No images selected'}</span>
+                    <span>${count} task${count === 1 ? '' : 's'}</span>
+                `;
+                refs.uploadStrip.innerHTML = state.uploads.map(item => `
+                    <div class="upload-thumb" title="${escapeHtml(item.name || item.url)}">
+                        <img src="${escapeHtml(item.url)}" alt="">
+                        <button type="button" data-action="remove-upload" data-upload-id="${escapeHtml(item.id || item.url)}" aria-label="Remove image">${icon('cross', 'xs')}</button>
+                        <span>${escapeHtml(item.name || 'image')}</span>
+                    </div>
+                `).join('');
+            }
+
+            function renderOverview() {
+                const c = counts();
+                refs.overview.innerHTML = ['total', 'pending', 'processing', 'completed', 'failed'].map(key => `
+                    <article class="metric">
+                        <span>${key}</span>
+                        <strong>${c[key] || 0}</strong>
+                    </article>
+                `).join('');
+            }
+
+            function renderFilters() {
+                const c = counts();
+                refs.filterBar.innerHTML = FILTERS.map(([key, text]) => {
+                    const amount = key === 'all' ? c.total : c[key] || 0;
+                    return `
+                        <button type="button" class="${state.filter === key ? 'is-active' : ''}" data-action="filter-items" data-filter="${key}">
+                            ${escapeHtml(text)} · ${amount}
+                        </button>
+                    `;
+                }).join('');
+            }
+
+            function renderItems() {
+                const items = filteredItems();
+                if (!items.length) {
+                    refs.itemGrid.innerHTML = state.detail?.items?.length
+                        ? '<div class="empty-state">No items match this filter.</div>'
+                        : '<div class="empty-state">No active flatlay batch. Upload model images and start a batch.</div>';
+                    return;
+                }
+                refs.itemGrid.innerHTML = items.map(item => {
+                    const src = imageForItem(item, item.front_url ? 'front' : item.combined_url ? 'combined' : 'source');
+                    const tone = statusTone(item.status);
+                    return `
+                        <button class="item-card ${item.id === state.selectedItemId ? 'is-active' : ''}" data-action="select-item" data-item-id="${escapeHtml(item.id)}" data-status="${escapeHtml(item.status)}" type="button">
+                            <div class="item-media">${src ? `<img src="${escapeHtml(src)}" alt="">` : ''}</div>
+                            <div class="item-progress" style="--progress:${itemProgress(item.status)}%"><span></span></div>
+                            <div class="item-copy">
+                                <span class="pill ${tone}">${escapeHtml(label(STATUS_LABELS, item.status))}</span>
+                                <div class="item-title">${escapeHtml(item.phrase || item.source_image?.name || `Item ${item.item_index}`)}</div>
+                                ${isRiskyPhrase(item.phrase) ? '<span class="risk-badge">multi-item risk</span>' : ''}
+                                <div class="item-meta">#${item.item_index} · attempts ${item.attempts || 0}</div>
+                            </div>
+                        </button>
+                    `;
+                }).join('');
+            }
+
+            function artifactLink(label, url) {
+                if (!url) return `<span class="artifact-link is-missing">${escapeHtml(label)} · none</span>`;
+                return `<a class="artifact-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${icon('download', 'xs')} ${escapeHtml(label)}</a>`;
+            }
+
+            function renderDetail() {
+                const item = selectedItem();
+                if (!item) {
+                    refs.detailSubtitle.textContent = 'Select an item to inspect outputs.';
+                    refs.detailBody.innerHTML = '<div class="empty-state">No item selected.</div>';
+                    return;
+                }
+                state.selectedItemId = item.id;
+                refs.detailSubtitle.textContent = item.source_image?.name || item.id;
+                if (!artifactForItem(item, state.previewKind)) {
+                    state.previewKind = preferredPreviewKind(item);
+                }
+                const previewUrl = artifactForItem(item, state.previewKind);
+                const itemSteps = stepsFor(item.id);
+                const completedAt = formatTimestamp(item.completed_at);
+                const updatedAt = formatTimestamp(item.updated_at);
+                const hasPair = Boolean(item.front_url && item.back_url);
+                refs.detailBody.innerHTML = `
+                    <div class="preview-tabs">
+                        ${['source', 'combined', 'rmbg', 'front', 'back'].map(kind => {
+                            const available = Boolean(artifactForItem(item, kind));
+                            return `
+                            <button type="button" class="${state.previewKind === kind ? 'is-active' : ''}" data-action="preview-kind" data-kind="${kind}" ${available ? '' : 'disabled'}>${PREVIEW_LABELS[kind]}</button>
+                        `;
+                        }).join('')}
+                    </div>
+                    <div class="preview-frame">${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="">` : '<span class="item-meta">No preview</span>'}</div>
+                    <div class="preview-meta">
+                        <span>${escapeHtml(label(STATUS_LABELS, item.status))} · #${item.item_index}</span>
+                        <span>${escapeHtml(completedAt || updatedAt || '')}</span>
+                    </div>
+                    ${hasPair ? `
+                        <div class="compare-grid">
+                            <div class="compare-tile"><img src="${escapeHtml(item.front_url)}" alt=""><span>front split</span></div>
+                            <div class="compare-tile"><img src="${escapeHtml(item.back_url)}" alt=""><span>back split</span></div>
+                        </div>
+                    ` : ''}
+                    <div class="field">
+                        <label class="label" for="phraseInput">Detected phrase</label>
+                        <input id="phraseInput" class="input" type="text" value="${escapeHtml(item.phrase || '')}" placeholder="e.g. jacket">
+                        ${isRiskyPhrase(item.phrase) ? '<div class="phrase-risk">Phrase looks like a full outfit. Change it to one target garment, then rerun output.</div>' : ''}
+                    </div>
+                    <div class="inline-actions" style="justify-content:flex-start; margin:10px 0 12px;">
+                        <button class="plain-btn" type="button" data-action="save-phrase" data-item-id="${escapeHtml(item.id)}">${icon('check', 'xs')} Save phrase</button>
+                        <button class="plain-btn" type="button" data-action="rerun-generation" data-item-id="${escapeHtml(item.id)}">${icon('refresh', 'xs')} Rerun output</button>
+                        <button class="plain-btn" type="button" data-action="rerun-full" data-item-id="${escapeHtml(item.id)}">${icon('search', 'xs')} Re-detect</button>
+                    </div>
+                    <div class="artifact-grid">
+                        ${artifactLink('source', item.source_image?.url)}
+                        ${artifactLink('combined', item.combined_url)}
+                        ${artifactLink('rmbg', item.rmbg_url)}
+                        ${artifactLink('front', item.front_url)}
+                        ${artifactLink('back', item.back_url)}
+                    </div>
+                    ${item.error_message ? `<div class="status-line is-error">${escapeHtml(item.error_message)}</div>` : ''}
+                    <details class="prompt-details">
+                        <summary>Prompt used</summary>
+                        <p>${escapeHtml(item.prompt || 'No prompt recorded yet.')}</p>
+                    </details>
+                    <div class="steps">
+                        ${itemSteps.length ? itemSteps.map(step => `
+                            <div class="step-row">
+                                <strong>${escapeHtml(label(STEP_LABELS, step.step_name))} · ${escapeHtml(label(STATUS_LABELS, step.status))}</strong>
+                                <span>${escapeHtml(step.error_message || JSON.stringify(step.detail || {}))}</span>
+                            </div>
+                        `).join('') : '<div class="step-row">No steps recorded yet.</div>'}
+                    </div>
+                `;
+            }
+
+            function renderBatch() {
+                const batch = state.detail?.batch;
+                refs.batchSubtitle.textContent = batch
+                    ? `${batch.title || batch.id} · ${batch.id} · ${label(BATCH_LABELS, batch.status)} · ${label(CATEGORY_LABELS, batch.target_category)}`
+                    : 'No batch selected.';
+                document.querySelector('[data-action="pause"]').disabled = !batch || batch.status !== 'running';
+                document.querySelector('[data-action="resume"]').disabled = !batch || !['paused', 'failed', 'partial'].includes(batch.status);
+                document.querySelector('[data-action="retry-failed"]').disabled = !batch || !(batch.counts?.failed);
+                renderOverview();
+                renderFilters();
+                renderItems();
+                renderDetail();
+            }
+
+            function render() {
+                renderBatchSelect();
+                renderUploads();
+                renderBatch();
+            }
+
+            function controlPayload(mode = 'generation') {
+                localStorage.setItem(RMBG_KEY, refs.rmbgKey.value.trim());
+                localStorage.setItem(RMBG_BASE_KEY, refs.rmbgBase.value.trim());
+                return {
+                    mode,
+                    rmbg_api_key: refs.rmbgKey.value.trim(),
+                    rmbg_base_url: refs.rmbgBase.value.trim(),
+                    rmbg_variant: refs.rmbgVariant.value
+                };
+            }
+
+            async function uploadFiles(files) {
+                const images = Array.from(files || []).filter(file => file.type.startsWith('image/'));
+                if (!images.length) return;
+                setStatus(`Uploading ${images.length} image${images.length === 1 ? '' : 's'}...`);
+                const form = new FormData();
+                images.forEach(file => form.append('files', file));
+                const data = await fetchJson('/api/ai/upload', { method: 'POST', body: form });
+                const mapped = (data.files || []).map(file => ({
+                    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`,
+                    url: file.url,
+                    name: file.name || file.url
+                }));
+                state.uploads.push(...mapped);
+                renderUploads();
+                refs.fileInput.value = '';
+                refs.folderInput.value = '';
+                setStatus(`Uploaded ${mapped.length} image${mapped.length === 1 ? '' : 's'}.`);
+            }
+
+            async function loadBatches(keepSelection = true) {
+                const data = await fetchJson(`${API}/batches?limit=80`);
+                state.batches = data.batches || [];
+                const selectionStillExists = state.batches.some(batch => batch.id === state.activeBatchId);
+                if (!keepSelection || !state.activeBatchId || !selectionStillExists) {
+                    const running = state.batches.find(batch => batch.status === 'running');
+                    state.activeBatchId = running?.id || state.batches[0]?.id || '';
+                }
+                if (state.activeBatchId) await loadDetail(state.activeBatchId, false);
+                render();
+                syncPolling();
+            }
+
+            async function loadDetail(batchId, shouldRender = true) {
+                if (!batchId) {
+                    state.detail = null;
+                    state.selectedItemId = '';
+                    if (shouldRender) render();
+                    return;
+                }
+                state.detail = await fetchJson(`${API}/batches/${encodeURIComponent(batchId)}`);
+                const items = state.detail.items || [];
+                if (!items.find(item => item.id === state.selectedItemId)) {
+                    state.selectedItemId = items[0]?.id || '';
+                    if (items[0]) state.previewKind = preferredPreviewKind(items[0]);
+                }
+                if (shouldRender) {
+                    render();
+                    syncPolling();
+                }
+            }
+
+            async function startBatch() {
+                if (!state.uploads.length) return;
+                setStatus('Starting flatlay batch...');
+                const payload = {
+                    title: refs.batchTitle.value.trim() || 'Flatlay batch',
+                    target_category: refs.targetCategory.value,
+                    vision_model: refs.visionModel.value.trim(),
+                    generate_model: refs.generateModel.value.trim(),
+                    size: refs.imageSize.value,
+                    quality: refs.quality.value,
+                    rmbg_provider: refs.rmbgProvider.value,
+                    rmbg_variant: refs.rmbgVariant.value,
+                    rmbg_base_url: refs.rmbgBase.value.trim(),
+                    rmbg_api_key: refs.rmbgKey.value.trim(),
+                    images: state.uploads,
+                    autostart: true
+                };
+                localStorage.setItem(RMBG_KEY, refs.rmbgKey.value.trim());
+                localStorage.setItem(RMBG_BASE_KEY, refs.rmbgBase.value.trim());
+                const detail = await fetchJson(`${API}/batches`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                state.detail = detail;
+                state.activeBatchId = detail.batch.id;
+                state.selectedItemId = detail.items?.[0]?.id || '';
+                state.uploads = [];
+                await loadBatches(true);
+                setStatus(`Batch ${detail.batch.id} started.`);
+            }
+
+            async function pauseBatch() {
+                if (!state.activeBatchId) return;
+                state.detail = await fetchJson(`${API}/batches/${encodeURIComponent(state.activeBatchId)}/pause`, { method: 'POST' });
+                render();
+                syncPolling();
+            }
+
+            async function resumeBatch() {
+                if (!state.activeBatchId) return;
+                state.detail = await fetchJson(`${API}/batches/${encodeURIComponent(state.activeBatchId)}/resume`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(controlPayload())
+                });
+                render();
+                syncPolling();
+            }
+
+            async function retryFailed() {
+                if (!state.activeBatchId) return;
+                state.detail = await fetchJson(`${API}/batches/${encodeURIComponent(state.activeBatchId)}/retry-failed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(controlPayload())
+                });
+                render();
+                syncPolling();
+            }
+
+            async function savePhrase(itemId) {
+                const input = document.getElementById('phraseInput');
+                if (!input) return;
+                state.detail = await fetchJson(`${API}/items/${encodeURIComponent(itemId)}/phrase`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phrase: input.value.trim() })
+                });
+                render();
+                setStatus('Phrase saved.');
+            }
+
+            async function rerunItem(itemId, mode) {
+                state.detail = await fetchJson(`${API}/items/${encodeURIComponent(itemId)}/rerun`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(controlPayload(mode))
+                });
+                render();
+                syncPolling();
+                setStatus(mode === 'full' ? 'Full rerun queued.' : 'Generation rerun queued.');
+            }
+
+            function syncPolling() {
+                if (state.pollTimer) {
+                    clearInterval(state.pollTimer);
+                    state.pollTimer = null;
+                }
+                if (state.detail?.batch?.status !== 'running') return;
+                state.pollTimer = setInterval(async () => {
+                    try {
+                        await loadDetail(state.activeBatchId, true);
+                    } catch (err) {
+                        setStatus(err.message, true);
+                    }
+                }, 2500);
+            }
+
+            document.addEventListener('click', async event => {
+                const selectTrigger = event.target.closest('.custom-select-trigger');
+                if (selectTrigger) {
+                    event.preventDefault();
+                    const wrapper = selectTrigger.closest('.custom-select');
+                    const isOpen = wrapper.classList.contains('is-open');
+                    closeCustomSelects(wrapper);
+                    wrapper.classList.toggle('is-open', !isOpen);
+                    selectTrigger.setAttribute('aria-expanded', String(!isOpen));
+                    return;
+                }
+
+                const selectOption = event.target.closest('.custom-select-option');
+                if (selectOption) {
+                    event.preventDefault();
+                    const wrapper = selectOption.closest('.custom-select');
+                    const select = document.querySelector(`select[data-custom-select-id="${wrapper.dataset.selectWrapper}"]`);
+                    if (select) {
+                        select.value = selectOption.dataset.selectValue || '';
+                        syncCustomSelect(select);
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    closeCustomSelects();
+                    return;
+                }
+
+                if (!event.target.closest('.custom-select')) {
+                    closeCustomSelects();
+                }
+
+                const target = event.target.closest('[data-action]');
+                if (!target) return;
+                event.preventDefault();
+                try {
+                    const action = target.dataset.action;
+                    if (action === 'start') return startBatch();
+                    if (action === 'refresh') return loadBatches(true);
+                    if (action === 'pause') return pauseBatch();
+                    if (action === 'resume') return resumeBatch();
+                    if (action === 'retry-failed') return retryFailed();
+                    if (action === 'filter-items') {
+                        state.filter = target.dataset.filter || 'all';
+                        const visible = filteredItems();
+                        if (visible.length && !visible.find(item => item.id === state.selectedItemId)) {
+                            state.selectedItemId = visible[0].id;
+                            state.previewKind = preferredPreviewKind(visible[0]);
+                        }
+                        renderBatch();
+                        return;
+                    }
+                    if (action === 'clear-uploads') {
+                        state.uploads = [];
+                        renderUploads();
+                        setStatus('Uploads cleared.');
+                        return;
+                    }
+                    if (action === 'remove-upload') {
+                        state.uploads = state.uploads.filter(item => (item.id || item.url) !== target.dataset.uploadId);
+                        renderUploads();
+                        setStatus('Image removed.');
+                        return;
+                    }
+                    if (action === 'select-item') {
+                        state.selectedItemId = target.dataset.itemId || '';
+                        const item = selectedItem();
+                        if (item) state.previewKind = preferredPreviewKind(item);
+                        renderBatch();
+                        return;
+                    }
+                    if (action === 'preview-kind') {
+                        state.previewKind = target.dataset.kind || 'front';
+                        renderDetail();
+                        return;
+                    }
+                    if (action === 'save-phrase') return savePhrase(target.dataset.itemId);
+                    if (action === 'rerun-generation') return rerunItem(target.dataset.itemId, 'generation');
+                    if (action === 'rerun-full') return rerunItem(target.dataset.itemId, 'full');
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+            });
+
+            refs.batchSelect.addEventListener('change', async event => {
+                state.activeBatchId = event.target.value;
+                state.filter = 'all';
+                await loadDetail(state.activeBatchId);
+            });
+
+            refs.dropzone.addEventListener('keydown', event => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                refs.dropzone.click();
+            });
+            document.querySelector('label[for="folderInput"]').addEventListener('keydown', event => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                event.currentTarget.click();
+            });
+            refs.fileInput.addEventListener('change', () => uploadFiles(refs.fileInput.files).catch(err => setStatus(err.message, true)));
+            refs.folderInput.addEventListener('change', () => uploadFiles(refs.folderInput.files).catch(err => setStatus(err.message, true)));
+            refs.dropzone.addEventListener('dragover', event => {
+                event.preventDefault();
+                refs.dropzone.classList.add('is-over');
+            });
+            refs.dropzone.addEventListener('dragleave', () => refs.dropzone.classList.remove('is-over'));
+            refs.dropzone.addEventListener('drop', event => {
+                event.preventDefault();
+                refs.dropzone.classList.remove('is-over');
+                uploadFiles(event.dataTransfer.files).catch(err => setStatus(err.message, true));
+            });
+            refs.rmbgKey.value = localStorage.getItem(RMBG_KEY) || '';
+            refs.rmbgBase.value = localStorage.getItem(RMBG_BASE_KEY) || '';
+
+            function syncRmbgFields() {
+                const provider = refs.rmbgProvider.value;
+                refs.rmbgFields.classList.toggle('is-hidden', provider === 'none');
+                refs.rmbgKeyField.classList.toggle('is-hidden', provider !== 'remove_bg');
+                if (provider === 'none') {
+                    setStatus(state.uploads.length ? `${state.uploads.length} image${state.uploads.length === 1 ? '' : 's'} ready.` : 'Ready.');
+                }
+            }
+
+            refs.rmbgProvider.addEventListener('change', syncRmbgFields);
+
+            document.addEventListener('keydown', event => {
+                if (event.key !== 'Escape') return;
+                closeCustomSelects();
+            });
+
+            async function init() {
+                enhanceSelects();
+                render();
+                try {
+                    const config = await fetchJson('/api/config');
+                    refs.visionModel.value = config.flatlay_vision_model || config.chat_model || '';
+                    refs.generateModel.value = localStorage.getItem('comfly_image_model') || config.flatlay_generate_model || config.image_model || '';
+                    refs.rmbgProvider.value = config.flatlay_rmbg_provider || 'none';
+                    refs.rmbgVariant.value = config.flatlay_rmbg_variant || 'lite';
+                    syncAllCustomSelects();
+                    if (!refs.rmbgBase.value) {
+                        refs.rmbgBase.value = refs.rmbgProvider.value === 'local_birefnet'
+                            ? (config.flatlay_local_rmbg_base_url || '')
+                            : (config.flatlay_rmbg_base_url || '');
+                    }
+                    syncRmbgFields();
+                    await loadBatches(false);
+                } catch (err) {
+                    setStatus(err.message, true);
+                }
+            }
+
+            window.addEventListener('beforeunload', () => {
+                if (state.pollTimer) clearInterval(state.pollTimer);
+            });
+
+            init();
+        })();
+    </script>
+</body>
+
+</html>

@@ -9,6 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/design-system.css?v=24">
     <script src="/static/theme.js?v=20260512g"></script>
+    <script src="/static/i18n.js?v=1"></script>
+    <script src="/static/image-preview.js?v=1"></script>
+    <script src="/static/history-bulk-manager.js?v=1"></script>
     <style>
         html,
         body {
@@ -125,6 +128,53 @@
 
         .plain-btn {
             background: var(--bg-2);
+        }
+
+        .tab-btn:disabled,
+        .icon-btn:disabled,
+        .plain-btn:disabled,
+        .btn-primary:disabled,
+        .mode-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.54;
+        }
+
+        @keyframes fs-running-stripe {
+            from { background-position: 0 0; }
+            to { background-position: 24px 0; }
+        }
+
+        @keyframes fs-beacon {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.28; }
+        }
+
+        .status-beacon {
+            width: 8px;
+            height: 8px;
+            display: inline-block;
+            background: var(--primary);
+            flex: 0 0 auto;
+        }
+
+        .status-beacon.is-running {
+            animation: fs-beacon 0.9s steps(2, end) infinite;
+        }
+
+        .status-beacon.is-complete {
+            background: #3f7f2a;
+        }
+
+        .status-beacon.is-failed {
+            background: var(--primary);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .status-beacon.is-running,
+            .btn-primary.is-busy,
+            .start-btn.is-busy {
+                animation: none;
+            }
         }
 
         .toolbar-actions {
@@ -472,6 +522,10 @@
             color: var(--ink);
         }
 
+        .file-input-hidden {
+            display: none;
+        }
+
         body.studio-theme-dark .dropzone {
             background: rgba(22, 22, 24, 0.84);
             border-color: var(--dark-border);
@@ -595,6 +649,42 @@
             font-weight: 600;
         }
 
+        .start-btn.is-busy {
+            background-image: repeating-linear-gradient(
+                90deg,
+                #0f0f0f 0,
+                #0f0f0f 12px,
+                #2a2a2a 12px,
+                #2a2a2a 24px
+            );
+            animation: fs-running-stripe 0.8s steps(6, end) infinite;
+            opacity: 1;
+        }
+
+        .generation-bar.is-submitting,
+        .generation-bar.is-running {
+            border-color: #0f0f0f;
+            border-left: 4px solid var(--primary);
+        }
+
+        .generation-bar.is-failed {
+            border-color: var(--primary);
+            border-left: 4px solid var(--primary);
+        }
+
+        .generation-bar.is-complete {
+            border-color: #3f7f2a;
+            border-left: 4px solid #3f7f2a;
+        }
+
+        body.studio-theme-dark .generation-bar.is-submitting,
+        body.studio-theme-dark .generation-bar.is-running,
+        body.studio-theme-dark .generation-bar.is-failed,
+        body.studio-theme-dark .generation-bar.is-complete {
+            border-color: #f5f5f5;
+            border-left-color: var(--primary);
+        }
+
         .mode-panel {
             display: grid;
             gap: 8px;
@@ -677,6 +767,28 @@
             gap: 6px;
         }
 
+        .bar-summary.is-live {
+            border-color: #0f0f0f;
+        }
+
+        .bar-summary.is-alert {
+            border-color: var(--primary);
+            color: var(--ink);
+        }
+
+        .bar-summary.is-done {
+            border-color: #3f7f2a;
+            color: var(--ink);
+        }
+
+        .submit-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--ink);
+            font-weight: 700;
+        }
+
         body.studio-theme-dark .bar-summary {
             border-color: var(--dark-border);
             background: var(--dark-surface);
@@ -693,6 +805,73 @@
             padding: 18px;
             display: grid;
             gap: 16px;
+        }
+
+        .active-batch-panel.is-running {
+            border-color: #0f0f0f;
+            border-left: 4px solid var(--primary);
+        }
+
+        .active-batch-panel.is-failed {
+            border-color: var(--primary);
+            border-left: 4px solid var(--primary);
+        }
+
+        .active-batch-panel.is-complete {
+            border-color: #3f7f2a;
+            border-left: 4px solid #3f7f2a;
+        }
+
+        body.studio-theme-dark .active-batch-panel.is-running,
+        body.studio-theme-dark .active-batch-panel.is-failed,
+        body.studio-theme-dark .active-batch-panel.is-complete {
+            border-color: #f5f5f5;
+        }
+
+        .run-banner {
+            min-height: 46px;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px;
+            font-family: var(--font-mono);
+            color: var(--muted);
+        }
+
+        .run-banner strong {
+            color: var(--ink);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .run-banner.is-running {
+            border-color: #0f0f0f;
+            color: var(--ink);
+        }
+
+        .run-banner.is-failed {
+            border-color: var(--primary);
+            color: var(--ink);
+        }
+
+        .run-banner.is-complete {
+            border-color: #3f7f2a;
+            color: var(--ink);
+        }
+
+        body.studio-theme-dark .run-banner {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+
+        body.studio-theme-dark .run-banner strong,
+        body.studio-theme-dark .run-banner.is-running,
+        body.studio-theme-dark .run-banner.is-failed,
+        body.studio-theme-dark .run-banner.is-complete {
+            color: var(--dark-text);
         }
 
         .panel-head {
@@ -853,6 +1032,27 @@
             background: var(--stage-bg);
         }
 
+        .mini-count {
+            width: 30px;
+            height: 30px;
+            border: 1px solid var(--border);
+            background: var(--bg-2);
+            color: var(--ink);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        body.studio-theme-dark .mini-count {
+            border-color: var(--dark-border);
+            background: var(--dark-elev);
+            color: var(--dark-text);
+        }
+
         .status-pill {
             display: inline-flex;
             align-items: center;
@@ -971,6 +1171,32 @@
             border-left-width: 4px;
         }
 
+        .batch-item.is-running {
+            border-color: #0f0f0f;
+            border-left: 4px solid var(--primary);
+            background: rgba(255, 248, 222, 0.96);
+        }
+
+        .batch-item.is-failed {
+            border-color: var(--primary);
+            border-left: 4px solid var(--primary);
+        }
+
+        .batch-item.is-complete {
+            border-color: #3f7f2a;
+            border-left: 4px solid #3f7f2a;
+        }
+
+        .batch-status-line {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: var(--font-mono);
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+        }
+
         body.studio-theme-dark .batch-item {
             background: var(--dark-surface);
             color: var(--dark-text);
@@ -980,6 +1206,16 @@
         body.studio-theme-dark .batch-item.is-active {
             border-color: #f5f5f5;
             border-left-width: 4px;
+        }
+
+        body.studio-theme-dark .batch-item.is-running {
+            border-color: #f5f5f5;
+            background: rgba(34, 30, 23, 0.96);
+        }
+
+        body.studio-theme-dark .batch-item.is-failed,
+        body.studio-theme-dark .batch-item.is-complete {
+            border-color: #f5f5f5;
         }
 
         .empty-state {
@@ -1626,11 +1862,12 @@
                     <input id="settingsModelInput" class="input" type="text">
                 </div>
                 <div class="field">
-                    <label class="label" for="settingsSizeInput">Size</label>
+                    <label class="label" for="settingsSizeInput">Size / Ratio</label>
                     <select id="settingsSizeInput">
-                        <option value="1024x1024">1024x1024</option>
-                        <option value="1536x1024">1536x1024</option>
-                        <option value="1024x1536">1024x1536</option>
+                        <option value="auto">Auto</option>
+                        <option value="1:1">1:1</option>
+                        <option value="2:3">2:3</option>
+                        <option value="3:4">3:4</option>
                     </select>
                 </div>
             </div>
@@ -1653,36 +1890,46 @@
 
     <div id="cropOverlayRoot"></div>
 
-    <input id="fileInput" type="file" accept="image/*" multiple hidden>
+    <input id="fileInput" class="file-input-hidden" type="file" accept="image/*" multiple>
 
     <script>
         (() => {
             const STORAGE_KEY = 'feebee_batch_tryon_workspace_v3';
             const LEGACY_STORAGE_KEY = 'feebee_batch_tryon_workspace_v2';
+            const WORKSPACE_SETTINGS_VERSION = 4;
             const API = '/api/batch-tryon';
-            const DEFAULT_PROMPT = [
+            const BATCH_TRYON_MODEL = 'gemini-3.1-flash-image-preview';
+            const BATCH_TRYON_SIZE_VALUES = new Set(['auto', '1:1', '2:3', '3:4']);
+            const LEGACY_BATCH_MODELS = new Set(['', 'gpt-image-2', 'gpt-image-2-all', 'nano-banana-pro', 'nano-banana-2']);
+            const LEGACY_DEFAULT_PROMPT = [
                 'Extract ONLY the clothing, accessories and shoes worn by the person in image 1.',
                 'Ignore image 1 background, walls, floor and body identity.',
                 'Place those garments on the person in image 2 while preserving the model pose and body proportions.',
                 'Return a clean product try-on image.'
             ].join(' ');
+            const DEFAULT_PROMPT = [
+                'Use all clothing reference images before the final model reference image as garments, accessories and shoes to transfer.',
+                'Ignore clothing-reference backgrounds, displays, mannequins, floors, walls and source body identity.',
+                'Place the complete outfit on the person in the final model reference image while preserving pose, body proportions and model identity.',
+                'Return one clean product try-on image.'
+            ].join(' ');
             const MODE_LABELS = {
                 pair: '1:1',
                 fixedModel: 'Fix Model',
                 fixedClothing: 'Fix Cloth',
-                matrix: 'Matrix'
+                multiClothing: 'Multi Cloth'
             };
             const MODE_ICONS = {
                 pair: 'chevron-right',
                 fixedModel: 'person',
                 fixedClothing: 'nav-batch',
-                matrix: 'diamond'
+                multiClothing: 'plus'
             };
             const DEFAULT_SETTINGS = {
                 title: 'PM batch try-on',
                 prompt: DEFAULT_PROMPT,
-                model: localStorage.getItem('comfly_image_model') || 'gpt-image-2',
-                size: '1024x1024',
+                model: BATCH_TRYON_MODEL,
+                size: 'auto',
                 quality: 'auto'
             };
 
@@ -1756,6 +2003,9 @@
                 galleryStatusFilter: 'all',
                 galleryGroupFilter: 'all',
                 uploadTarget: null,
+                isSubmitting: false,
+                submittingGroupId: '',
+                submittingStartedAt: 0,
                 crop: {
                     open: false,
                     groupId: '',
@@ -1788,11 +2038,37 @@
                 };
             }
 
-            function cleanWorkspace(workspace) {
+            function normalizeMode(mode) {
+                return MODE_LABELS[mode] ? mode : 'pair';
+            }
+
+            function normalizeBatchTryonModel(value, forceDefault = false) {
+                const model = String(value || '').trim();
+                if (forceDefault || LEGACY_BATCH_MODELS.has(model)) return BATCH_TRYON_MODEL;
+                return model;
+            }
+
+            function normalizeBatchTryonSize(value) {
+                const size = String(value || '').trim();
+                return BATCH_TRYON_SIZE_VALUES.has(size) ? size : DEFAULT_SETTINGS.size;
+            }
+
+            function cleanSettings(settings, forceBatchDefaults = false) {
+                const clean = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+                if ((clean.prompt || '').trim() === LEGACY_DEFAULT_PROMPT) {
+                    clean.prompt = DEFAULT_PROMPT;
+                }
+                clean.model = normalizeBatchTryonModel(clean.model, forceBatchDefaults);
+                clean.size = normalizeBatchTryonSize(clean.size);
+                clean.quality = clean.quality || DEFAULT_SETTINGS.quality;
+                return clean;
+            }
+
+            function cleanWorkspace(workspace, forceBatchDefaults = false) {
                 const groups = Array.isArray(workspace?.groups) ? workspace.groups.map(cleanGroup) : [];
                 return {
-                    mode: workspace?.mode || 'pair',
-                    settings: { ...DEFAULT_SETTINGS, ...(workspace?.settings || {}) },
+                    mode: normalizeMode(workspace?.mode),
+                    settings: cleanSettings(workspace?.settings, forceBatchDefaults),
                     groups: groups.length ? groups : [newGroup('Group 1')]
                 };
             }
@@ -1806,7 +2082,7 @@
             }
 
             function currentMode() {
-                return state.workspace.mode;
+                return normalizeMode(state.workspace.mode);
             }
 
             function comparableWorkspace(workspace) {
@@ -1843,10 +2119,13 @@
 
             function loadDraft() {
                 const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) || '{}';
+                let shouldPersist = false;
                 try {
-                    const draft = JSON.parse(raw);
+                    const draft = JSON.parse(raw) || {};
+                    const needsSettingsMigration = Number(draft.settingsVersion || 0) < WORKSPACE_SETTINGS_VERSION;
+                    shouldPersist = needsSettingsMigration;
                     if (draft.workspace) {
-                        state.workspace = cleanWorkspace(draft.workspace);
+                        state.workspace = cleanWorkspace(draft.workspace, needsSettingsMigration);
                         state.activeBatchId = draft.activeBatchId || '';
                         state.galleryBatchId = draft.galleryBatchId || '';
                     } else {
@@ -1854,16 +2133,18 @@
                             mode: draft.mode,
                             settings: draft.settings,
                             groups: draft.groups
-                        });
+                        }, needsSettingsMigration);
                     }
                 } catch (err) {
                     state.workspace = initialWorkspace();
                 }
                 state.workspaceBaseline = workspaceSnapshot(state.workspace);
+                if (shouldPersist) saveDraft();
             }
 
             function saveDraft() {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    settingsVersion: WORKSPACE_SETTINGS_VERSION,
                     workspace: state.workspace,
                     activeBatchId: state.activeBatchId,
                     galleryBatchId: state.galleryBatchId
@@ -2272,11 +2553,44 @@
                 setStatus('Crop applied and workspace image updated.');
             }
 
+            function emptyCounts() {
+                return { total: 0, pending: 0, running: 0, completed: 0, failed: 0 };
+            }
+
+            function mergeBatchRecord(current = {}, patch = {}) {
+                return {
+                    ...current,
+                    ...patch,
+                    counts: {
+                        ...emptyCounts(),
+                        ...(current.counts || {}),
+                        ...(patch.counts || {})
+                    }
+                };
+            }
+
             function cacheBatchDetail(data) {
                 if (data?.batch?.id) {
-                    state.batchCache[data.batch.id] = data;
+                    const previous = state.batchCache[data.batch.id] || {};
+                    state.batchCache[data.batch.id] = {
+                        ...previous,
+                        ...data,
+                        batch: mergeBatchRecord(previous.batch || {}, data.batch),
+                        groups: data.groups || previous.groups || [],
+                        tasks: data.tasks || previous.tasks || []
+                    };
+                    return state.batchCache[data.batch.id];
                 }
                 return data;
+            }
+
+            function mergeBatchSummary(batch) {
+                if (!batch?.id || !state.batchCache[batch.id]?.batch) return;
+                state.batchCache[batch.id].batch = mergeBatchRecord(state.batchCache[batch.id].batch, batch);
+            }
+
+            function reconcileBatchCache() {
+                state.batches.forEach(mergeBatchSummary);
             }
 
             function detailFor(batchId) {
@@ -2352,8 +2666,114 @@
                 });
             }
 
+            function batchRecord(source) {
+                return source?.batch || source || {};
+            }
+
+            function batchCounts(source = activeDetail()) {
+                const record = batchRecord(source);
+                return { ...emptyCounts(), ...(record.counts || {}) };
+            }
+
             function counts(detail = activeDetail()) {
-                return detail?.batch?.counts || { total: 0, pending: 0, running: 0, completed: 0, failed: 0 };
+                return batchCounts(detail);
+            }
+
+            function derivedBatchStatus(source) {
+                const batch = batchRecord(source);
+                const status = batch.status || 'pending';
+                const c = batchCounts(source);
+                if (status === 'running' && c.total > 0 && c.pending === 0 && c.running === 0) {
+                    if (c.failed && !c.completed) return 'failed';
+                    if (c.failed && c.completed) return 'partial';
+                    if (c.completed >= c.total) return 'completed';
+                }
+                if (status === 'completed' && c.failed) return 'partial';
+                return status;
+            }
+
+            function batchLifecycle(source) {
+                const batch = batchRecord(source);
+                const c = batchCounts(source);
+                const status = derivedBatchStatus(source);
+                const title = batch.title || batch.id || 'Batch';
+                const done = `${c.completed}/${c.total || 0} done`;
+                const failed = `${c.failed} failed`;
+                const base = { status, counts: c, title, done, failed };
+                if (status === 'running') {
+                    return {
+                        ...base,
+                        label: 'running',
+                        className: 'is-running',
+                        beaconClass: 'is-running',
+                        isRunning: true,
+                        isFailed: false,
+                        isComplete: false,
+                        message: `${done} · ${c.pending} pending · ${c.running} running`
+                    };
+                }
+                if (status === 'failed') {
+                    return {
+                        ...base,
+                        label: 'failed',
+                        className: 'is-failed',
+                        beaconClass: 'is-failed',
+                        isRunning: false,
+                        isFailed: true,
+                        isComplete: false,
+                        message: `${done} · ${failed} · no task is running`
+                    };
+                }
+                if (status === 'partial') {
+                    return {
+                        ...base,
+                        label: 'partial',
+                        className: 'is-failed',
+                        beaconClass: 'is-failed',
+                        isRunning: false,
+                        isFailed: true,
+                        isComplete: true,
+                        message: `${done} · ${failed} · retry failed tasks if needed`
+                    };
+                }
+                if (status === 'completed') {
+                    return {
+                        ...base,
+                        label: 'completed',
+                        className: 'is-complete',
+                        beaconClass: 'is-complete',
+                        isRunning: false,
+                        isFailed: false,
+                        isComplete: true,
+                        message: `${done} · results are ready`
+                    };
+                }
+                return {
+                    ...base,
+                    label: status,
+                    className: '',
+                    beaconClass: '',
+                    isRunning: false,
+                    isFailed: false,
+                    isComplete: false,
+                    message: `${done} · ${failed}`
+                };
+            }
+
+            function runningBatch() {
+                const active = activeDetail();
+                if (batchLifecycle(active).isRunning) return active.batch;
+                return state.batches.find(batch => batchLifecycle(batch).isRunning) || null;
+            }
+
+            function launchLocked() {
+                return state.isSubmitting || Boolean(runningBatch());
+            }
+
+            function runningLabel(batch) {
+                if (!batch) return '';
+                const lifecycle = batchLifecycle(batch);
+                return `${lifecycle.title} · ${lifecycle.done}`;
             }
 
             function formatTime(value) {
@@ -2380,7 +2800,7 @@
                 }
                 if (currentMode() === 'fixedModel') return { active: true, valid: true, count: clothing, message: '' };
                 if (currentMode() === 'fixedClothing') return { active: true, valid: true, count: models, message: '' };
-                if (currentMode() === 'matrix') return { active: true, valid: true, count: clothing * models, message: '' };
+                if (currentMode() === 'multiClothing') return { active: true, valid: true, count: 1, message: '' };
                 return { active: true, valid: false, count: 0, message: 'Unsupported pairing mode' };
             }
 
@@ -2455,9 +2875,9 @@
                 refs.batchSelect.innerHTML = [
                     '<option value="">Select active batch</option>',
                     ...state.batches.map(batch => {
-                        const status = batch.status || 'pending';
+                        const lifecycle = batchLifecycle(batch);
                         const total = batch.counts?.total || 0;
-                        return `<option value="${escapeHtml(batch.id)}" ${batch.id === selected ? 'selected' : ''}>${escapeHtml(batch.title || batch.id)} · ${status} · ${total}</option>`;
+                        return `<option value="${escapeHtml(batch.id)}" ${batch.id === selected ? 'selected' : ''}>${escapeHtml(batch.title || batch.id)} · ${lifecycle.label} · ${total}</option>`;
                     })
                 ].join('');
             }
@@ -2516,6 +2936,8 @@
                 const estimate = estimateGroup(group);
                 const info = taskCountsForGroup(group.id);
                 const stateInfo = groupState(group);
+                const locked = launchLocked();
+                const groupSubmitting = state.isSubmitting && state.submittingGroupId === group.id;
                 const statusBits = [
                     `<span class="mini-stat is-primary"><strong>${MODE_LABELS[currentMode()]}</strong></span>`,
                     `<span class="mini-stat"><strong>${clothingCount}C</strong> / <strong>${modelCount}M</strong></span>`,
@@ -2542,7 +2964,9 @@
                             <div class="group-tools">
                                 <button class="icon-btn" type="button" data-action="move-group-up" data-group-id="${escapeHtml(group.id)}" ${index === 0 ? 'disabled' : ''} aria-label="Move group up">${icon('chevron-up')}</button>
                                 <button class="icon-btn" type="button" data-action="move-group-down" data-group-id="${escapeHtml(group.id)}" ${index === currentGroups().length - 1 ? 'disabled' : ''} aria-label="Move group down">${icon('chevron-down')}</button>
-                                <button class="plain-btn" type="button" data-action="run-group" data-group-id="${escapeHtml(group.id)}">${icon('chevron-right')} Run Group</button>
+                                <button class="plain-btn ${groupSubmitting ? 'is-busy' : ''}" type="button" data-action="run-group" data-group-id="${escapeHtml(group.id)}" ${locked ? 'disabled' : ''}>
+                                    ${groupSubmitting ? '<span class="status-beacon is-running"></span>' : icon('chevron-right')} ${groupSubmitting ? 'Submitting' : 'Run Group'}
+                                </button>
                                 ${info.completed ? `<button class="plain-btn" type="button" data-action="view-group-results" data-group-id="${escapeHtml(group.id)}">${icon('search', 'xs')} View Results</button>` : ''}
                                 <button class="icon-btn" type="button" data-action="delete-group" data-group-id="${escapeHtml(group.id)}" aria-label="Delete group">${icon('trash')}</button>
                             </div>
@@ -2551,14 +2975,14 @@
                             <section class="image-lane">
                                 <div class="lane-head"><span class="label">Clothing Images (${clothingCount})</span></div>
                                 <div class="lane-body ${clothingPopulated ? 'is-populated' : ''}">
-                                    <div class="dropzone ${clothingPopulated ? 'is-compact' : ''}" role="button" tabindex="0" data-action="upload" data-type="clothing" data-group-id="${escapeHtml(group.id)}">
+                                    <label class="dropzone ${clothingPopulated ? 'is-compact' : ''}" for="fileInput" role="button" tabindex="0" data-action="upload" data-type="clothing" data-group-id="${escapeHtml(group.id)}">
                                         <div class="drop-inner">
                                             ${icon('upload', 'md')}
                                             <strong>${clothingPopulated ? 'Add more images' : 'Drop or click to upload'}</strong>
                                             <span>JPG, PNG, WEBP</span>
                                             ${clothingPopulated ? '<span class="thumb-note">Click any thumbnail to crop.</span>' : ''}
                                         </div>
-                                    </div>
+                                    </label>
                                     ${renderThumbs(group, 'clothing')}
                                 </div>
                             </section>
@@ -2566,14 +2990,14 @@
                             <section class="image-lane">
                                 <div class="lane-head"><span class="label">Model Images (${modelCount})</span></div>
                                 <div class="lane-body ${modelPopulated ? 'is-populated' : ''}">
-                                    <div class="dropzone ${modelPopulated ? 'is-compact' : ''}" role="button" tabindex="0" data-action="upload" data-type="model" data-group-id="${escapeHtml(group.id)}">
+                                    <label class="dropzone ${modelPopulated ? 'is-compact' : ''}" for="fileInput" role="button" tabindex="0" data-action="upload" data-type="model" data-group-id="${escapeHtml(group.id)}">
                                         <div class="drop-inner">
                                             ${icon('upload', 'md')}
                                             <strong>${modelPopulated ? 'Add more images' : 'Drop or click to upload'}</strong>
                                             <span>JPG, PNG, WEBP</span>
                                             ${modelPopulated ? '<span class="thumb-note">Click any thumbnail to crop.</span>' : ''}
                                         </div>
-                                    </div>
+                                    </label>
                                     ${renderThumbs(group, 'model')}
                                 </div>
                             </section>
@@ -2589,21 +3013,32 @@
             function renderActiveBatchPanel() {
                 const detail = activeDetail();
                 if (!detail) {
+                    refs.activeBatchPanel.className = 'active-batch-panel';
                     refs.activeBatchPanel.innerHTML = '<div class="empty-state">No active batch. Start a new batch from the workspace draft when the groups are ready.</div>';
                     return;
                 }
-                const c = counts(detail);
+                const lifecycle = batchLifecycle(detail);
+                const c = lifecycle.counts;
+                const rawStatus = detail.batch.status || 'pending';
+                refs.activeBatchPanel.className = `active-batch-panel ${lifecycle.className}`;
                 refs.activeBatchPanel.innerHTML = `
                     <div class="panel-head">
                         <div class="title-block">
                             <h1>Active Batch</h1>
-                            <p>${escapeHtml(detail.batch.title || detail.batch.id)} · ${escapeHtml(detail.batch.id)} · ${escapeHtml(detail.batch.status || '')}</p>
+                            <p>${escapeHtml(detail.batch.title || detail.batch.id)} · ${escapeHtml(detail.batch.id)} · ${escapeHtml(lifecycle.label)}</p>
                         </div>
                         <div class="panel-actions">
-                            <button class="plain-btn" type="button" data-action="pause-batch" ${detail.batch.status !== 'running' ? 'disabled' : ''}>${icon('cross', 'xs')} Pause</button>
-                            <button class="plain-btn" type="button" data-action="resume-batch" ${!['paused', 'failed'].includes(detail.batch.status) ? 'disabled' : ''}>${icon('chevron-right', 'xs')} Resume</button>
+                            <button class="plain-btn" type="button" data-action="pause-batch" ${!lifecycle.isRunning ? 'disabled' : ''}>${icon('cross', 'xs')} Pause</button>
+                            <button class="plain-btn" type="button" data-action="resume-batch" ${rawStatus !== 'paused' ? 'disabled' : ''}>${icon('chevron-right', 'xs')} Resume</button>
                             <button class="plain-btn" type="button" data-action="retry-failed" ${!c.failed ? 'disabled' : ''}>${icon('refresh', 'xs')} Retry failed</button>
                         </div>
+                    </div>
+                    <div class="run-banner ${lifecycle.className}">
+                        <span class="submit-status">
+                            <span class="status-beacon ${lifecycle.beaconClass}"></span>
+                            <strong>${escapeHtml(lifecycle.label)}</strong>
+                        </span>
+                        <span>${escapeHtml(lifecycle.message)}</span>
                     </div>
                     <div class="summary-grid">
                         ${[
@@ -2644,29 +3079,64 @@
 
             function renderGenerationBar() {
                 const estimate = estimateGroups();
-                const disabled = !(estimate.valid && estimate.total > 0);
+                const running = runningBatch();
+                const locked = launchLocked();
+                const activeState = activeDetail() ? batchLifecycle(activeDetail()) : null;
+                const disabled = locked || !(estimate.valid && estimate.total > 0);
                 const summaryText = estimate.valid
                     ? `${estimate.readyCount} ready groups · ${estimate.incompleteCount} incomplete`
                     : estimate.message;
+                const terminalText = activeState?.isFailed
+                    ? `Last batch ${activeState.label} · ${activeState.done} · ${activeState.failed}`
+                    : activeState?.isComplete
+                        ? `Last batch ${activeState.label} · ${activeState.done}`
+                        : summaryText;
+                const buttonText = state.isSubmitting
+                    ? 'Submitting batch...'
+                    : running
+                        ? 'Generation running'
+                        : 'Start Generation';
+                const liveText = state.isSubmitting
+                    ? 'Submitting request. Do not click again.'
+                    : running
+                        ? `Running ${runningLabel(running)}`
+                        : terminalText;
+                const barTone = state.isSubmitting
+                    ? 'is-submitting'
+                    : running
+                        ? 'is-running'
+                        : activeState?.isFailed
+                            ? 'is-failed'
+                            : activeState?.isComplete
+                                ? 'is-complete'
+                                : '';
+                const summaryTone = locked
+                    ? 'is-live'
+                    : activeState?.isFailed
+                        ? 'is-alert'
+                        : activeState?.isComplete
+                            ? 'is-done'
+                            : '';
+                refs.generationBar.className = `generation-bar ${barTone}`;
                 refs.generationBar.innerHTML = `
-                    <button class="btn-primary start-btn" type="button" data-action="start-all" ${disabled ? 'disabled' : ''}>
-                        ${icon('chevron-right')} Start Generation
+                    <button class="btn-primary start-btn ${locked ? 'is-busy' : ''}" type="button" data-action="start-all" ${disabled ? 'disabled' : ''}>
+                        ${locked ? '<span class="status-beacon is-running"></span>' : icon('chevron-right')} ${escapeHtml(buttonText)}
                     </button>
                     <section class="mode-panel">
                         <span class="label">Pairing Mode</span>
                         <div class="mode-grid">
                             ${Object.entries(MODE_LABELS).map(([mode, label]) => `
-                                <button class="mode-btn ${currentMode() === mode ? 'is-active' : ''}" type="button" data-action="mode" data-mode="${mode}">
+                                <button class="mode-btn ${currentMode() === mode ? 'is-active' : ''}" type="button" data-action="mode" data-mode="${mode}" ${locked ? 'disabled' : ''}>
                                     ${icon(MODE_ICONS[mode], 'xs')} ${label}
                                 </button>
                             `).join('')}
                         </div>
                     </section>
                     <section class="bar-meta">
-                        <div class="bar-summary">
+                        <div class="bar-summary ${summaryTone}">
                             <div><strong>${estimate.total}</strong> task${estimate.total === 1 ? '' : 's'} estimated</div>
                             <div class="truncate">${escapeHtml(currentSettings().title || DEFAULT_SETTINGS.title)}</div>
-                            <div class="${estimate.valid ? '' : 'text-primary'}">${escapeHtml(summaryText)}</div>
+                            <div class="${estimate.valid ? '' : 'text-primary'}">${escapeHtml(liveText)}</div>
                         </div>
                         <button class="plain-btn" type="button" data-action="open-settings">${icon('settings', 'xs')} Review Settings</button>
                     </section>
@@ -2674,18 +3144,12 @@
             }
 
             function renderTaskRow(task) {
-                const clothing = task.clothing_images || [];
-                const model = task.model_image || {};
                 return `
                     <tr>
                         <td>#${task.task_index || '-'}</td>
                         <td><span class="status-pill ${escapeHtml(task.status)}">${escapeHtml(task.status)}</span></td>
                         <td>
-                            <div class="task-ref">
-                                ${clothing.slice(0, 2).map(item => `<img class="mini-img" src="${escapeHtml(item.url)}" alt="">`).join('')}
-                                ${model.url ? `<img class="mini-img" src="${escapeHtml(model.url)}" alt="">` : ''}
-                                <span class="truncate">${escapeHtml(task.error_message || '')}</span>
-                            </div>
+                            ${renderReferenceStrip(task, 'task-ref', 3, task.error_message || '')}
                         </td>
                         <td>${task.result_url ? `<a class="btn-underline" href="${escapeHtml(task.result_url)}" target="_blank" rel="noreferrer">open</a>` : '-'}</td>
                         <td><button class="plain-btn" type="button" data-action="retry-task" data-task-id="${escapeHtml(task.id)}" ${task.status !== 'failed' ? 'disabled' : ''}>Retry</button></td>
@@ -2771,18 +3235,28 @@
                 `;
             }
 
+            function renderReferenceStrip(task, className = 'source-strip', maxClothing = 3, note = '') {
+                const clothing = Array.isArray(task?.clothing_images) ? task.clothing_images : [];
+                const model = task?.model_image || {};
+                const visibleClothing = clothing.slice(0, maxClothing);
+                const extraClothing = Math.max(0, clothing.length - visibleClothing.length);
+                return `
+                    <div class="${className}">
+                        ${visibleClothing.map(item => `<img class="mini-img" src="${escapeHtml(item.url)}" alt="">`).join('')}
+                        ${extraClothing ? `<span class="mini-count">+${extraClothing}</span>` : ''}
+                        ${model.url ? `<img class="mini-img" src="${escapeHtml(model.url)}" alt="">` : ''}
+                        ${note ? `<span class="truncate">${escapeHtml(note)}</span>` : ''}
+                    </div>
+                `;
+            }
+
             function renderGallery() {
                 const detail = galleryDetail();
                 const tasks = (detail?.tasks || [])
                     .filter(task => state.galleryStatusFilter === 'all' || task.status === state.galleryStatusFilter)
                     .filter(task => state.galleryGroupFilter === 'all' || task.group_id === state.galleryGroupFilter);
                 refs.galleryGrid.innerHTML = tasks.length ? tasks.map(task => {
-                    const sourceStrip = `
-                        <div class="source-strip">
-                            ${(task.clothing_images || []).slice(0, 2).map(item => `<img class="mini-img" src="${escapeHtml(item.url)}" alt="">`).join('')}
-                            ${task.model_image?.url ? `<img class="mini-img" src="${escapeHtml(task.model_image.url)}" alt="">` : ''}
-                        </div>
-                    `;
+                    const sourceStrip = renderReferenceStrip(task);
                     if (task.result_url) {
                         return `
                             <article class="gallery-card">
@@ -2820,20 +3294,27 @@
             }
 
             function renderHistory() {
-                refs.batchList.innerHTML = state.batches.length ? state.batches.map(batch => `
-                    <button class="batch-item ${state.inspectBatchId === batch.id ? 'is-active' : ''}" type="button" data-action="inspect-batch" data-batch-id="${escapeHtml(batch.id)}">
-                        <strong class="truncate">${escapeHtml(batch.title || batch.id)}</strong>
-                        <span class="label">${escapeHtml(batch.status || 'pending')} · ${(batch.counts?.completed || 0)}/${(batch.counts?.total || 0)} done</span>
-                        <span class="label">${escapeHtml(MODE_LABELS[batch.pairing_mode] || batch.pairing_mode || 'pair')}</span>
-                        <span class="label">${escapeHtml(formatTime(batch.updated_at))}</span>
-                    </button>
-                `).join('') : '<div class="empty-state">No persisted batches.</div>';
+                refs.batchList.innerHTML = state.batches.length ? state.batches.map(batch => {
+                    const lifecycle = batchLifecycle(batch);
+                    return `
+                        <button class="batch-item ${state.inspectBatchId === batch.id ? 'is-active' : ''} ${lifecycle.className}" type="button" data-action="inspect-batch" data-batch-id="${escapeHtml(batch.id)}">
+                            <strong class="truncate">${escapeHtml(batch.title || batch.id)}</strong>
+                            <span class="batch-status-line">
+                                ${lifecycle.beaconClass ? `<span class="status-beacon ${lifecycle.beaconClass}"></span>` : ''}
+                                ${escapeHtml(lifecycle.label)} · ${lifecycle.done}
+                            </span>
+                            <span class="label">${escapeHtml(MODE_LABELS[batch.pairing_mode] || batch.pairing_mode || 'pair')}</span>
+                            <span class="label">${escapeHtml(formatTime(batch.updated_at))}</span>
+                        </button>
+                    `;
+                }).join('') : '<div class="empty-state">No persisted batches.</div>';
                 const detail = inspectDetail();
+                const detailState = detail ? batchLifecycle(detail) : null;
                 refs.historyDetail.innerHTML = detail ? `
                     <div class="workspace-head" style="margin-bottom:14px;">
                         <div class="title-block">
                             <h1>${escapeHtml(detail.batch.title || detail.batch.id)}</h1>
-                            <p>${escapeHtml(detail.batch.id)} · ${escapeHtml(detail.batch.status || '')}</p>
+                            <p>${escapeHtml(detail.batch.id)} · ${escapeHtml(detailState.label)}</p>
                         </div>
                         <div class="inline-actions">
                             <button class="plain-btn" type="button" data-action="set-active-batch" data-batch-id="${escapeHtml(detail.batch.id)}">${icon('refresh', 'xs')} Set Active View</button>
@@ -2843,7 +3324,7 @@
                     <div class="detail-grid" style="margin-bottom:14px;">
                         <div class="detail-block">
                             <span class="label">Batch Summary</span>
-                            <div class="detail-row"><span>Status</span><strong>${escapeHtml(detail.batch.status || '')}</strong></div>
+                            <div class="detail-row"><span>Status</span><strong>${escapeHtml(detailState.label)}</strong></div>
                             <div class="detail-row"><span>Mode</span><strong>${escapeHtml(MODE_LABELS[detail.batch.pairing_mode] || detail.batch.pairing_mode || '')}</strong></div>
                             <div class="detail-row"><span>Tasks</span><strong>${detail.batch.counts?.total || 0}</strong></div>
                             <div class="detail-row"><span>Groups</span><strong>${derivedGroups(detail).length}</strong></div>
@@ -2956,40 +3437,64 @@
             }
 
             async function createBatch(groupId = '') {
+                const running = runningBatch();
+                if (state.isSubmitting) {
+                    setStatus('Batch request is already being submitted.');
+                    return;
+                }
+                if (running) {
+                    setStatus(`Batch ${running.id} is already running. Wait for it to finish before starting another.`, true);
+                    return;
+                }
                 const selectedGroups = groupId ? currentGroups().filter(group => group.id === groupId) : currentGroups();
                 const activeGroups = activeGroupsForSubmit(selectedGroups);
                 validateGroups(activeGroups);
-                setStatus(groupId ? 'Starting group...' : 'Starting batch...');
-                const data = await fetchJson(`${API}/batches`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        title: currentSettings().title,
-                        prompt: currentSettings().prompt,
-                        model: currentSettings().model,
-                        size: currentSettings().size,
-                        quality: currentSettings().quality,
-                        pairing_mode: currentMode(),
-                        groups: payloadGroups(activeGroups),
-                        autostart: true
-                    })
-                });
-                cacheBatchDetail(data);
-                state.activeBatchId = data.batch?.id || '';
-                state.galleryBatchId = state.activeBatchId;
-                state.workspace = workspaceFromDetail(data);
-                markWorkspaceClean();
-                await loadBatches(false);
+                state.isSubmitting = true;
+                state.submittingGroupId = groupId || '';
+                state.submittingStartedAt = Date.now();
+                setStatus(groupId ? 'Submitting group batch...' : 'Submitting batch...');
                 render();
-                syncPolling();
-                setStatus(`Batch ${data.batch?.id || ''} started from workspace.`);
+                try {
+                    const data = await fetchJson(`${API}/batches`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: currentSettings().title,
+                            prompt: currentSettings().prompt,
+                            model: currentSettings().model,
+                            size: currentSettings().size,
+                            quality: currentSettings().quality,
+                            pairing_mode: currentMode(),
+                            groups: payloadGroups(activeGroups),
+                            autostart: true
+                        })
+                    });
+                    cacheBatchDetail(data);
+                    state.activeBatchId = data.batch?.id || '';
+                    state.galleryBatchId = state.activeBatchId;
+                    state.workspace = workspaceFromDetail(data);
+                    markWorkspaceClean();
+                    await loadBatches(false);
+                    if (state.activeBatchId) await ensureBatchDetail(state.activeBatchId, true);
+                    syncPolling();
+                    const lifecycle = batchLifecycle(activeDetail());
+                    setStatus(lifecycle.isRunning
+                        ? `Batch ${data.batch?.id || ''} is running. Progress will update automatically.`
+                        : `Batch ${data.batch?.id || ''} submitted. Current status: ${lifecycle.label}.`, lifecycle.isFailed);
+                } finally {
+                    state.isSubmitting = false;
+                    state.submittingGroupId = '';
+                    state.submittingStartedAt = 0;
+                    render();
+                }
             }
 
             async function loadBatches(shouldRender = true) {
                 const data = await fetchJson(`${API}/batches?limit=50`);
                 state.batches = data.batches || [];
+                reconcileBatchCache();
                 if (!state.activeBatchId) {
-                    const running = state.batches.find(batch => batch.status === 'running');
+                    const running = state.batches.find(batch => batchLifecycle(batch).isRunning);
                     if (running) state.activeBatchId = running.id;
                 }
                 if (!state.galleryBatchId && (state.activeBatchId || state.batches[0]?.id)) {
@@ -3047,6 +3552,7 @@
                     body: JSON.stringify({})
                 });
                 cacheBatchDetail(data);
+                await loadBatches(false);
                 render();
                 syncPolling();
                 setStatus(`${action.replace('-', ' ')} requested.`);
@@ -3059,7 +3565,9 @@
                     body: JSON.stringify({})
                 });
                 cacheBatchDetail(data);
+                await loadBatches(false);
                 render();
+                syncPolling();
                 setStatus('Task retry queued.');
             }
 
@@ -3068,12 +3576,24 @@
                     clearInterval(state.pollTimer);
                     state.pollTimer = null;
                 }
-                const detail = activeDetail();
-                if (!detail || detail.batch?.status !== 'running') return;
+                const running = runningBatch();
+                if (!running) return;
+                if (!state.activeBatchId) state.activeBatchId = running.id;
                 state.pollTimer = setInterval(async () => {
                     try {
+                        await loadBatches(false);
                         await ensureBatchDetail(state.activeBatchId, true);
                         render();
+                        const lifecycle = batchLifecycle(activeDetail());
+                        if (!runningBatch()) {
+                            clearInterval(state.pollTimer);
+                            state.pollTimer = null;
+                            if (lifecycle.isFailed) {
+                                setStatus(`Batch ${state.activeBatchId} failed. Review task details or retry failed.`, true);
+                            } else if (lifecycle.isComplete) {
+                                setStatus(`Batch ${state.activeBatchId} completed. Results are ready.`);
+                            }
+                        }
                     } catch (err) {
                         clearInterval(state.pollTimer);
                         state.pollTimer = null;
@@ -3085,7 +3605,6 @@
             function openUpload(groupId, type) {
                 state.uploadTarget = { groupId, type };
                 refs.fileInput.value = '';
-                refs.fileInput.click();
             }
 
             function moveGroup(groupId, direction) {
@@ -3179,7 +3698,7 @@
                     return;
                 }
                 if (action === 'mode') {
-                    state.workspace.mode = target.dataset.mode || 'pair';
+                    state.workspace.mode = normalizeMode(target.dataset.mode);
                     saveDraft();
                     render();
                     return;
@@ -3248,6 +3767,10 @@
             document.addEventListener('click', async event => {
                 const target = event.target.closest('[data-action]');
                 if (!target) return;
+                if (target.dataset.action === 'upload') {
+                    openUpload(target.dataset.groupId, target.dataset.type || 'clothing');
+                    return;
+                }
                 event.preventDefault();
                 try {
                     await handleAction(target, event.target);
@@ -3267,6 +3790,7 @@
                 if (event.key !== 'Enter' && event.key !== ' ') return;
                 event.preventDefault();
                 openUpload(target.dataset.groupId, target.dataset.type || 'clothing');
+                target.click();
             });
 
             document.addEventListener('input', event => {

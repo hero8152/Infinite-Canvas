@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Gallery · Feebee Studios</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260514-gallery2"></script>
+    <script src="/static/i18n.js?v=1"></script>
+    <script src="/static/image-preview.js?v=1"></script>
+    <script src="/static/history-bulk-manager.js?v=1"></script>
+    <style>
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: var(--font-sans);
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        .page-shell {
+            height: 100vh;
+            height: 100dvh;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(to right, rgba(230, 213, 168, 0.42) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(230, 213, 168, 0.42) 1px, transparent 1px);
+            background-size: 80px 80px;
+        }
+
+        body.studio-theme-dark .page-shell {
+            background-color: var(--dark-bg);
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        }
+
+        .topbar {
+            flex: 0 0 auto;
+            min-height: 76px;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.92);
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) minmax(280px, 420px) auto;
+            align-items: center;
+            gap: 18px;
+        }
+
+        body.studio-theme-dark .topbar {
+            background: rgba(14, 14, 16, 0.92);
+            border-bottom-color: var(--dark-border);
+        }
+
+        .section-tag {
+            height: 42px;
+            padding: 0 16px;
+            background: #0f0f0f;
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+
+        .section-tag .pixel-icon,
+        .btn-primary .pixel-icon {
+            color: var(--primary);
+        }
+
+        .top-copy {
+            min-width: 0;
+        }
+
+        .top-copy h1 {
+            margin: 0;
+            font-size: 22px;
+            line-height: 1.15;
+            font-weight: 600;
+        }
+
+        .top-copy p {
+            margin: 5px 0 0;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .search-box {
+            height: 42px;
+            min-width: 0;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 12px;
+        }
+
+        .search-box .pixel-icon {
+            color: var(--primary);
+            flex: 0 0 auto;
+        }
+
+        .search-box input {
+            width: 100%;
+            border: 0;
+            outline: none;
+            background: transparent;
+            color: var(--ink);
+            min-width: 0;
+        }
+
+        .btn-primary,
+        .plain-btn,
+        .icon-btn,
+        .filter-btn {
+            height: 42px;
+            border: 1px solid var(--border);
+            border-radius: 0;
+            background: var(--stage-bg);
+            color: var(--ink);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 0 14px;
+            cursor: pointer;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: #0f0f0f;
+            border-color: #0f0f0f;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .plain-btn {
+            background: var(--bg-2);
+        }
+
+        .icon-btn {
+            width: 42px;
+            padding: 0;
+        }
+
+        .btn-primary:disabled,
+        .plain-btn:disabled,
+        .icon-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+
+        .btn-primary:not(:disabled):hover,
+        .plain-btn:not(:disabled):hover,
+        .icon-btn:not(:disabled):hover,
+        .filter-btn:hover {
+            border-color: var(--primary);
+        }
+
+        .workspace {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) minmax(300px, 360px);
+            gap: 18px;
+            padding: 24px;
+        }
+
+        .panel {
+            min-height: 0;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.86);
+            display: flex;
+            flex-direction: column;
+        }
+
+        body.studio-theme-dark .panel {
+            background: rgba(28, 28, 30, 0.94);
+            border-color: var(--dark-border);
+        }
+
+        .panel-head {
+            flex: 0 0 auto;
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        body.studio-theme-dark .panel-head {
+            border-bottom-color: var(--dark-border);
+        }
+
+        .title-block h2 {
+            margin: 0;
+            font-size: 20px;
+            line-height: 1.1;
+        }
+
+        .title-block p {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .panel-scroll {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: auto;
+            padding: 16px;
+            scrollbar-gutter: stable;
+        }
+
+        .panel-footer {
+            flex: 0 0 auto;
+            border-top: 1px solid var(--border);
+            padding: 12px 16px;
+            background: rgba(255, 250, 235, 0.94);
+        }
+
+        body.studio-theme-dark .panel-footer,
+        body.studio-theme-dark .search-box,
+        body.studio-theme-dark .plain-btn,
+        body.studio-theme-dark .icon-btn,
+        body.studio-theme-dark .filter-btn {
+            background: var(--dark-elev);
+            border-color: var(--dark-border);
+            color: var(--dark-text);
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        .metric {
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            padding: 12px;
+            min-height: 74px;
+        }
+
+        body.studio-theme-dark .metric {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+
+        .metric .label,
+        .filter-label,
+        .meta-label {
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .metric strong {
+            display: block;
+            margin-top: 8px;
+            font-family: var(--font-mono);
+            font-size: 26px;
+            line-height: 1;
+        }
+
+        .filter-group {
+            display: grid;
+            gap: 8px;
+            margin-top: 18px;
+        }
+
+        .filter-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .filter-btn {
+            min-height: 34px;
+            height: auto;
+            padding: 8px 10px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            justify-content: flex-start;
+        }
+
+        .filter-btn.is-active {
+            background: #0f0f0f;
+            border-color: #0f0f0f;
+            color: #fff;
+        }
+
+        .filter-btn.is-active .count {
+            color: var(--primary);
+        }
+
+        .count {
+            color: var(--muted);
+        }
+
+        .asset-panel {
+            min-width: 0;
+        }
+
+        .asset-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar-left,
+        .toolbar-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .status-line {
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .asset-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 14px;
+            align-content: start;
+        }
+
+        .asset-card {
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            min-width: 0;
+            display: grid;
+            grid-template-rows: 168px auto;
+            cursor: pointer;
+        }
+
+        body.studio-theme-dark .asset-card {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+
+        .asset-card.is-active {
+            border-color: var(--primary);
+            outline: 1px solid var(--primary);
+        }
+
+        .asset-card.is-selected {
+            border-color: #0f0f0f;
+        }
+
+        .asset-card.is-selected .asset-meta {
+            background: var(--bg-2);
+        }
+
+        body.studio-theme-dark .asset-card.is-selected {
+            border-color: var(--dark-text);
+        }
+
+        .thumb-wrap {
+            position: relative;
+            min-width: 0;
+            background-color: #f5e8ba;
+            background-image:
+                linear-gradient(45deg, rgba(255,255,255,.48) 25%, transparent 25%),
+                linear-gradient(-45deg, rgba(255,255,255,.48) 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, rgba(255,255,255,.48) 75%),
+                linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.48) 75%);
+            background-size: 18px 18px;
+            background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+            overflow: hidden;
+        }
+
+        .thumb-wrap img {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: contain;
+        }
+
+        .card-top-actions {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            right: 8px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+        }
+
+        .mini-action {
+            width: 30px;
+            height: 30px;
+            border: 1px solid var(--border);
+            background: #0f0f0f;
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        .mini-action.is-on {
+            color: var(--primary);
+        }
+
+        .asset-meta {
+            min-width: 0;
+            padding: 11px 12px 12px;
+            border-top: 1px solid var(--border);
+            display: grid;
+            gap: 8px;
+        }
+
+        body.studio-theme-dark .asset-meta {
+            border-top-color: var(--dark-border);
+        }
+
+        .asset-title {
+            font-weight: 600;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .asset-sub {
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .badge {
+            border: 1px solid var(--border);
+            background: var(--bg-2);
+            color: var(--ink);
+            padding: 3px 6px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            line-height: 1.2;
+        }
+
+        .badge.is-hot {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .detail-preview {
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            min-height: 280px;
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+        }
+
+        .detail-preview img {
+            width: 100%;
+            max-height: 420px;
+            object-fit: contain;
+            display: block;
+            cursor: zoom-in;
+        }
+
+        .detail-stack {
+            display: grid;
+            gap: 14px;
+        }
+
+        .detail-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .reference-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .reference-thumb {
+            min-width: 0;
+            border: 1px solid var(--border);
+            background: var(--stage-bg);
+            padding: 0;
+            cursor: zoom-in;
+            display: grid;
+            grid-template-rows: 92px auto;
+            color: var(--ink);
+            text-align: left;
+        }
+
+        .reference-thumb img {
+            width: 100%;
+            height: 92px;
+            object-fit: cover;
+            display: block;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .reference-thumb span {
+            min-width: 0;
+            padding: 7px 8px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--muted);
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        body.studio-theme-dark .reference-thumb {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+            color: var(--dark-text);
+        }
+
+        body.studio-theme-dark .reference-thumb img {
+            border-bottom-color: var(--dark-border);
+        }
+
+        .context-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .context-item {
+            border: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.42);
+            padding: 10px;
+            display: grid;
+            gap: 5px;
+        }
+
+        body.studio-theme-dark .context-item {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+
+        .context-item strong {
+            font-size: 12px;
+        }
+
+        .context-item span {
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+
+        .meta-block {
+            border: 1px solid var(--border);
+            background: rgba(255, 250, 235, 0.42);
+            padding: 12px;
+            display: grid;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        body.studio-theme-dark .meta-block,
+        body.studio-theme-dark .detail-preview {
+            background: var(--dark-surface);
+            border-color: var(--dark-border);
+        }
+
+        .meta-value {
+            min-width: 0;
+            overflow-wrap: anywhere;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--ink);
+        }
+
+        .empty-state {
+            min-height: 340px;
+            border: 1px dashed var(--border);
+            display: grid;
+            place-items: center;
+            color: var(--muted);
+            font-family: var(--font-mono);
+            font-size: 13px;
+            text-align: center;
+            padding: 24px;
+        }
+
+        .empty-state[hidden] {
+            display: none !important;
+        }
+
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .pager-buttons {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .lightbox {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(15, 15, 15, 0.78);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 32px;
+        }
+
+        .lightbox.is-open {
+            display: flex;
+        }
+
+        .lightbox-inner {
+            width: min(1100px, 100%);
+            max-height: min(860px, 100%);
+            background: var(--bg);
+            border: 1px solid var(--border);
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto;
+        }
+
+        .lightbox-head,
+        .lightbox-foot {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .lightbox-foot {
+            border-top: 1px solid var(--border);
+            border-bottom: 0;
+        }
+
+        .lightbox-body {
+            min-height: 0;
+            display: grid;
+            place-items: center;
+            background: #7c7a6d;
+            overflow: auto;
+        }
+
+        .lightbox-body img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .toast {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 1100;
+            min-width: 220px;
+            max-width: min(420px, calc(100vw - 48px));
+            border: 1px solid var(--border);
+            background: #0f0f0f;
+            color: #fff;
+            padding: 12px 14px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            display: none;
+        }
+
+        .toast.is-visible {
+            display: block;
+        }
+
+        .pixel-icon {
+            width: 16px;
+            height: 16px;
+            flex: 0 0 auto;
+        }
+
+        .pixel-icon--sm {
+            width: 14px;
+            height: 14px;
+        }
+
+        .pixel-icon--xs {
+            width: 12px;
+            height: 12px;
+        }
+
+        @media (max-width: 1240px) {
+            .workspace {
+                grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+            }
+
+            .detail-panel {
+                display: none;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .topbar {
+                grid-template-columns: 1fr;
+                align-items: stretch;
+            }
+
+            .workspace {
+                grid-template-columns: 1fr;
+                overflow: auto;
+            }
+
+            .panel {
+                min-height: 420px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page-shell">
+        <header class="topbar">
+            <div class="section-tag">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#nav-gallery"></use></svg>
+                <span>Gallery</span>
+            </div>
+            <div class="top-copy">
+                <h1>Global assets</h1>
+                <p>Generated image registry across Feebee Studios.</p>
+            </div>
+            <label class="search-box">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#search"></use></svg>
+                <input id="searchInput" type="search" placeholder="Search prompt, batch, model, filename">
+            </label>
+            <button id="refreshBtn" class="plain-btn" type="button">
+                <svg class="pixel-icon pixel-icon--sm"><use href="#refresh"></use></svg>
+                Refresh
+            </button>
+        </header>
+
+        <main class="workspace">
+            <aside class="panel">
+                <div class="panel-head">
+                    <div class="title-block">
+                        <h2>Filters</h2>
+                        <p id="filterSummary">0 assets indexed.</p>
+                    </div>
+                </div>
+                <div class="panel-scroll">
+                    <div class="metric-grid">
+                        <div class="metric">
+                            <span class="label">Total</span>
+                            <strong id="metricTotal">0</strong>
+                        </div>
+                        <div class="metric">
+                            <span class="label">Selected</span>
+                            <strong id="metricSelected">0</strong>
+                        </div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Pinned</div>
+                        <div class="filter-list" id="favoriteFilters"></div>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Source</div>
+                        <div class="filter-list" id="sourceFilters"></div>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Artifact</div>
+                        <div class="filter-list" id="artifactFilters"></div>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Date</div>
+                        <div class="filter-list" id="dateFilters"></div>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Status</div>
+                        <div class="filter-list" id="statusFilters"></div>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Model</div>
+                        <div class="filter-list" id="modelFilters"></div>
+                    </div>
+                </div>
+                <div class="panel-footer">
+                    <button id="clearFiltersBtn" class="plain-btn" type="button" style="width:100%;">
+                        <svg class="pixel-icon pixel-icon--sm"><use href="#cross"></use></svg>
+                        Clear filters
+                    </button>
+                </div>
+            </aside>
+
+            <section class="panel asset-panel">
+                <div class="panel-head">
+                    <div class="asset-toolbar">
+                        <div class="toolbar-left">
+                            <button id="selectPageBtn" class="plain-btn" type="button">
+                                <svg class="pixel-icon pixel-icon--sm"><use href="#check"></use></svg>
+                                Select page
+                            </button>
+                            <button id="downloadSelectedBtn" class="btn-primary" type="button" disabled>
+                                <svg class="pixel-icon pixel-icon--sm"><use href="#download"></use></svg>
+                                Download selected
+                            </button>
+                            <button id="clearSelectionBtn" class="plain-btn" type="button" disabled>Clear</button>
+                        </div>
+                        <div class="toolbar-right">
+                            <span id="pageStatus" class="status-line">Page 1 / 1</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel-scroll">
+                    <div id="assetGrid" class="asset-grid"></div>
+                    <div id="emptyState" class="empty-state" hidden>No assets match the current filters.</div>
+                </div>
+                <div class="panel-footer">
+                    <div class="pagination">
+                        <div class="filter-list" id="pageSizeFilters"></div>
+                        <div class="pager-buttons">
+                            <button id="prevBtn" class="plain-btn" type="button">
+                                <svg class="pixel-icon pixel-icon--sm" style="transform:scaleX(-1)"><use href="#chevron-right"></use></svg>
+                                Prev
+                            </button>
+                            <button id="nextBtn" class="plain-btn" type="button">
+                                Next
+                                <svg class="pixel-icon pixel-icon--sm"><use href="#chevron-right"></use></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="panel detail-panel">
+                <div class="panel-head">
+                    <div class="title-block">
+                        <h2>Inspector</h2>
+                        <p id="detailSubtitle">Select an asset.</p>
+                    </div>
+                </div>
+                <div id="detailBody" class="panel-scroll"></div>
+            </aside>
+        </main>
+    </div>
+
+    <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Asset preview">
+        <div class="lightbox-inner">
+            <div class="lightbox-head">
+                <span id="lightboxTitle" class="status-line">Preview</span>
+                <button id="closeLightboxBtn" class="icon-btn" type="button" aria-label="Close">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#cross"></use></svg>
+                </button>
+            </div>
+            <div class="lightbox-body">
+                <img id="lightboxImg" alt="">
+            </div>
+            <div class="lightbox-foot">
+                <span id="lightboxMeta" class="status-line"></span>
+                <button id="lightboxDownloadBtn" class="btn-primary" type="button">
+                    <svg class="pixel-icon pixel-icon--sm"><use href="#download"></use></svg>
+                    Download
+                </button>
+            </div>
+        </div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script>
+        const STORAGE_KEY = 'feebee_gallery_state_v2';
+        const refs = {
+            search: document.getElementById('searchInput'),
+            refresh: document.getElementById('refreshBtn'),
+            filterSummary: document.getElementById('filterSummary'),
+            metricTotal: document.getElementById('metricTotal'),
+            metricSelected: document.getElementById('metricSelected'),
+            favoriteFilters: document.getElementById('favoriteFilters'),
+            sourceFilters: document.getElementById('sourceFilters'),
+            artifactFilters: document.getElementById('artifactFilters'),
+            dateFilters: document.getElementById('dateFilters'),
+            statusFilters: document.getElementById('statusFilters'),
+            modelFilters: document.getElementById('modelFilters'),
+            pageSizeFilters: document.getElementById('pageSizeFilters'),
+            grid: document.getElementById('assetGrid'),
+            empty: document.getElementById('emptyState'),
+            pageStatus: document.getElementById('pageStatus'),
+            detailSubtitle: document.getElementById('detailSubtitle'),
+            detailBody: document.getElementById('detailBody'),
+            prev: document.getElementById('prevBtn'),
+            next: document.getElementById('nextBtn'),
+            selectPage: document.getElementById('selectPageBtn'),
+            downloadSelected: document.getElementById('downloadSelectedBtn'),
+            clearSelection: document.getElementById('clearSelectionBtn'),
+            clearFilters: document.getElementById('clearFiltersBtn'),
+            lightbox: document.getElementById('lightbox'),
+            lightboxTitle: document.getElementById('lightboxTitle'),
+            lightboxMeta: document.getElementById('lightboxMeta'),
+            lightboxImg: document.getElementById('lightboxImg'),
+            lightboxDownload: document.getElementById('lightboxDownloadBtn'),
+            closeLightbox: document.getElementById('closeLightboxBtn'),
+            toast: document.getElementById('toast'),
+        };
+
+        const state = {
+            page: 1,
+            pageSize: 36,
+            pages: 1,
+            total: 0,
+            q: '',
+            source: 'all',
+            artifactType: 'all',
+            status: 'all',
+            favorite: null,
+            model: 'all',
+            date: 'all',
+            assets: [],
+            facets: {},
+            selected: new Set(),
+            activeId: '',
+            loading: false,
+        };
+
+        const dateOptions = [
+            { value: 'all', label: 'All' },
+            { value: 'today', label: 'Today' },
+            { value: '7d', label: '7 days' },
+            { value: '30d', label: '30 days' },
+        ];
+        const pageSizes = [24, 36, 60, 96];
+
+        function restoreState() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+                Object.assign(state, {
+                    pageSize: pageSizes.includes(Number(saved.pageSize)) ? Number(saved.pageSize) : state.pageSize,
+                    q: typeof saved.q === 'string' ? saved.q : '',
+                    source: saved.source || 'all',
+                    artifactType: saved.artifactType || 'all',
+                    status: saved.status || 'all',
+                    favorite: saved.favorite === true ? true : null,
+                    model: saved.model || 'all',
+                    date: saved.date || 'all',
+                    activeId: saved.activeId || '',
+                });
+                refs.search.value = state.q;
+            } catch (e) {}
+        }
+
+        function persistState() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    pageSize: state.pageSize,
+                    q: state.q,
+                    source: state.source,
+                    artifactType: state.artifactType,
+                    status: state.status,
+                    favorite: state.favorite,
+                    model: state.model,
+                    date: state.date,
+                    activeId: state.activeId,
+                }));
+            } catch (e) {}
+        }
+
+        let toastTimer = 0;
+        function showToast(message) {
+            clearTimeout(toastTimer);
+            refs.toast.textContent = message;
+            refs.toast.classList.add('is-visible');
+            toastTimer = setTimeout(() => refs.toast.classList.remove('is-visible'), 2200);
+        }
+
+        function icon(name, size = 'sm') {
+            return `<svg class="pixel-icon pixel-icon--${size}"><use href="#${name}"></use></svg>`;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[ch]));
+        }
+
+        function formatDate(ts) {
+            if (!ts) return '--';
+            const d = new Date(ts * 1000);
+            const pad = n => String(n).padStart(2, '0');
+            return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+
+        function formatSize(bytes) {
+            const value = Number(bytes || 0);
+            if (!value) return '--';
+            if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+            return `${(value / 1024 / 1024).toFixed(1)} MB`;
+        }
+
+        function resolution(asset) {
+            return asset.width && asset.height ? `${asset.width} x ${asset.height}` : '--';
+        }
+
+        function downloadUrl(asset) {
+            if (!asset) return '#';
+            if (asset.url.startsWith('/output/')) {
+                return `/api/download-output?url=${encodeURIComponent(asset.url)}&name=${encodeURIComponent(asset.filename || 'asset.png')}`;
+            }
+            return asset.url;
+        }
+
+        function activeAsset() {
+            return state.assets.find(asset => asset.id === state.activeId) || state.assets[0] || null;
+        }
+
+        function filterButton(option, field, currentValue) {
+            const active = String(currentValue) === String(option.value);
+            const count = typeof option.count === 'number' ? ` <span class="count">${option.count}</span>` : '';
+            return `<button class="filter-btn${active ? ' is-active' : ''}" type="button" data-filter-field="${field}" data-filter-value="${escapeHtml(option.value)}">${escapeHtml(option.label)}${count}</button>`;
+        }
+
+        function renderFilterList(el, field, options, currentValue) {
+            el.innerHTML = options.map(option => filterButton(option, field, currentValue)).join('');
+        }
+
+        function renderFilters() {
+            const facets = state.facets || {};
+            renderFilterList(refs.favoriteFilters, 'favorite', [
+                { value: 'all', label: 'All' },
+                { value: 'true', label: 'Favorites', count: facets.favorites || 0 },
+            ], state.favorite === true ? 'true' : 'all');
+            renderFilterList(refs.sourceFilters, 'source', [
+                { value: 'all', label: 'All' },
+                ...(facets.sources || []),
+            ], state.source);
+            renderFilterList(refs.artifactFilters, 'artifactType', [
+                { value: 'all', label: 'All' },
+                ...(facets.artifact_types || []),
+            ], state.artifactType);
+            renderFilterList(refs.dateFilters, 'date', dateOptions, state.date);
+            renderFilterList(refs.statusFilters, 'status', [
+                { value: 'all', label: 'All' },
+                ...(facets.statuses || []),
+            ], state.status);
+            renderFilterList(refs.modelFilters, 'model', [
+                { value: 'all', label: 'All' },
+                ...(facets.models || []),
+            ], state.model);
+            renderFilterList(refs.pageSizeFilters, 'pageSize', pageSizes.map(value => ({ value, label: `${value} / page` })), state.pageSize);
+        }
+
+        function renderAssets() {
+            refs.grid.innerHTML = state.assets.map(asset => {
+                const selected = state.selected.has(asset.id);
+                const active = asset.id === state.activeId;
+                const source = (asset.source_labels || [asset.source_label]).join(' + ');
+                const prompt = asset.prompt || asset.phrase || asset.filename || '';
+                return `
+                    <article class="asset-card${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}" data-asset-id="${escapeHtml(asset.id)}">
+                        <div class="thumb-wrap">
+                            <img src="${escapeHtml(asset.url)}" loading="lazy" alt="${escapeHtml(asset.title)}">
+                            <div class="card-top-actions">
+                                <button class="mini-action${selected ? ' is-on' : ''}" type="button" data-action="select" title="Select">${selected ? icon('check', 'xs') : ''}</button>
+                                <button class="mini-action${asset.favorite ? ' is-on' : ''}" type="button" data-action="favorite" title="Favorite">${icon('star', 'xs')}</button>
+                            </div>
+                        </div>
+                        <div class="asset-meta">
+                            <div class="asset-title" title="${escapeHtml(asset.title)}">${escapeHtml(asset.title)}</div>
+                            <div class="asset-sub" title="${escapeHtml(prompt)}">${escapeHtml(prompt || 'No prompt')}</div>
+                            <div class="badge-row">
+                                <span class="badge is-hot">${escapeHtml(asset.artifact_label || 'Image')}</span>
+                                <span class="badge">${escapeHtml(source)}</span>
+                                <span class="badge">${escapeHtml(formatDate(asset.created_at))}</span>
+                            </div>
+                        </div>
+                    </article>
+                `;
+            }).join('');
+            refs.empty.hidden = Boolean(state.assets.length);
+        }
+
+        function detailRow(label, value) {
+            if (!value) return '';
+            return `<div class="meta-block"><div class="meta-label">${escapeHtml(label)}</div><div class="meta-value">${escapeHtml(value)}</div></div>`;
+        }
+
+        function renderReferences(asset) {
+            const refsList = (asset.source_images || []).filter(item => item && item.url);
+            if (!refsList.length) return '';
+            return `
+                <div class="meta-block">
+                    <div class="meta-label">Source images</div>
+                    <div class="reference-grid">
+                        ${refsList.map((item, index) => `
+                            <button class="reference-thumb" type="button" data-reference-url="${escapeHtml(item.url)}" data-reference-title="${escapeHtml(item.name || `Source ${index + 1}`)}">
+                                <img src="${escapeHtml(item.url)}" loading="lazy" alt="${escapeHtml(item.name || `Source ${index + 1}`)}">
+                                <span title="${escapeHtml(item.name || `Source ${index + 1}`)}">${escapeHtml(item.name || `Source ${index + 1}`)}</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderContexts(asset) {
+            const contexts = (asset.contexts || []).filter(Boolean);
+            if (!contexts.length) return '';
+            return `
+                <div class="meta-block">
+                    <div class="meta-label">Indexed from</div>
+                    <div class="context-list">
+                        ${contexts.map(ctx => `
+                            <div class="context-item">
+                                <strong>${escapeHtml(ctx.source_label || ctx.source || 'Source')}</strong>
+                                <span>${escapeHtml([ctx.batch_id, ctx.task_id || ctx.item_id, ctx.canvas_title || ctx.canvas_id].filter(Boolean).join(' · ') || asset.filename)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDetail() {
+            const asset = activeAsset();
+            if (!asset) {
+                refs.detailSubtitle.textContent = 'Select an asset.';
+                refs.detailBody.innerHTML = '<div class="empty-state">No asset selected.</div>';
+                return;
+            }
+            state.activeId = asset.id;
+            const source = (asset.source_labels || [asset.source_label]).join(' + ');
+            refs.detailSubtitle.textContent = asset.filename || asset.title;
+            refs.detailBody.innerHTML = `
+                <div class="detail-stack">
+                    <div class="detail-preview">
+                        <img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.title)}" data-action="preview">
+                    </div>
+                    <div class="detail-actions">
+                        <button class="plain-btn" type="button" data-detail-action="favorite">${icon('star', 'sm')} ${asset.favorite ? 'Unfavorite' : 'Favorite'}</button>
+                        <a class="btn-primary" href="${escapeHtml(downloadUrl(asset))}" download>${icon('download', 'sm')} Download</a>
+                        <button class="plain-btn" type="button" data-detail-action="copy">${icon('copy', 'sm')} Copy prompt</button>
+                        <button class="plain-btn" type="button" data-detail-action="copy-url">${icon('copy', 'sm')} Copy URL</button>
+                        <button class="plain-btn" type="button" data-detail-action="open">${icon('nav-online', 'sm')} Open file</button>
+                        <button class="plain-btn" type="button" data-detail-action="hide">${icon('trash', 'sm')} Hide</button>
+                    </div>
+                    ${renderReferences(asset)}
+                    ${detailRow('Source', source)}
+                    ${detailRow('Artifact', asset.artifact_label)}
+                    ${detailRow('Prompt', asset.prompt || asset.phrase || '')}
+                    ${detailRow('Model', asset.model)}
+                    ${detailRow('Resolution', resolution(asset))}
+                    ${detailRow('File', `${asset.filename} · ${formatSize(asset.size_bytes)}`)}
+                    ${detailRow('Created', formatDate(asset.created_at))}
+                    ${detailRow('Batch', asset.batch_title || asset.batch_id)}
+                    ${detailRow('Task', asset.item_id || asset.task_id)}
+                    ${detailRow('Canvas', asset.canvas_title || asset.canvas_id)}
+                    ${renderContexts(asset)}
+                </div>
+            `;
+        }
+
+        function renderPageState() {
+            refs.metricTotal.textContent = state.total;
+            refs.metricSelected.textContent = state.selected.size;
+            refs.filterSummary.textContent = `${state.total} assets match.`;
+            refs.pageStatus.textContent = `Page ${state.page} / ${state.pages} · ${state.total} assets`;
+            refs.prev.disabled = state.page <= 1;
+            refs.next.disabled = state.page >= state.pages;
+            refs.downloadSelected.disabled = state.selected.size === 0;
+            refs.clearSelection.disabled = state.selected.size === 0;
+        }
+
+        function render() {
+            if (!state.activeId || !state.assets.some(asset => asset.id === state.activeId)) {
+                state.activeId = state.assets[0]?.id || '';
+            }
+            renderFilters();
+            renderAssets();
+            renderDetail();
+            renderPageState();
+        }
+
+        async function loadAssets() {
+            if (state.loading) return;
+            state.loading = true;
+            refs.filterSummary.textContent = 'Indexing assets...';
+            refs.grid.setAttribute('aria-busy', 'true');
+            try {
+                const params = new URLSearchParams({
+                    q: state.q,
+                    source: state.source,
+                    artifact_type: state.artifactType,
+                    status: state.status,
+                    model: state.model,
+                    date: state.date,
+                    page: String(state.page),
+                    page_size: String(state.pageSize),
+                });
+                if (state.favorite !== null) params.set('favorite', state.favorite ? 'true' : 'false');
+                const res = await fetch(`/api/gallery/assets?${params.toString()}`);
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+                state.assets = data.assets || [];
+                state.page = data.page || 1;
+                state.pageSize = data.page_size || state.pageSize;
+                state.pages = data.pages || 1;
+                state.total = data.total || 0;
+                state.facets = data.facets || {};
+                render();
+            } catch (err) {
+                refs.grid.innerHTML = '';
+                refs.empty.hidden = false;
+                refs.empty.textContent = err.message || 'Gallery load failed.';
+            } finally {
+                state.loading = false;
+                refs.grid.removeAttribute('aria-busy');
+            }
+        }
+
+        function setFilter(field, value) {
+            if (field === 'favorite') state.favorite = value === 'true' ? true : null;
+            else if (field === 'pageSize') state.pageSize = Number(value) || 36;
+            else if (field === 'artifactType') state.artifactType = value;
+            else state[field] = value;
+            state.page = 1;
+            persistState();
+            loadAssets();
+        }
+
+        function toggleSelected(assetId) {
+            if (state.selected.has(assetId)) state.selected.delete(assetId);
+            else state.selected.add(assetId);
+            renderAssets();
+            renderDetail();
+            renderPageState();
+        }
+
+        async function toggleFavorite(asset) {
+            if (!asset) return;
+            const next = !asset.favorite;
+            const res = await fetch(`/api/gallery/assets/${encodeURIComponent(asset.id)}/favorite`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ favorite: next }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            asset.favorite = next;
+            showToast(next ? 'Added to Favorites.' : 'Removed from Favorites.');
+            loadAssets();
+        }
+
+        async function hideAsset(asset) {
+            if (!asset) return;
+            if (!confirm(`Hide ${asset.filename || 'this asset'} from Gallery?`)) return;
+            const res = await fetch(`/api/gallery/assets/${encodeURIComponent(asset.id)}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error(await res.text());
+            state.selected.delete(asset.id);
+            state.activeId = '';
+            persistState();
+            showToast('Asset hidden from Gallery.');
+            loadAssets();
+        }
+
+        async function downloadSelected() {
+            const ids = [...state.selected];
+            if (!ids.length) return;
+            const res = await fetch('/api/gallery/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ asset_ids: ids }),
+            });
+            if (!res.ok) {
+                alert('Download failed');
+                return;
+            }
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `feebee-gallery-${Date.now()}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast(`Downloading ${ids.length} selected assets.`);
+        }
+
+        function openLightbox(asset) {
+            if (!asset) return;
+            refs.lightboxTitle.textContent = asset.title || asset.filename;
+            refs.lightboxMeta.textContent = `${asset.artifact_label || 'Image'} · ${resolution(asset)} · ${formatSize(asset.size_bytes)}`;
+            refs.lightboxImg.src = asset.url;
+            refs.lightboxDownload.onclick = () => {
+                const a = document.createElement('a');
+                a.href = downloadUrl(asset);
+                a.download = asset.filename || 'asset.png';
+                a.click();
+            };
+            refs.lightbox.classList.add('is-open');
+        }
+
+        function closeLightbox() {
+            refs.lightbox.classList.remove('is-open');
+            refs.lightboxImg.src = '';
+        }
+
+        let searchTimer = 0;
+        refs.search.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                state.q = refs.search.value.trim();
+                state.page = 1;
+                persistState();
+                loadAssets();
+            }, 220);
+        });
+        refs.refresh.addEventListener('click', loadAssets);
+        refs.clearFilters.addEventListener('click', () => {
+            Object.assign(state, {
+                q: '',
+                source: 'all',
+                artifactType: 'all',
+                status: 'all',
+                favorite: null,
+                model: 'all',
+                date: 'all',
+                page: 1,
+            });
+            refs.search.value = '';
+            persistState();
+            loadAssets();
+        });
+        refs.prev.addEventListener('click', () => {
+            if (state.page > 1) {
+                state.page -= 1;
+                loadAssets();
+            }
+        });
+        refs.next.addEventListener('click', () => {
+            if (state.page < state.pages) {
+                state.page += 1;
+                loadAssets();
+            }
+        });
+        refs.selectPage.addEventListener('click', () => {
+            const allSelected = state.assets.every(asset => state.selected.has(asset.id));
+            state.assets.forEach(asset => {
+                if (allSelected) state.selected.delete(asset.id);
+                else state.selected.add(asset.id);
+            });
+            render();
+        });
+        refs.clearSelection.addEventListener('click', () => {
+            state.selected.clear();
+            render();
+        });
+        refs.downloadSelected.addEventListener('click', downloadSelected);
+        refs.closeLightbox.addEventListener('click', closeLightbox);
+        refs.lightbox.addEventListener('click', event => {
+            if (event.target === refs.lightbox) closeLightbox();
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') closeLightbox();
+        });
+
+        document.body.addEventListener('click', event => {
+            const filter = event.target.closest('[data-filter-field]');
+            if (filter) {
+                setFilter(filter.dataset.filterField, filter.dataset.filterValue);
+                return;
+            }
+            const card = event.target.closest('.asset-card');
+            const action = event.target.closest('[data-action]');
+            if (card && action) {
+                event.stopPropagation();
+                const asset = state.assets.find(item => item.id === card.dataset.assetId);
+                if (!asset) return;
+                if (action.dataset.action === 'select') toggleSelected(asset.id);
+                if (action.dataset.action === 'favorite') toggleFavorite(asset).catch(err => alert(err.message || 'Favorite failed'));
+                return;
+            }
+            if (card) {
+                state.activeId = card.dataset.assetId;
+                persistState();
+                render();
+                return;
+            }
+            const detailAction = event.target.closest('[data-detail-action]');
+            if (detailAction) {
+                const asset = activeAsset();
+                if (detailAction.dataset.detailAction === 'favorite') toggleFavorite(asset).catch(err => alert(err.message || 'Favorite failed'));
+                if (detailAction.dataset.detailAction === 'copy' && navigator.clipboard) {
+                    navigator.clipboard.writeText(asset?.prompt || asset?.phrase || '').then(() => showToast('Prompt copied.')).catch(() => showToast('Copy failed.'));
+                }
+                if (detailAction.dataset.detailAction === 'copy-url' && navigator.clipboard) {
+                    navigator.clipboard.writeText(new URL(asset?.url || '', window.location.origin).href).then(() => showToast('Asset URL copied.')).catch(() => showToast('Copy failed.'));
+                }
+                if (detailAction.dataset.detailAction === 'open') window.open(asset?.url || '#', '_blank');
+                if (detailAction.dataset.detailAction === 'hide') hideAsset(asset).catch(err => alert(err.message || 'Hide failed'));
+                return;
+            }
+            const reference = event.target.closest('[data-reference-url]');
+            if (reference) {
+                openLightbox({
+                    url: reference.dataset.referenceUrl,
+                    title: reference.dataset.referenceTitle || 'Source image',
+                    filename: reference.dataset.referenceTitle || 'source-image',
+                });
+                return;
+            }
+            if (event.target.closest('[data-action="preview"]')) openLightbox(activeAsset());
+        });
+
+        const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        try {
+            const socket = new WebSocket(`${wsProto}//${window.location.host}/ws/stats`);
+            socket.onmessage = event => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'new_image') loadAssets();
+                } catch (e) {}
+            };
+        } catch (e) {}
+
+        window.addEventListener('message', event => {
+            if (event.data?.type === 'studio-theme' && window.StudioTheme) {
+                window.StudioTheme.apply(event.data.theme);
+            }
+        });
+
+        restoreState();
+        loadAssets();
+    </script>
+</body>
+
+</html>

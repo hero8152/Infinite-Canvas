@@ -9,6 +9,8 @@
     <link rel="stylesheet" href="/static/design-system.css?v=24">
     <!-- 保留 theme.js 用于接收父 frame 的主题切换 postMessage -->
     <script src="/static/theme.js?v=20260512g"></script>
+    <script src="/static/i18n.js?v=1"></script>
+    <script src="/static/image-preview.js?v=1"></script>
     <style>
         /* ============================================================
            gpt-chat 局部规则 — 仅做布局, 不写颜色/圆角/阴影/transition
@@ -434,6 +436,21 @@
             text-transform: uppercase;
             letter-spacing: 0.08em;
         }
+        .provider-native {
+            height: 30px;
+            border: 1px solid var(--border);
+            border-radius: 0;
+            background: var(--stage-bg);
+            color: var(--ink);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            padding: 0 8px;
+        }
+        body.studio-theme-dark .provider-native {
+            background: var(--dark-elev);
+            color: var(--dark-text);
+            border-color: var(--dark-border);
+        }
 
         /* image 控件：ratio + resolution 用 chip 风格 */
         .image-controls {
@@ -629,19 +646,10 @@
                                 </label>
                             </div>
 
-                            <!-- Provider toggle: comfly / modelscope (仅 chat 模式) -->
+                            <!-- Provider 选择：来自 /api/config.api_providers -->
                             <div class="radio-group" role="radiogroup" aria-label="Provider" id="providerSwitchWrap">
                                 <span class="group-label">Provider</span>
-                                <label class="radio-row">
-                                    <input type="radio" name="provider" value="comfly" checked onchange="setProvider('comfly')">
-                                    <span class="radio-box"></span>
-                                    <span>API</span>
-                                </label>
-                                <label class="radio-row">
-                                    <input type="radio" name="provider" value="modelscope" onchange="setProvider('modelscope')">
-                                    <span class="radio-box"></span>
-                                    <span>ModelScope</span>
-                                </label>
+                                <select id="providerSelect" class="provider-native" onchange="setProvider(this.value)"></select>
                             </div>
                         </div>
 
@@ -708,6 +716,7 @@
         let mode = 'chat';
         let provider = 'comfly';
         let msModel = '';
+        let apiProviders = [];
         let chatRatio = 'square';
         let chatResolution = '1k';
         let refs = [];
@@ -728,8 +737,17 @@
             try {
                 const data = await fetch('/api/config').then(r => r.json());
                 config = { ...config, ...data };
-                config.chat_model = (config.chat_models || []).find(m => m === 'gpt-5.5') || config.chat_model || 'gpt-5.5';
+                apiProviders = Array.isArray(config.api_providers) && config.api_providers.length
+                    ? config.api_providers.filter(p => p.enabled !== false)
+                    : [{id:'comfly', name:'Comfly', chat_models:config.chat_models || [config.chat_model], image_models:[config.image_model]}];
+                provider = config.primary_provider_id || apiProviders.find(p => p.chat_models?.length)?.id || apiProviders[0]?.id || 'comfly';
+                const chatProvider = providerById(provider);
+                config.chat_model = (chatProvider.chat_models || config.chat_models || []).find(m => m === 'gpt-5.5') || (chatProvider.chat_models || config.chat_models || [config.chat_model])[0] || 'gpt-5.5';
+                const imageProvider = apiProviders.find(p => p.image_models?.length) || chatProvider;
+                config.image_provider = imageProvider.id;
+                config.image_model = imageProvider.image_models?.[0] || config.image_model || 'gpt-image-1';
                 if (config.ms_chat_models?.length) msModel = config.ms_chat_models[0];
+                renderProviderSelect();
                 updateModelLabel();
                 renderModelMenu();
             } catch (e) { /* 静默 */ }
@@ -752,7 +770,8 @@
             if (!menu) return;
             const items = [];
             if (mode === 'image') {
-                items.push({ value: config.image_model || 'gpt-image-1', label: config.image_model || 'gpt-image-1', kind: 'image' });
+                const p = providerById(config.image_provider || provider);
+                (p.image_models || [config.image_model || 'gpt-image-1']).forEach(m => items.push({ value: m, label: m, kind: 'image' }));
             } else if (provider === 'modelscope') {
                 (config.ms_chat_models || []).forEach(m => {
                     const short = m.split('/').pop().split(':')[0];
@@ -801,8 +820,26 @@
             document.getElementById('modelLabel').textContent = label;
         }
 
+        function providerById(id) {
+            return apiProviders.find(p => p.id === id) || apiProviders[0] || {id:'comfly', name:'Comfly', chat_models:[config.chat_model], image_models:[config.image_model]};
+        }
+        function renderProviderSelect() {
+            const el = document.getElementById('providerSelect');
+            if (!el) return;
+            const eligible = mode === 'image' ? apiProviders.filter(p => p.image_models?.length) : apiProviders.filter(p => p.chat_models?.length || p.id === 'modelscope');
+            el.innerHTML = eligible.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || p.id)}</option>`).join('');
+            if (!eligible.some(p => p.id === provider)) provider = eligible[0]?.id || provider;
+            el.value = provider;
+        }
         function setProvider(p) {
             provider = p;
+            if (mode === 'image') {
+                config.image_provider = p;
+                config.image_model = providerById(p).image_models?.[0] || config.image_model;
+            } else if (p !== 'modelscope') {
+                config.chat_model = providerById(p).chat_models?.[0] || config.chat_model;
+            }
+            renderProviderSelect();
             updateModelLabel();
             renderModelMenu();
         }
@@ -811,7 +848,12 @@
         function setMode(next) {
             mode = next;
             document.getElementById('imageControls').classList.toggle('is-hidden', next !== 'image');
-            document.getElementById('providerSwitchWrap').style.display = next === 'image' ? 'none' : '';
+            if (next === 'image') {
+                provider = config.image_provider || apiProviders.find(p => p.image_models?.length)?.id || provider;
+            } else if (!providerById(provider).chat_models?.length && provider !== 'modelscope') {
+                provider = apiProviders.find(p => p.chat_models?.length)?.id || provider;
+            }
+            renderProviderSelect();
             updateModelLabel();
             renderModelMenu();
         }
@@ -1080,7 +1122,7 @@
                             model: config.chat_model,
                             image_model: config.image_model,
                             reference_images: pendingRefs,
-                            provider: 'comfly',
+                            provider: config.image_provider || provider,
                         })
                     }).then(async r => {
                         if (!r.ok) throw new Error((await r.json()).detail || '请求失败');

@@ -9,7 +9,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/design-system.css?v=24">
-    <script src="/static/theme.js?v=20260512g"></script>
+    <script src="/static/theme.js?v=20260514-gallery-icon"></script>
+    <script src="/static/i18n.js?v=1"></script>
     <style>
         /* ===== 项目级 shell 特化（设计 token 全部来自 design-system.css） ===== */
 
@@ -343,6 +344,10 @@
                     <svg class="nav-icon pixel-icon"><use href="#nav-online"/></svg>
                     <span class="nav-text">Online generate</span>
                 </button>
+                <button class="nav-item" onclick="switchUI(this, 'flatlay')">
+                    <svg class="nav-icon pixel-icon"><use href="#nav-flatlay"/></svg>
+                    <span class="nav-text">Flatlay</span>
+                </button>
                 <button class="nav-item" onclick="switchUI(this, 'batch-tryon')">
                     <svg class="nav-icon pixel-icon"><use href="#nav-batch"/></svg>
                     <span class="nav-text">Batch try-on</span>
@@ -354,6 +359,20 @@
                 <button class="nav-item" onclick="switchUI(this, 'canvas')">
                     <svg class="nav-icon pixel-icon"><use href="#nav-canvas"/></svg>
                     <span class="nav-text">Canvas</span>
+                </button>
+                <button class="nav-item" onclick="switchUI(this, 'gallery')">
+                    <svg class="nav-icon pixel-icon" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+                        <rect x="2" y="2" width="4" height="4" fill="currentColor"/>
+                        <rect x="7" y="2" width="4" height="4" fill="currentColor"/>
+                        <rect x="12" y="2" width="2" height="4" fill="currentColor"/>
+                        <rect x="2" y="7" width="4" height="4" fill="currentColor"/>
+                        <rect x="7" y="7" width="4" height="4" fill="currentColor"/>
+                        <rect x="12" y="7" width="2" height="4" fill="currentColor"/>
+                        <rect x="2" y="12" width="4" height="2" fill="currentColor"/>
+                        <rect x="7" y="12" width="4" height="2" fill="currentColor"/>
+                        <rect x="13" y="13" width="2" height="2" fill="currentColor"/>
+                    </svg>
+                    <span class="nav-text">Gallery</span>
                 </button>
             </nav>
 
@@ -377,6 +396,11 @@
                     <span class="sidebar-action-status" id="api-keys-status" aria-hidden="true"></span>
                 </button>
 
+                <button class="sidebar-action" data-route="comfyui-settings" onclick="switchUI(this, 'comfyui-settings')" type="button">
+                    <svg class="nav-icon pixel-icon"><use href="#tool-workflow"/></svg>
+                    <span class="sidebar-action-text">ComfyUI</span>
+                </button>
+
                 <button class="sidebar-action" onclick="toggleTheme()" id="theme-toggle-btn" type="button">
                     <svg id="icon-moon" class="nav-icon pixel-icon"><use href="#nav-moon"/></svg>
                     <svg id="icon-sun" class="nav-icon pixel-icon" style="display:none"><use href="#nav-sun"/></svg>
@@ -390,12 +414,15 @@
                 <iframe id="frame-zimage" src="/static/zimage.html?v=32" class="active"></iframe>
                 <iframe id="frame-enhance" data-src="/static/enhance.html?v=31"></iframe>
                 <iframe id="frame-klein" data-src="/static/klein.html?v=31"></iframe>
-                <iframe id="frame-angle" data-src="/static/angle.html?v=31"></iframe>
+                <iframe id="frame-angle" data-src="/static/angle.html?v=20260514-cta"></iframe>
                 <iframe id="frame-online" data-src="/static/online.html?v=1"></iframe>
-                <iframe id="frame-batch-tryon" data-src="/static/batch-tryon.html?v=2"></iframe>
+                <iframe id="frame-flatlay" data-src="/static/flatlay.html?v=4"></iframe>
+                <iframe id="frame-batch-tryon" data-src="/static/batch-tryon.html?v=20260514-batch-state-ux"></iframe>
                 <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1"></iframe>
-                <iframe id="frame-canvas" data-src="/static/canvas.html?v=1"></iframe>
-                <iframe id="frame-api-config" data-src="/static/api-config.html?v=1"></iframe>
+                <iframe id="frame-canvas" data-src="/static/canvas.html?v=20260514-dnd"></iframe>
+                <iframe id="frame-gallery" data-src="/static/gallery.html?v=3"></iframe>
+                <iframe id="frame-api-config" data-src="/static/api-providers.html?v=1"></iframe>
+                <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1"></iframe>
             </div>
         </main>
 
@@ -449,6 +476,11 @@
             }
             syncThemeToFrame(target);
         }
+        window.addEventListener('message', event => {
+            if (event.data?.type === 'providers-changed') {
+                document.getElementById('frame-canvas')?.contentWindow?.postMessage(event.data, '*');
+            }
+        });
 
         async function syncStatus() {
             try {

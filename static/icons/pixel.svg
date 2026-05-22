@@ -87,6 +87,16 @@
     <rect x="5" y="8" width="2" height="2" fill="currentColor"/>
   </symbol>
 
+  <!-- star: 12×12 收藏星标 -->
+  <symbol id="star" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="5" y="1" width="2" height="2" fill="currentColor"/>
+    <rect x="4" y="3" width="4" height="2" fill="currentColor"/>
+    <rect x="2" y="5" width="8" height="2" fill="currentColor"/>
+    <rect x="3" y="7" width="6" height="1" fill="currentColor"/>
+    <rect x="2" y="8" width="3" height="2" fill="currentColor"/>
+    <rect x="7" y="8" width="3" height="2" fill="currentColor"/>
+  </symbol>
+
   <!-- person: 12×12 简笔人形（Human-in-the-loop 徽章） -->
   <symbol id="person" viewBox="0 0 12 12" shape-rendering="crispEdges">
     <rect x="5" y="2" width="2" height="2" fill="currentColor"/>
@@ -104,6 +114,15 @@
     <rect x="2" y="5" width="2" height="2" fill="currentColor"/>
     <rect x="8" y="5" width="2" height="2" fill="currentColor"/>
     <rect x="1" y="9" width="10" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- folder: 12×12 文件夹 -->
+  <symbol id="folder" viewBox="0 0 12 12" shape-rendering="crispEdges">
+    <rect x="1" y="3" width="4" height="1" fill="currentColor"/>
+    <rect x="2" y="2" width="3" height="1" fill="currentColor"/>
+    <rect x="5" y="4" width="6" height="1" fill="currentColor"/>
+    <rect x="1" y="5" width="10" height="5" fill="currentColor"/>
+    <rect x="2" y="6" width="8" height="3" fill="var(--bg, #fffaeb)"/>
   </symbol>
 
   <!-- download: 12×12 下载箭头 -->
@@ -226,6 +245,138 @@
     <rect x="8" y="7" width="1" height="1" fill="currentColor"/>
   </symbol>
 
+  <!-- Canvas toolbar: image card -->
+  <symbol id="tool-image" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="3" width="12" height="1" fill="currentColor"/>
+    <rect x="2" y="4" width="1" height="9" fill="currentColor"/>
+    <rect x="13" y="4" width="1" height="9" fill="currentColor"/>
+    <rect x="2" y="13" width="12" height="1" fill="currentColor"/>
+    <rect x="4" y="10" width="2" height="1" fill="currentColor"/>
+    <rect x="5" y="9" width="2" height="1" fill="currentColor"/>
+    <rect x="7" y="8" width="2" height="1" fill="currentColor"/>
+    <rect x="9" y="10" width="2" height="1" fill="currentColor"/>
+    <rect x="11" y="6" width="2" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: prompt note -->
+  <symbol id="tool-prompt" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="3" y="3" width="10" height="1" fill="currentColor"/>
+    <rect x="3" y="4" width="1" height="8" fill="currentColor"/>
+    <rect x="12" y="4" width="1" height="8" fill="currentColor"/>
+    <rect x="3" y="12" width="8" height="1" fill="currentColor"/>
+    <rect x="5" y="6" width="6" height="1" fill="currentColor"/>
+    <rect x="5" y="8" width="5" height="1" fill="currentColor"/>
+    <rect x="5" y="10" width="3" height="1" fill="currentColor"/>
+    <rect x="11" y="11" width="1" height="1" fill="currentColor"/>
+    <rect x="12" y="12" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: loop node with counter -->
+  <symbol id="tool-loop" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="5" y="3" width="6" height="1" fill="currentColor"/>
+    <rect x="3" y="5" width="1" height="4" fill="currentColor"/>
+    <rect x="12" y="5" width="1" height="4" fill="currentColor"/>
+    <rect x="5" y="11" width="6" height="1" fill="currentColor"/>
+    <rect x="10" y="2" width="2" height="1" fill="currentColor"/>
+    <rect x="11" y="3" width="2" height="1" fill="currentColor"/>
+    <rect x="3" y="10" width="2" height="1" fill="currentColor"/>
+    <rect x="4" y="11" width="2" height="1" fill="currentColor"/>
+    <rect x="7" y="6" width="2" height="2" fill="currentColor"/>
+    <rect x="7" y="9" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: LLM chip -->
+  <symbol id="tool-llm" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="4" y="4" width="8" height="1" fill="currentColor"/>
+    <rect x="4" y="11" width="8" height="1" fill="currentColor"/>
+    <rect x="4" y="5" width="1" height="6" fill="currentColor"/>
+    <rect x="11" y="5" width="1" height="6" fill="currentColor"/>
+    <rect x="6" y="7" width="1" height="2" fill="currentColor"/>
+    <rect x="9" y="7" width="1" height="2" fill="currentColor"/>
+    <rect x="2" y="5" width="1" height="2" fill="currentColor"/>
+    <rect x="2" y="9" width="1" height="2" fill="currentColor"/>
+    <rect x="13" y="5" width="1" height="2" fill="currentColor"/>
+    <rect x="13" y="9" width="1" height="2" fill="currentColor"/>
+    <rect x="7" y="2" width="2" height="1" fill="currentColor"/>
+    <rect x="7" y="13" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: API generation spark -->
+  <symbol id="tool-api" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="7" y="2" width="2" height="3" fill="currentColor"/>
+    <rect x="5" y="5" width="6" height="2" fill="currentColor"/>
+    <rect x="7" y="7" width="2" height="2" fill="currentColor"/>
+    <rect x="3" y="9" width="10" height="1" fill="currentColor"/>
+    <rect x="2" y="10" width="1" height="3" fill="currentColor"/>
+    <rect x="13" y="10" width="1" height="3" fill="currentColor"/>
+    <rect x="3" y="13" width="10" height="1" fill="currentColor"/>
+    <rect x="1" y="3" width="2" height="1" fill="currentColor"/>
+    <rect x="13" y="3" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: ComfyUI node graph -->
+  <symbol id="tool-comfy" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="3" width="4" height="4" fill="currentColor"/>
+    <rect x="10" y="2" width="4" height="4" fill="currentColor"/>
+    <rect x="10" y="10" width="4" height="4" fill="currentColor"/>
+    <rect x="6" y="5" width="3" height="1" fill="currentColor"/>
+    <rect x="8" y="6" width="1" height="5" fill="currentColor"/>
+    <rect x="9" y="4" width="1" height="1" fill="currentColor"/>
+    <rect x="9" y="11" width="1" height="1" fill="currentColor"/>
+    <rect x="3" y="11" width="3" height="1" fill="currentColor"/>
+    <rect x="3" y="12" width="1" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: video node -->
+  <symbol id="tool-video" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="4" width="10" height="1" fill="currentColor"/>
+    <rect x="2" y="11" width="10" height="1" fill="currentColor"/>
+    <rect x="2" y="5" width="1" height="6" fill="currentColor"/>
+    <rect x="11" y="5" width="1" height="6" fill="currentColor"/>
+    <rect x="13" y="6" width="1" height="1" fill="currentColor"/>
+    <rect x="14" y="7" width="1" height="3" fill="currentColor"/>
+    <rect x="13" y="10" width="1" height="1" fill="currentColor"/>
+    <rect x="5" y="6" width="1" height="4" fill="currentColor"/>
+    <rect x="6" y="7" width="2" height="2" fill="currentColor"/>
+    <rect x="8" y="8" width="1" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: output tray -->
+  <symbol id="tool-output" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="7" y="2" width="2" height="6" fill="currentColor"/>
+    <rect x="5" y="6" width="2" height="2" fill="currentColor"/>
+    <rect x="9" y="6" width="2" height="2" fill="currentColor"/>
+    <rect x="3" y="9" width="10" height="1" fill="currentColor"/>
+    <rect x="2" y="10" width="1" height="3" fill="currentColor"/>
+    <rect x="13" y="10" width="1" height="3" fill="currentColor"/>
+    <rect x="3" y="13" width="10" height="1" fill="currentColor"/>
+    <rect x="5" y="11" width="6" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: workflow settings -->
+  <symbol id="tool-workflow" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="3" width="4" height="4" fill="currentColor"/>
+    <rect x="10" y="3" width="4" height="4" fill="currentColor"/>
+    <rect x="2" y="10" width="4" height="4" fill="currentColor"/>
+    <rect x="6" y="5" width="4" height="1" fill="currentColor"/>
+    <rect x="4" y="7" width="1" height="3" fill="currentColor"/>
+    <rect x="6" y="12" width="5" height="1" fill="currentColor"/>
+    <rect x="12" y="10" width="1" height="4" fill="currentColor"/>
+    <rect x="11" y="11" width="3" height="2" fill="currentColor"/>
+  </symbol>
+
+  <!-- Canvas toolbar: group selection -->
+  <symbol id="tool-group" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="3" width="5" height="5" fill="currentColor"/>
+    <rect x="9" y="3" width="5" height="5" fill="currentColor"/>
+    <rect x="2" y="10" width="5" height="5" fill="currentColor"/>
+    <rect x="9" y="10" width="5" height="5" fill="currentColor"/>
+    <rect x="7" y="5" width="2" height="1" fill="currentColor"/>
+    <rect x="4" y="8" width="1" height="2" fill="currentColor"/>
+    <rect x="11" y="8" width="1" height="2" fill="currentColor"/>
+    <rect x="7" y="12" width="2" height="1" fill="currentColor"/>
+  </symbol>
+
   <!-- ====================================================================
        项目品牌字 — "FS" 像素 logo（替换 Mistral 的 "M"）
        ==================================================================== -->
@@ -340,6 +491,19 @@
     <rect x="9" y="9" width="5" height="5" fill="currentColor"/>
   </symbol>
 
+  <!-- nav-gallery: 全局资产库 — 影像栅格 + 选中点 -->
+  <symbol id="nav-gallery" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="2" y="2" width="4" height="4" fill="currentColor"/>
+    <rect x="7" y="2" width="4" height="4" fill="currentColor"/>
+    <rect x="12" y="2" width="2" height="4" fill="currentColor"/>
+    <rect x="2" y="7" width="4" height="4" fill="currentColor"/>
+    <rect x="7" y="7" width="4" height="4" fill="currentColor"/>
+    <rect x="12" y="7" width="2" height="4" fill="currentColor"/>
+    <rect x="2" y="12" width="4" height="2" fill="currentColor"/>
+    <rect x="7" y="12" width="4" height="2" fill="currentColor"/>
+    <rect x="13" y="13" width="2" height="2" fill="currentColor"/>
+  </symbol>
+
   <!-- nav-batch: 批量试穿 — 2×2 输入矩阵 + 输出点 -->
   <symbol id="nav-batch" viewBox="0 0 16 16" shape-rendering="crispEdges">
     <rect x="2" y="2" width="4" height="4" fill="currentColor"/>
@@ -350,6 +514,20 @@
     <rect x="14" y="6" width="1" height="4" fill="currentColor"/>
     <rect x="13" y="10" width="1" height="1" fill="currentColor"/>
     <rect x="12" y="13" width="3" height="1" fill="currentColor"/>
+  </symbol>
+
+  <!-- nav-flatlay: 模特图转平面图 — 单品正反面 -->
+  <symbol id="nav-flatlay" viewBox="0 0 16 16" shape-rendering="crispEdges">
+    <rect x="3" y="2" width="4" height="1" fill="currentColor"/>
+    <rect x="2" y="3" width="6" height="2" fill="currentColor"/>
+    <rect x="3" y="5" width="4" height="8" fill="currentColor"/>
+    <rect x="2" y="13" width="6" height="1" fill="currentColor"/>
+    <rect x="10" y="2" width="3" height="1" fill="currentColor"/>
+    <rect x="9" y="3" width="5" height="2" fill="currentColor"/>
+    <rect x="10" y="5" width="3" height="8" fill="currentColor"/>
+    <rect x="9" y="13" width="5" height="1" fill="currentColor"/>
+    <rect x="7" y="7" width="2" height="1" fill="currentColor"/>
+    <rect x="7" y="10" width="2" height="1" fill="currentColor"/>
   </symbol>
 
   <!-- 主题切换：太阳 / 月亮 -->

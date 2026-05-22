@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>ComfyUI Settings · Feebee Studios</title>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <script src="/static/theme.js?v=20260512h"></script>
+    <script src="/static/i18n.js?v=1"></script>
+    <style>
+        body { margin:0; min-height:100vh; background:var(--stage-bg); color:var(--ink); font-family:var(--font-sans); }
+        .page { min-height:100vh; padding:28px; background-image:linear-gradient(to right, rgba(230,213,168,.24) 1px, transparent 1px), linear-gradient(to bottom, rgba(230,213,168,.24) 1px, transparent 1px); background-size:80px 80px; }
+        body.studio-theme-dark .page { background:var(--dark-bg); background-image:linear-gradient(to right, rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,.03) 1px, transparent 1px); }
+        .head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:18px; }
+        h1 { margin:0; font-size:26px; font-weight:600; display:flex; gap:10px; align-items:center; }
+        .sub { margin-top:8px; color:var(--muted); font-size:13px; max-width:780px; }
+        .layout { display:grid; grid-template-columns:320px minmax(420px, 1fr); gap:14px; align-items:start; }
+        .panel { border:1px solid var(--border); background:rgba(255,255,255,.78); }
+        body.studio-theme-dark .panel { background:rgba(28,28,30,.94); border-color:var(--dark-border); }
+        .panel-head { min-height:44px; padding:0 12px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); font-weight:700; gap:10px; }
+        body.studio-theme-dark .panel-head { border-bottom-color:var(--dark-border); }
+        .body { padding:14px; display:grid; gap:12px; }
+        .list { display:grid; gap:8px; padding:10px; }
+        .item { border:1px solid var(--border); background:var(--bg); color:var(--ink); padding:10px; text-align:left; cursor:pointer; display:grid; gap:4px; }
+        .item.active { background:#111; color:#fff; border-color:#111; }
+        body.studio-theme-dark .item { background:var(--dark-surface); border-color:var(--dark-border); color:var(--dark-text); }
+        body.studio-theme-dark .item.active { background:#f2f2f2; color:#111; border-color:#f2f2f2; }
+        .meta { font-family:var(--font-mono); font-size:10px; color:var(--muted); overflow-wrap:anywhere; }
+        input, textarea { width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:0; background:var(--stage-bg); color:var(--ink); font-family:var(--font-mono); font-size:12px; outline:none; }
+        input { height:38px; padding:0 10px; }
+        textarea { min-height:118px; padding:9px 10px; resize:vertical; }
+        input:focus, textarea:focus { border-color:var(--primary); }
+        body.studio-theme-dark input, body.studio-theme-dark textarea { background:var(--dark-surface); border-color:var(--dark-border); color:var(--dark-text); }
+        label { font-family:var(--font-mono); font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+        .field { display:grid; gap:6px; }
+        .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .actions { display:flex; flex-wrap:wrap; gap:8px; }
+        .btn { height:38px; border:1px solid var(--border); border-radius:0; padding:0 12px; background:var(--bg-2); color:var(--ink); cursor:pointer; font-weight:700; display:inline-flex; align-items:center; gap:7px; }
+        .btn.primary { background:#111; color:#fff; border-color:#111; }
+        .btn.danger { color:#b42318; }
+        body.studio-theme-dark .btn { background:var(--dark-surface); border-color:var(--dark-border); color:var(--dark-text); }
+        body.studio-theme-dark .btn.primary { background:#f2f2f2; color:#111; border-color:#f2f2f2; }
+        .pixel-icon { width:14px; height:14px; color:var(--primary); }
+        .graph { min-height:180px; border:1px solid var(--border); background:var(--stage-bg); padding:10px; font-family:var(--font-mono); font-size:11px; overflow:auto; white-space:pre-wrap; }
+        body.studio-theme-dark .graph { border-color:var(--dark-border); background:var(--dark-surface); color:var(--dark-text); }
+        .status { min-height:18px; color:var(--muted); font-family:var(--font-mono); font-size:12px; }
+        @media (max-width:900px){ .page{padding:16px}.layout,.grid{grid-template-columns:1fr}.head{display:grid} }
+    </style>
+</head>
+<body>
+<main class="page">
+    <header class="head">
+        <div>
+            <h1><svg class="pixel-icon"><use href="#tool-workflow"></use></svg><span>ComfyUI Settings</span></h1>
+            <div class="sub">管理本机 ComfyUI backend 和 custom workflow。只写入 workflows/custom/*.json，内置 workflow 保持只读。</div>
+        </div>
+        <button class="btn primary" type="button" id="saveInstancesBtn"><svg class="pixel-icon"><use href="#download"></use></svg>Save instances</button>
+    </header>
+    <section class="layout">
+        <aside class="panel">
+            <div class="panel-head"><span>Instances</span></div>
+            <div class="body">
+                <div class="field"><label>ComfyUI instances</label><textarea id="instancesInput" placeholder="127.0.0.1:8188"></textarea></div>
+            </div>
+            <div class="panel-head"><span>Workflows</span><button class="btn" type="button" id="refreshBtn"><svg class="pixel-icon"><use href="#refresh"></use></svg>Refresh</button></div>
+            <div class="list" id="workflowList"></div>
+        </aside>
+        <section class="panel">
+            <div class="panel-head"><span id="editorTitle">Workflow</span><span id="workflowMeta" class="meta"></span></div>
+            <div class="body">
+                <div class="grid">
+                    <div class="field"><label>Upload name</label><input id="uploadName" placeholder="custom-workflow.json"></div>
+                    <div class="field"><label>Upload API workflow JSON</label><input id="workflowFile" type="file" accept="application/json,.json"></div>
+                </div>
+                <div class="actions">
+                    <button class="btn" type="button" id="uploadBtn"><svg class="pixel-icon"><use href="#upload"></use></svg>Upload</button>
+                    <button class="btn danger" type="button" id="deleteBtn"><svg class="pixel-icon"><use href="#trash"></use></svg>Delete custom</button>
+                </div>
+                <div class="field"><label>Field config JSON</label><textarea id="configInput" placeholder='{"title":"Workflow","fields":[]}'></textarea></div>
+                <div class="actions">
+                    <button class="btn primary" type="button" id="saveConfigBtn"><svg class="pixel-icon"><use href="#download"></use></svg>Save config</button>
+                    <button class="btn" type="button" id="testRunBtn"><svg class="pixel-icon"><use href="#chevron-right"></use></svg>Test run</button>
+                </div>
+                <div class="field"><label>Node graph preview</label><div id="graphPreview" class="graph">No workflow selected.</div></div>
+                <div class="status" id="status"></div>
+            </div>
+        </section>
+    </section>
+</main>
+<script>
+    const state = { workflows: [], selected: '', detail: null };
+    const $ = id => document.getElementById(id);
+    const setStatus = text => $('status').textContent = text || '';
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    async function loadInstances(){
+        const data = await fetch('/api/comfyui/instances').then(r => r.json());
+        $('instancesInput').value = (data.instances || []).join('\n');
+    }
+    async function saveInstances(){
+        const instances = $('instancesInput').value.split(/\n|,/).map(v => v.trim()).filter(Boolean);
+        const res = await fetch('/api/comfyui/instances', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({instances})});
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.detail || '保存失败');
+        $('instancesInput').value = (data.instances || []).join('\n');
+        setStatus('Instances saved.');
+    }
+    async function loadWorkflows(){
+        const data = await fetch('/api/workflows').then(r => r.json());
+        state.workflows = data.workflows || [];
+        if(!state.selected && state.workflows[0]) state.selected = state.workflows[0].name;
+        renderWorkflowList();
+        if(state.selected) await selectWorkflow(state.selected);
+    }
+    function renderWorkflowList(){
+        $('workflowList').innerHTML = state.workflows.map(w => `
+            <button class="item ${w.name === state.selected ? 'active' : ''}" type="button" data-name="${esc(w.name)}">
+                <strong>${esc(w.title || w.name)}</strong>
+                <span class="meta">${esc(w.name)} · ${w.field_count || 0} fields</span>
+            </button>`).join('') || '<div class="meta">No custom workflows.</div>';
+        document.querySelectorAll('.item[data-name]').forEach(btn => btn.onclick = () => selectWorkflow(btn.dataset.name));
+    }
+    async function selectWorkflow(name){
+        state.selected = name;
+        renderWorkflowList();
+        const data = await fetch(`/api/workflows/${encodeURIComponent(name).replace(/%2F/g, '/')}`).then(r => r.json());
+        state.detail = data;
+        $('editorTitle').textContent = data.config?.title || data.name;
+        $('workflowMeta').textContent = data.builtin ? 'builtin' : 'custom';
+        $('configInput').value = JSON.stringify(data.config || {title:data.name, fields:[]}, null, 2);
+        const nodes = Object.entries(data.workflow || {}).map(([id, node]) => `${id}  ${node.class_type || 'Node'}\n    ${Object.keys(node.inputs || {}).join(', ')}`);
+        $('graphPreview').textContent = nodes.slice(0, 160).join('\n') || 'Empty workflow.';
+    }
+    async function uploadWorkflow(){
+        const file = $('workflowFile').files[0];
+        if(!file) throw new Error('请选择 workflow JSON 文件');
+        const workflow = JSON.parse(await file.text());
+        const name = $('uploadName').value.trim() || file.name;
+        const res = await fetch('/api/workflows', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, workflow})});
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.detail || '上传失败');
+        state.selected = data.name;
+        await loadWorkflows();
+        setStatus('Workflow uploaded.');
+    }
+    async function saveConfig(){
+        if(!state.selected) throw new Error('未选择 workflow');
+        const config = JSON.parse($('configInput').value || '{}');
+        const res = await fetch(`/api/workflows/${encodeURIComponent(state.selected).replace(/%2F/g, '/')}/config`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)});
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.detail || '保存配置失败');
+        await selectWorkflow(state.selected);
+        setStatus('Config saved.');
+    }
+    async function deleteWorkflow(){
+        if(!state.selected) return;
+        const res = await fetch(`/api/workflows/${encodeURIComponent(state.selected).replace(/%2F/g, '/')}`, {method:'DELETE'});
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || '删除失败');
+        state.selected = '';
+        await loadWorkflows();
+        setStatus('Workflow deleted.');
+    }
+    async function testRun(){
+        if(!state.selected) throw new Error('未选择 workflow');
+        const config = JSON.parse($('configInput').value || '{}');
+        const fields = {};
+        (config.fields || []).forEach(field => fields[field.id] = field.default ?? '');
+        const res = await fetch(`/api/workflows/${encodeURIComponent(state.selected).replace(/%2F/g, '/')}/run`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({prompt:'test run from settings', width:1024, height:1024, type:'custom-workflow-test', fields, config})
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.detail || data.error || '测试运行失败');
+        setStatus(`Test run finished: ${(data.images || []).length} images.`);
+    }
+    $('saveInstancesBtn').onclick = () => saveInstances().catch(e => setStatus(e.message));
+    $('refreshBtn').onclick = () => loadWorkflows().catch(e => setStatus(e.message));
+    $('uploadBtn').onclick = () => uploadWorkflow().catch(e => setStatus(e.message));
+    $('saveConfigBtn').onclick = () => saveConfig().catch(e => setStatus(e.message));
+    $('deleteBtn').onclick = () => deleteWorkflow().catch(e => setStatus(e.message));
+    $('testRunBtn').onclick = () => testRun().catch(e => setStatus(e.message));
+    window.addEventListener('message', event => { if(event.data?.type === 'theme') document.body.classList.toggle('studio-theme-dark', event.data.theme === 'dark'); });
+    Promise.all([loadInstances(), loadWorkflows()]).catch(e => setStatus(e.message));
+</script>
+</body>
+</html>

@@ -1,6 +1,8 @@
 # Feebee Studios
 Supports comfyui/API calls/modelscope calls
 
+Upstream product parity notes for the current `design/v2.1` line are tracked in [docs/upstream-parity-2026-05.md](docs/upstream-parity-2026-05.md). The port keeps this project's Mistral/pixel design system and excludes upstream runtime bundle/install-script replacement.
+
 支持几乎所有API平台调用，修改API文件中的env的网址和key就可以运行。
 支持本地comfyui调用，支持modelscope免费调用。
 

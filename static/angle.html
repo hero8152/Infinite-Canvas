@@ -8,6 +8,9 @@
     <title>Angle control · Feebee Studios</title>
     <link rel="stylesheet" href="/static/design-system.css?v=24">
     <script src="/static/theme.js?v=20260512g"></script>
+    <script src="/static/i18n.js?v=1"></script>
+    <script src="/static/image-preview.js?v=1"></script>
+    <script src="/static/history-bulk-manager.js?v=1"></script>
     <script type="importmap">
         {
             "imports": {
@@ -51,10 +54,10 @@
         .param-panel {
             width: 380px;
             flex-shrink: 0;
-            padding: 32px 24px;
+            padding: 24px;
             display: flex;
             flex-direction: column;
-            gap: 24px;
+            gap: 16px;
             border-right: 1px solid var(--border);
             background: rgba(255, 250, 235, 0.94);
         }
@@ -182,6 +185,9 @@
         body.studio-theme-dark .radio-grid .radio-row {
             background: var(--dark-elev);
         }
+        .generate-action {
+            padding-top: 0;
+        }
 
         /* ====================================================
            Three.js 3D 球容器（angle.html 核心特色）
@@ -266,9 +272,9 @@
         }
         .angle-row-head .angle-reset:hover { color: var(--ink); }
 
-        /* dropzone 4:3 比例显示（上传区与 Three.js 区高度协调） */
+        /* dropzone 保持紧凑，避免主 CTA 被推到首屏之外 */
         .dropzone-aspect {
-            aspect-ratio: 4 / 3;
+            aspect-ratio: 16 / 9;
             min-height: 0;
             position: relative;
         }
@@ -283,6 +289,9 @@
         .dropzone-aspect.has-file { padding: 0; }
         .dropzone-aspect.has-file .preview-img { display: block; }
         .dropzone-aspect.has-file .upload-content { display: none; }
+        #promptInput {
+            min-height: 88px;
+        }
 
         /* Result Card 主舞台 */
         .result-card {
@@ -677,7 +686,7 @@
             </div>
 
             <!-- 主 CTA §7.1 -->
-            <div style="margin-top:auto; padding-top:16px;">
+            <div class="generate-action">
                 <button id="genBtn" type="button" class="btn-primary" onclick="handleGenerate()" style="width:100%; justify-content:center;">
                     <span id="btnText">Generate</span>
                     <svg class="pixel-icon pixel-icon--sm" aria-hidden="true"><use href="#i-chevron-right"/></svg>

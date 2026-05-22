@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+    <title>Smart Canvas · Feebee Studios</title>
+    <script src="/static/theme.js?v=20260522a"></script>
+    <link rel="stylesheet" href="/static/design-system.css?v=24">
+    <style>
+        :root {
+            --page:#fffaeb;
+            --paper:#fff8df;
+            --card:#fff;
+            --soft:#fff4d6;
+            --line:#e6d5a8;
+            --line-strong:#d9c489;
+            --ink:#0f0f0f;
+            --ink-soft:rgba(15,15,15,.12);
+            --muted:#6a6a6a;
+            --faint:#9a9a9a;
+            --orange:#fa520f;
+            --orange-soft:#ffe2c8;
+            --danger:#dc2626;
+            --panel-bg:rgba(255,255,255,.965);
+            --grid-minor:rgba(15,15,15,.035);
+            --grid-major:rgba(15,15,15,.07);
+            --node-mark:#fa520f;
+        }
+        * { box-sizing:border-box; }
+        html, body { width:100%; height:100%; margin:0; overflow:hidden; background-color:var(--page); color:var(--ink); font-family:ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        html, body {
+            background-image:
+                linear-gradient(to right, var(--grid-minor) 1px, transparent 1px),
+                linear-gradient(to bottom, var(--grid-minor) 1px, transparent 1px),
+                linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+                linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
+            background-size:24px 24px, 24px 24px, 96px 96px, 96px 96px;
+        }
+        button, input, select, textarea { font:inherit; border-radius:0; }
+        button { border:0; cursor:pointer; }
+        .pixel-icon { width:16px; height:16px; fill:currentColor; flex:0 0 auto; shape-rendering:crispEdges; }
+        .shell { position:relative; width:100%; height:100%; overflow:hidden; }
+        .shell::before,
+        .shell::after { content:""; position:absolute; z-index:2; pointer-events:none; border-color:var(--ink-soft); border-style:solid; }
+        .shell::before { left:18px; top:18px; width:54px; height:54px; border-width:2px 0 0 2px; }
+        .shell::after { right:18px; bottom:18px; width:54px; height:54px; border-width:0 2px 2px 0; }
+        .topbar { position:absolute; left:18px; right:18px; top:18px; z-index:40; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; pointer-events:none; }
+        .panel { position:relative; pointer-events:auto; border:2px solid var(--ink); background:var(--panel-bg); box-shadow:none; }
+        .panel::after { content:""; position:absolute; inset:3px; border:1px solid var(--line); pointer-events:none; }
+        .nav-panel { min-width:300px; height:54px; display:flex; align-items:center; gap:10px; padding:7px 10px; }
+        .title-wrap { min-width:0; flex:1; }
+        .title-input { width:100%; height:22px; border:0; background:transparent; color:var(--ink); outline:none; font-size:14px; font-weight:950; letter-spacing:.01em; }
+        .save-state { display:inline-flex; align-items:center; gap:6px; margin-top:2px; color:var(--muted); font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.1em; }
+        .save-state::before { content:""; width:7px; height:7px; border:1px solid var(--ink); background:var(--line); }
+        .save-state[data-state="ready"]::before,
+        .save-state[data-state="saved"]::before,
+        .save-state[data-state="done"]::before { background:var(--orange); }
+        .save-state[data-state="saving"]::before,
+        .save-state[data-state="running"]::before { background:var(--ink); }
+        .save-state[data-state*="failed"]::before,
+        .save-state[data-state="conflict"]::before { background:var(--danger); }
+        .toolbar { display:flex; align-items:center; gap:0; padding:7px; flex-wrap:wrap; justify-content:flex-end; max-width:min(790px, calc(100vw - 360px)); }
+        .toolbar .tool-btn + .tool-btn { margin-left:-1px; }
+        .tool-btn, .mini-btn { position:relative; height:36px; min-width:36px; padding:0 10px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid var(--line); background:var(--card); color:var(--ink); font-size:11px; font-weight:950; }
+        .tool-btn:hover, .mini-btn:hover { z-index:1; background:var(--soft); border-color:var(--ink); color:var(--orange); }
+        .tool-btn:focus-visible, .mini-btn:focus-visible, .icon-btn:focus-visible, .run-btn:focus-visible, .input-lite:focus-visible, .select-lite:focus-visible { outline:2px solid var(--orange); outline-offset:2px; }
+        .tool-btn.primary { background:var(--ink); border-color:var(--ink); color:#fff; }
+        .tool-btn.primary:hover { background:#000; color:#fff; }
+        .board { position:absolute; inset:0; overflow:hidden; cursor:grab; }
+        .board.dragging-board { cursor:grabbing; }
+        .world { position:absolute; left:0; top:0; width:10000px; height:10000px; transform-origin:0 0; }
+        .links { position:absolute; inset:0; width:10000px; height:10000px; pointer-events:none; overflow:visible; }
+        .link-line { fill:none; stroke:var(--ink); stroke-width:2.5; stroke-linecap:square; stroke-linejoin:miter; }
+        .link-line.temp { stroke:var(--orange); stroke-dasharray:8 6; }
+        .nodes { position:absolute; inset:0; }
+        .smart-node { position:absolute; width:280px; min-width:180px; min-height:150px; box-sizing:border-box; background:var(--card); border:2px solid var(--ink); user-select:none; }
+        .smart-node.node-sized { display:flex; flex-direction:column; }
+        .smart-node::before { content:""; position:absolute; left:-2px; top:-2px; bottom:-2px; width:7px; background:var(--node-mark); border-right:2px solid var(--ink); pointer-events:none; }
+        .smart-node::after { content:""; position:absolute; left:7px; right:0; top:34px; height:1px; background:var(--line); pointer-events:none; }
+        .smart-node.node-prompt { --node-mark:#0f0f0f; }
+        .smart-node.node-loop { --node-mark:#d9c489; }
+        .smart-node.node-group { --node-mark:#fff4d6; }
+        .smart-node.node-running { border-color:var(--line-strong); }
+        .smart-node.node-running::before { background:repeating-linear-gradient(180deg, var(--orange) 0 7px, var(--ink) 7px 14px); }
+        .smart-node.node-error { border-color:var(--orange); }
+        .smart-node.node-error::before { background:var(--orange); }
+        .smart-node.selected { outline:2px solid var(--orange); outline-offset:4px; }
+        .smart-node.group-node { background:rgba(255,248,223,.9); border-style:dashed; }
+        .node-head { height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:space-between; gap:8px; border-bottom:1px solid var(--line); background:var(--soft); padding:0 8px 0 16px; cursor:move; }
+        .node-title-wrap { min-width:0; display:flex; align-items:center; gap:7px; }
+        .node-type { height:18px; min-width:38px; padding:0 5px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--ink); background:var(--card); color:var(--ink); font-size:9px; font-weight:950; letter-spacing:.08em; }
+        .node-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:950; text-transform:uppercase; letter-spacing:.08em; }
+        .node-count { height:20px; min-width:22px; padding:0 6px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--line); background:var(--card); color:var(--muted); font-size:10px; font-weight:900; }
+        .node-actions { display:flex; gap:4px; align-items:center; }
+        .icon-btn { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; background:transparent; color:var(--muted); border:1px solid transparent; }
+        .icon-btn:hover { color:var(--orange); background:var(--card); border-color:var(--ink); }
+        .node-body { min-height:124px; padding:12px 10px 10px 14px; box-sizing:border-box; }
+        .smart-node.node-sized .node-body { flex:1 1 auto; min-height:0; overflow:auto; }
+        .image-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(86px, 1fr)); gap:8px; align-items:stretch; }
+        .image-grid-single { grid-template-columns:1fr; }
+        .smart-node.node-sized .image-grid,
+        .smart-node.node-sized .pending-grid { height:100%; grid-auto-rows:minmax(0, 1fr); }
+        .image-tile { position:relative; min-height:100px; aspect-ratio:var(--node-aspect, 1 / 1); border:1px solid var(--line); background:var(--soft); overflow:hidden; }
+        .smart-node.node-sized .image-tile { height:100%; min-height:0; aspect-ratio:auto; }
+        .image-tile::before { content:""; position:absolute; inset:0; background-image:linear-gradient(45deg, rgba(15,15,15,.05) 25%, transparent 25%, transparent 75%, rgba(15,15,15,.05) 75%), linear-gradient(45deg, rgba(15,15,15,.05) 25%, transparent 25%, transparent 75%, rgba(15,15,15,.05) 75%); background-position:0 0, 6px 6px; background-size:12px 12px; }
+        .image-tile img, .image-tile video { position:relative; width:100%; height:100%; min-height:100px; object-fit:cover; display:block; background:#0f0f0f; }
+        .smart-node.node-sized .image-tile img,
+        .smart-node.node-sized .image-tile video { min-height:0; }
+        .image-caption { position:absolute; left:0; right:0; bottom:0; height:22px; display:flex; align-items:center; padding:0 6px; background:rgba(255,255,255,.92); border-top:1px solid var(--line); color:var(--muted); font-size:9px; font-weight:900; text-transform:uppercase; letter-spacing:.04em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .tile-tools { position:absolute; right:5px; top:5px; display:flex; gap:4px; opacity:0; }
+        .image-tile:hover .tile-tools { opacity:1; }
+        .tile-tools .icon-btn { width:24px; height:24px; background:var(--card); border-color:var(--line); color:var(--ink); }
+        .empty-drop { min-height:116px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; border:1px dashed var(--line-strong); background:var(--soft); color:var(--muted); text-align:center; font-size:11px; font-weight:900; }
+        .empty-drop .pixel-icon { width:20px; height:20px; }
+        .pending-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(86px, 1fr)); gap:8px; align-items:stretch; }
+        .pending-grid-single { grid-template-columns:1fr; }
+        .pending-cell { min-height:100px; aspect-ratio:var(--node-aspect, 1 / 1); display:flex; align-items:center; justify-content:center; border:1px dashed var(--line-strong); background:var(--soft); color:var(--muted); font-size:9px; font-weight:950; letter-spacing:.1em; text-transform:uppercase; overflow:hidden; position:relative; }
+        .smart-node.node-sized .pending-cell { height:100%; min-height:0; aspect-ratio:auto; }
+        .pending-cell::before { content:""; position:absolute; inset:0; opacity:.55; background:repeating-linear-gradient(90deg, transparent 0 8px, rgba(233,92,39,.18) 8px 12px), repeating-linear-gradient(0deg, transparent 0 8px, rgba(15,15,15,.07) 8px 12px); }
+        .pending-cell span { position:relative; border:1px solid var(--line); background:var(--card); padding:4px 6px; }
+        .node-error-box { min-height:116px; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:7px; border:1px solid var(--orange); background:var(--orange-soft); color:var(--ink); padding:12px; text-align:left; font-size:11px; line-height:1.45; }
+        .smart-node.node-sized .empty-drop,
+        .smart-node.node-sized .node-error-box { height:100%; min-height:0; box-sizing:border-box; }
+        .node-error-box strong { font-size:10px; font-weight:950; letter-spacing:.1em; text-transform:uppercase; }
+        .node-error-box span { color:var(--muted); overflow-wrap:anywhere; }
+        .smart-textarea { width:100%; min-height:108px; resize:vertical; border:1px solid var(--line); background:var(--card); color:var(--ink); outline:none; padding:10px; font-size:12px; line-height:1.55; background-image:linear-gradient(to bottom, transparent 23px, rgba(230,213,168,.55) 24px); background-size:100% 24px; }
+        .smart-textarea:focus { border-color:var(--orange); outline:1px solid var(--orange); }
+        .node-foot { display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+        .node-output, .loop-preview { margin-top:8px; justify-content:flex-start; text-align:left; white-space:pre-wrap; align-items:flex-start; line-height:1.45; }
+        .field { display:flex; flex-direction:column; gap:4px; min-width:0; }
+        .field-title { color:var(--muted); font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; }
+        .input-lite, .select-lite { height:34px; border:1px solid var(--line); background:var(--card); color:var(--ink); outline:none; padding:0 9px; font-size:12px; font-weight:850; }
+        .select-lite { min-width:120px; }
+        .port { position:absolute; top:50%; width:18px; height:18px; margin-top:-9px; background:var(--card); border:2px solid var(--ink); z-index:5; }
+        .port::before { content:""; position:absolute; inset:4px; background:var(--line); }
+        .port-in { left:-11px; }
+        .port-out { right:-11px; }
+        .port:hover { background:var(--orange); }
+        .resize-handle { position:absolute; right:-9px; bottom:-9px; z-index:8; width:18px; height:18px; border:2px solid var(--ink); background:var(--card); cursor:nwse-resize; display:none; padding:0; }
+        .resize-handle::before { content:""; position:absolute; right:3px; bottom:3px; width:7px; height:7px; background:var(--orange); border-left:2px solid var(--ink); border-top:2px solid var(--ink); }
+        .smart-node.selected .resize-handle { display:block; }
+        .smart-node.resizing { outline:2px solid var(--orange); outline-offset:4px; }
+        .composer { position:absolute; left:50%; bottom:20px; transform:translateX(-50%); z-index:50; width:min(760px, calc(100vw - 36px)); border:2px solid var(--ink); background:var(--panel-bg); box-shadow:none; padding:12px; display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:9px; }
+        .composer::before { content:""; position:absolute; left:0; right:0; top:0; height:5px; background:repeating-linear-gradient(90deg, var(--ink) 0 14px, var(--orange) 14px 28px, var(--line) 28px 42px); pointer-events:none; }
+        .composer-head { grid-column:1/-1; display:grid; grid-template-columns:1.05fr 1fr 1.3fr; align-items:center; gap:8px; padding-top:3px; }
+        .input-thumbs { grid-column:1/-1; display:flex; align-items:center; gap:6px; min-height:0; overflow-x:auto; padding-bottom:1px; }
+        .input-thumbs:empty::before { content:"NO INPUTS"; height:22px; display:inline-flex; align-items:center; padding:0 8px; border:1px dashed var(--line); color:var(--faint); font-size:9px; font-weight:950; letter-spacing:.1em; }
+        .input-thumb { position:relative; width:48px; height:48px; border:1px solid var(--ink); background:var(--soft); flex:0 0 auto; }
+        .input-thumb::after { content:""; position:absolute; right:3px; bottom:3px; width:7px; height:7px; background:var(--orange); border:1px solid var(--ink); }
+        .input-thumb img, .input-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+        .prompt-row { position:relative; grid-column:1/-1; min-width:0; }
+        .prompt-input { width:100%; min-height:96px; max-height:250px; overflow:auto; resize:none; border:1px solid var(--ink); background:var(--card); color:var(--ink); outline:none; padding:12px 12px 12px 14px; font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; background-image:linear-gradient(to bottom, transparent 23px, rgba(230,213,168,.48) 24px); background-size:100% 24px; }
+        .prompt-input:empty::before { content:attr(data-placeholder); color:var(--faint); }
+        .prompt-input:focus { border-color:var(--orange); outline:1px solid var(--orange); }
+        .composer-params { min-width:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .run-btn { align-self:end; min-width:126px; height:42px; display:inline-flex; align-items:center; justify-content:center; gap:8px; background:var(--ink); color:#fff; border:1px solid var(--ink); font-size:12px; font-weight:950; letter-spacing:.04em; }
+        .run-btn:hover { background:#000; color:var(--orange-soft); }
+        .run-btn:disabled { background:var(--line); border-color:var(--line); color:var(--muted); cursor:wait; }
+        .mention-token { display:inline-flex; align-items:center; gap:5px; height:25px; max-width:158px; margin:0 3px 2px; padding:2px 7px 2px 3px; border:1px solid var(--ink); background:var(--soft); color:var(--ink); vertical-align:middle; font-size:11px; font-weight:900; white-space:nowrap; }
+        .mention-token img { width:19px; height:19px; object-fit:cover; border:1px solid var(--line); }
+        .mention-token span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+        .mention-picker { position:absolute; left:8px; bottom:calc(100% + 6px); z-index:70; width:min(372px, calc(100vw - 40px)); max-height:292px; overflow:auto; padding:9px; border:2px solid var(--ink); background:var(--card); display:none; }
+        .mention-picker.open { display:block; }
+        .mention-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-bottom:7px; }
+        .mention-tabs button { height:28px; border:1px solid var(--line); background:var(--soft); color:var(--muted); font-size:11px; font-weight:900; }
+        .mention-tabs button.active { background:var(--ink); border-color:var(--ink); color:#fff; }
+        .mention-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; }
+        .mention-option { min-width:0; border:1px solid var(--line); background:var(--soft); padding:4px; color:var(--ink); }
+        .mention-option:hover { border-color:var(--ink); background:var(--orange-soft); }
+        .mention-option img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--card); }
+        .mention-option span { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; font-weight:800; }
+        .asset-toggle { position:absolute; right:20px; top:84px; z-index:42; }
+        .asset-panel { position:absolute; right:20px; top:128px; bottom:150px; z-index:41; width:334px; display:none; flex-direction:column; gap:9px; padding:12px; border:2px solid var(--ink); background:var(--panel-bg); }
+        .asset-panel::before { content:""; position:absolute; left:0; right:0; top:0; height:5px; background:repeating-linear-gradient(90deg, var(--orange) 0 12px, var(--ink) 12px 24px, var(--line) 24px 36px); pointer-events:none; }
+        .asset-panel.open { display:flex; }
+        .asset-panel.drag-over { outline:2px solid var(--orange); outline-offset:3px; }
+        .asset-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-top:2px; }
+        .asset-title { font-size:12px; font-weight:950; text-transform:uppercase; letter-spacing:.08em; }
+        .asset-count { margin-left:auto; color:var(--muted); font-size:10px; font-weight:950; letter-spacing:.08em; }
+        .asset-row { display:flex; gap:6px; align-items:center; }
+        .asset-row .select-lite { flex:1; min-width:0; }
+        .asset-drop { min-height:58px; display:flex; align-items:center; justify-content:center; text-align:center; border:1px dashed var(--line-strong); background:var(--soft); color:var(--muted); font-size:11px; font-weight:900; }
+        .asset-grid { min-height:0; overflow:auto; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; padding-right:2px; }
+        .asset-item { border:1px solid var(--line); background:var(--card); cursor:grab; }
+        .asset-item:hover { border-color:var(--ink); }
+        .asset-item img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--soft); }
+        .asset-meta { display:flex; align-items:center; gap:4px; min-height:32px; padding:5px; border-top:1px solid var(--line); }
+        .asset-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; font-weight:850; }
+        .empty-note { min-height:84px; display:flex; align-items:center; justify-content:center; border:1px dashed var(--line); background:var(--soft); color:var(--muted); text-align:center; font-size:11px; font-weight:800; padding:12px; }
+        .drop-overlay { position:absolute; inset:0; z-index:80; display:none; align-items:center; justify-content:center; background:rgba(255,250,235,.82); color:var(--ink); font-size:22px; font-weight:950; pointer-events:none; }
+        .drop-overlay.open { display:flex; }
+        html.studio-theme-dark,
+        html.theme-dark,
+        body.studio-theme-dark,
+        body.theme-dark,
+        .theme-dark {
+            --page:#0e0e10;
+            --paper:#161618;
+            --card:#2a2a2d;
+            --soft:#1c1c1e;
+            --line:#3a3a3d;
+            --line-strong:#5a5a5d;
+            --ink:#f5f5f5;
+            --ink-soft:rgba(245,245,245,.12);
+            --muted:#9a9a9a;
+            --faint:#6a6a6a;
+            --orange-soft:#3b261d;
+            --panel-bg:#1c1c1e;
+            --grid-minor:rgba(255,255,255,.018);
+            --grid-major:rgba(255,255,255,.04);
+        }
+        html.studio-theme-dark,
+        html.theme-dark,
+        html.studio-theme-dark body,
+        html.theme-dark body,
+        body.studio-theme-dark,
+        body.theme-dark {
+            background-color:#0e0e10;
+            background-image:
+                linear-gradient(to right, var(--grid-minor) 1px, transparent 1px),
+                linear-gradient(to bottom, var(--grid-minor) 1px, transparent 1px),
+                linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+                linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
+            background-size:24px 24px, 24px 24px, 96px 96px, 96px 96px;
+        }
+        .theme-dark .panel,
+        .theme-dark .smart-node,
+        .theme-dark .composer,
+        .theme-dark .asset-panel,
+        .theme-dark .mention-picker { background:#1c1c1e; border-color:#5a5a5d; }
+        .theme-dark .node-head { background:#0e0e10; border-color:#3a3a3d; }
+        .theme-dark .tool-btn.primary,
+        .theme-dark .run-btn,
+        .theme-dark .mention-tabs button.active { background:#f5f5f5; border-color:#f5f5f5; color:#0e0e10; }
+        .theme-dark .input-lite,
+        .theme-dark .select-lite,
+        .theme-dark .smart-textarea,
+        .theme-dark .prompt-input { background:#2a2a2d; border-color:#5a5a5d; color:#f5f5f5; }
+        .theme-dark .image-caption { background:rgba(28,28,30,.92); border-color:#3a3a3d; }
+        .theme-dark .node-type { background:#2a2a2d; color:#f5f5f5; }
+        .theme-dark .port::before { background:#5a5a5d; }
+        @media (max-width:760px) {
+            .topbar { left:12px; right:12px; top:12px; flex-direction:column; align-items:stretch; }
+            .nav-panel,
+            .toolbar { width:100%; max-width:100%; }
+            .toolbar { overflow-x:auto; justify-content:flex-start; }
+            .asset-panel { left:12px; right:12px; top:132px; width:auto; bottom:154px; }
+            .composer { bottom:12px; width:calc(100vw - 24px); grid-template-columns:minmax(0, 1fr); }
+            .composer-head { grid-template-columns:1fr; }
+            .composer-head .select-lite { flex:1 1 132px; min-width:0; }
+            .composer-params { grid-column:1/-1; }
+            .run-btn { width:100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="topbar">
+            <div class="panel nav-panel">
+                <button id="backBtn" class="tool-btn" type="button" title="返回画布列表" aria-label="返回画布列表"><svg class="pixel-icon" aria-hidden="true" style="transform:scaleX(-1)"><use href="#chevron-right"></use></svg></button>
+                <div class="title-wrap">
+                    <input id="titleInput" class="title-input" maxlength="80" value="智能画布">
+                    <div id="saveState" class="save-state">LOADING</div>
+                </div>
+            </div>
+            <div class="panel toolbar">
+                <button id="uploadBtn" class="tool-btn" type="button" title="上传图片"><svg class="pixel-icon"><use href="#upload"></use></svg>图片</button>
+                <button id="promptNodeBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#tool-prompt"></use></svg>Prompt</button>
+                <button id="loopNodeBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#tool-loop"></use></svg>Loop</button>
+                <button id="groupBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#tool-group"></use></svg>分组</button>
+                <button id="copyBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#copy"></use></svg>复制</button>
+                <button id="pasteBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#plus"></use></svg>粘贴</button>
+                <button id="deleteBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#trash"></use></svg>删除</button>
+            </div>
+        </div>
+
+        <button id="assetToggle" class="tool-btn asset-toggle" type="button"><svg class="pixel-icon"><use href="#folder"></use></svg>资产库</button>
+        <div id="assetPanel" class="asset-panel">
+            <div class="asset-head">
+                <div class="asset-title">Asset Library</div>
+                <div id="assetCount" class="asset-count">0</div>
+                <button id="assetCloseBtn" class="icon-btn" type="button"><svg class="pixel-icon"><use href="#cross"></use></svg></button>
+            </div>
+            <div class="asset-row">
+                <select id="assetCategorySelect" class="select-lite"></select>
+                <button id="assetAddFolderBtn" class="mini-btn" type="button" title="新建文件夹"><svg class="pixel-icon"><use href="#plus"></use></svg></button>
+                <button id="assetRenameFolderBtn" class="mini-btn" type="button" title="重命名文件夹"><svg class="pixel-icon"><use href="#nav-klein"></use></svg></button>
+                <button id="assetDeleteFolderBtn" class="mini-btn" type="button" title="删除文件夹"><svg class="pixel-icon"><use href="#trash"></use></svg></button>
+            </div>
+            <div id="assetDrop" class="asset-drop">拖入画布图片保存为资产</div>
+            <div id="assetGrid" class="asset-grid"></div>
+        </div>
+
+        <div id="board" class="board">
+            <div id="world" class="world">
+                <svg id="links" class="links"></svg>
+                <div id="nodes" class="nodes"></div>
+            </div>
+        </div>
+        <div id="dropOverlay" class="drop-overlay">拖放图片到智能画布</div>
+
+        <div class="composer">
+            <div class="composer-head">
+                <select id="engineSelect" class="select-lite">
+                    <option value="image">API 图片生成</option>
+                    <option value="video">API 视频生成</option>
+                    <option value="comfy">ComfyUI 工作流</option>
+                    <option value="llm">LLM 文本节点</option>
+                </select>
+                <select id="providerSelect" class="select-lite"></select>
+                <select id="modelSelect" class="select-lite"></select>
+                <select id="workflowSelect" class="select-lite" style="display:none"></select>
+            </div>
+            <div id="inputThumbs" class="input-thumbs"></div>
+            <div class="prompt-row">
+                <div id="promptInput" class="prompt-input" contenteditable="true" data-placeholder="描述你要生成或编辑的内容，输入 @ 可引用图片"></div>
+                <div id="mentionPicker" class="mention-picker"></div>
+            </div>
+            <div class="composer-params">
+                <label class="field"><span class="field-title">Size</span><select id="sizeSelect" class="select-lite"><option value="1024x1024">1:1</option><option value="1024x1536">2:3</option><option value="1536x1024">3:2</option><option value="1792x1024">16:9</option><option value="1024x1792">9:16</option></select></label>
+                <label class="field"><span class="field-title">Count</span><input id="countInput" class="input-lite" type="number" min="1" max="4" value="1" style="width:74px"></label>
+            </div>
+            <button id="runBtn" class="run-btn" type="button"><svg class="pixel-icon"><use href="#chevron-right"></use></svg>运行</button>
+        </div>
+        <input id="fileInput" type="file" accept="image/*" multiple hidden>
+    </div>
+
+    <script>
+        const TASK_SUCCEEDED = 'succeeded';
+        const TASK_FAILED = 'failed';
+        const TASK_RUNNING = 'running';
+        const CLIENT_ID = `smart_${Math.random().toString(36).slice(2)}`;
+        const qs = new URLSearchParams(location.search);
+        const canvasId = qs.get('id') || '';
+        const draftKey = canvasId ? `smart_canvas_draft_${canvasId}` : '';
+        let canvas = null;
+        let nodes = [];
+        let connections = [];
+        let viewport = {x:0, y:0, scale:1};
+        let canvasBaseUpdatedAt = 0;
+        let saveTimer = null;
+        let dirtySinceSave = false;
+        let selectedIds = new Set();
+        let dragState = null;
+        let resizeState = null;
+        let panState = null;
+        let linkState = null;
+        let clipboard = [];
+        let assetLibrary = {categories:[]};
+        let assetLibraryOpen = false;
+        let mentionSource = 'input';
+        let mentionRange = null;
+        let apiProviders = [];
+        let imageModels = ['gpt-image-2', 'nano-banana-pro'];
+        let chatModels = ['gpt-4o-mini'];
+        let videoModels = ['veo3-fast'];
+        let comfyWorkflows = [];
+
+        const $ = id => document.getElementById(id);
+        const board = $('board');
+        const world = $('world');
+        const nodesEl = $('nodes');
+        const linksEl = $('links');
+        const saveState = $('saveState');
+        const titleInput = $('titleInput');
+        const promptInput = $('promptInput');
+        const mentionPicker = $('mentionPicker');
+        const inputThumbs = $('inputThumbs');
+        const assetPanel = $('assetPanel');
+        const assetGrid = $('assetGrid');
+        const assetCategorySelect = $('assetCategorySelect');
+
+        function uid(prefix='id'){ return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`; }
+        function escapeHtml(value){ return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+        function setStatus(text){
+            saveState.textContent = text;
+            saveState.dataset.state = String(text || '').trim().toLowerCase().replace(/\s+/g, '-');
+        }
+        function isVideoUrl(url){ return /\.(mp4|webm|mov|m4v)(?:\?|$)/i.test(String(url || '')); }
+        function imageIsVideo(img){ return img?.kind === 'video' || isVideoUrl(img?.url); }
+        function selectedNode(){ return nodes.find(n => selectedIds.has(n.id)) || null; }
+        function selectedNodes(){ return [...selectedIds].map(id => nodes.find(n => n.id === id)).filter(Boolean); }
+        function rawProviderModels(kind, provider){
+            if(!provider) return [];
+            if(kind === 'video') return provider.video_models?.length ? provider.video_models : [];
+            if(kind === 'chat') return provider.chat_models?.length ? provider.chat_models : [];
+            return provider.image_models?.length ? provider.image_models : [];
+        }
+        function fallbackModels(kind){
+            if(kind === 'video') return videoModels;
+            if(kind === 'chat') return chatModels;
+            return imageModels;
+        }
+        function enabledProviders(kind){
+            const enabled = (apiProviders || []).filter(p => p && p.enabled !== false);
+            const capable = enabled.filter(p => rawProviderModels(kind, p).length);
+            return capable.length ? capable : enabled;
+        }
+        function defaultProvider(kind){
+            const providers = enabledProviders(kind);
+            return providers.find(p => p.primary && rawProviderModels(kind, p).length)
+                || providers.find(p => rawProviderModels(kind, p).length)
+                || providers[0]
+                || {id:'comfly', name:'Comfly', enabled:true};
+        }
+        function providerById(id, kind){
+            return enabledProviders(kind).find(p => p.id === id) || defaultProvider(kind) || null;
+        }
+        function providerModels(kind, providerId){
+            const provider = providerById(providerId, kind);
+            const models = rawProviderModels(kind, provider);
+            return models.length ? models : fallbackModels(kind);
+        }
+        function selectedProviderId(kind){
+            return providerById($('providerSelect').value, kind)?.id || defaultProvider(kind)?.id || '';
+        }
+        function refreshIcons(){ window.replaceLucideIcons?.(document); }
+        function screenToWorld(clientX, clientY){
+            const rect = board.getBoundingClientRect();
+            return {x:(clientX - rect.left - viewport.x) / viewport.scale, y:(clientY - rect.top - viewport.y) / viewport.scale};
+        }
+        function applyViewport(){
+            world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+        }
+        function scheduleSave(){
+            if(!canvas) return;
+            dirtySinceSave = true;
+            saveLocalDraft();
+            setStatus('SAVING');
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(saveCanvas, 500);
+        }
+        function draftPayload(){
+            if(!canvas) return null;
+            return {
+                id:canvas.id,
+                title:titleInput.value.trim() || canvas.title || '智能画布',
+                nodes,
+                connections,
+                viewport,
+                settings:{
+                    ...(canvas.settings || {}),
+                    smartEngine:$('engineSelect').value,
+                    smartSize:$('sizeSelect').value,
+                    smartCount:Number($('countInput').value) || 1
+                },
+                base_updated_at:canvasBaseUpdatedAt,
+                draft_updated_at:Date.now()
+            };
+        }
+        function saveLocalDraft(){
+            if(!draftKey || !canvas) return;
+            try {
+                localStorage.setItem(draftKey, JSON.stringify(draftPayload()));
+            } catch(e) {
+                console.warn('smart canvas draft save failed', e);
+            }
+        }
+        function clearLocalDraft(){
+            if(!draftKey) return;
+            try { localStorage.removeItem(draftKey); } catch(e) {}
+        }
+        function loadLocalDraft(){
+            if(!draftKey) return null;
+            try {
+                const draft = JSON.parse(localStorage.getItem(draftKey) || 'null');
+                if(!draft || draft.id !== canvasId || !Array.isArray(draft.nodes)) return null;
+                return draft;
+            } catch(e) {
+                return null;
+            }
+        }
+        function applyLocalDraft(draft){
+            titleInput.value = draft.title || titleInput.value || '智能画布';
+            nodes = Array.isArray(draft.nodes) ? draft.nodes : nodes;
+            connections = Array.isArray(draft.connections) ? draft.connections : connections;
+            viewport = draft.viewport || viewport;
+            canvas.settings = draft.settings || canvas.settings || {};
+            $('engineSelect').value = canvas.settings.smartEngine || 'image';
+            $('sizeSelect').value = canvas.settings.smartSize || '1024x1024';
+            $('countInput').value = canvas.settings.smartCount || 1;
+            applyViewport();
+            render();
+        }
+        async function saveCanvas(){
+            if(!canvas) return;
+            saveTimer = null;
+            canvas.title = titleInput.value.trim() || '智能画布';
+            canvas.nodes = nodes;
+            canvas.connections = connections;
+            canvas.viewport = viewport;
+            canvas.settings = {
+                ...(canvas.settings || {}),
+                smartEngine: $('engineSelect').value,
+                smartSize: $('sizeSelect').value,
+                smartCount: Number($('countInput').value) || 1
+            };
+            try {
+                const res = await fetch(`/api/canvases/${encodeURIComponent(canvas.id)}`, {
+                    method:'PUT',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({
+                        title:canvas.title,
+                        icon:canvas.icon || 'sparkles',
+                        nodes,
+                        connections,
+                        viewport,
+                        logs:canvas.logs || [],
+                        settings:canvas.settings || {},
+                        client_id:CLIENT_ID,
+                        base_updated_at:canvasBaseUpdatedAt
+                    })
+                });
+                const data = await res.json().catch(() => ({}));
+                if(res.status === 409){
+                    setStatus('CONFLICT');
+                    alert(data.detail?.message || '画布已被其他客户端更新，请刷新后再保存。');
+                    return;
+                }
+                if(!res.ok) throw new Error(data.detail || '保存失败');
+                canvas.updated_at = data.canvas?.updated_at || Date.now();
+                canvasBaseUpdatedAt = canvas.updated_at;
+                dirtySinceSave = false;
+                clearLocalDraft();
+                setStatus('SAVED');
+            } catch(e) {
+                setStatus('SAVE FAILED');
+                console.error(e);
+            }
+        }
+        async function fetchJson(url, options={}){
+            const res = await fetch(url, options);
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok) throw new Error(data.detail || data.error || '请求失败');
+            return data;
+        }
+        async function loadConfig(){
+            try {
+                const cfg = await fetchJson('/api/config');
+                apiProviders = Array.isArray(cfg.api_providers) && cfg.api_providers.length ? cfg.api_providers : [{id:'comfly', name:'Comfly', primary:true, image_models:cfg.image_models || imageModels, chat_models:cfg.chat_models || chatModels, video_models:cfg.video_models || videoModels}];
+                imageModels = cfg.image_models?.length ? cfg.image_models : imageModels;
+                chatModels = cfg.chat_models?.length ? cfg.chat_models : chatModels;
+                videoModels = cfg.video_models?.length ? cfg.video_models : videoModels;
+            } catch(e) {
+                apiProviders = [{id:'comfly', name:'Comfly', primary:true, image_models:imageModels, chat_models:chatModels, video_models:videoModels}];
+            }
+            try {
+                const wf = await fetchJson('/api/workflows');
+                comfyWorkflows = Array.isArray(wf.workflows) ? wf.workflows : [];
+            } catch(e) {
+                comfyWorkflows = [];
+            }
+            renderComposerControls();
+        }
+        async function loadCanvas(){
+            if(!canvasId){
+                alert('缺少画布 ID');
+                location.href = '/static/canvas.html';
+                return;
+            }
+            const data = await fetchJson(`/api/canvases/${encodeURIComponent(canvasId)}`);
+            canvas = data.canvas;
+            if((canvas.kind || 'smart') !== 'smart'){
+                location.href = `/static/canvas.html?id=${encodeURIComponent(canvas.id)}`;
+                return;
+            }
+            nodes = Array.isArray(canvas.nodes) ? canvas.nodes : [];
+            connections = Array.isArray(canvas.connections) ? canvas.connections : [];
+            viewport = canvas.viewport || {x:0, y:0, scale:1};
+            canvas.settings = canvas.settings || {};
+            canvasBaseUpdatedAt = canvas.updated_at || 0;
+            titleInput.value = canvas.title || '智能画布';
+            $('engineSelect').value = canvas.settings.smartEngine || 'image';
+            $('sizeSelect').value = canvas.settings.smartSize || '1024x1024';
+            $('countInput').value = canvas.settings.smartCount || 1;
+            applyViewport();
+            render();
+            const draft = loadLocalDraft();
+            if(draft && Number(draft.draft_updated_at || 0) > Number(canvas.updated_at || 0) + 1000){
+                const recover = confirm('检测到本地未保存的智能画布草稿，是否恢复？');
+                if(recover){
+                    applyLocalDraft(draft);
+                    setStatus('LOCAL DRAFT');
+                    scheduleSave();
+                    return;
+                }
+                clearLocalDraft();
+            }
+            setStatus('READY');
+        }
+
+        function nodeLabel(node){
+            if(node.type === 'smart-image') return node.title || 'Image';
+            if(node.type === 'smart-group') return node.title || 'Group';
+            if(node.type === 'smart-prompt') return node.title || 'Prompt';
+            if(node.type === 'smart-loop') return node.title || 'Loop';
+            return 'Node';
+        }
+        function nodeTypeLabel(node){
+            if(node.type === 'smart-image') return 'IMG';
+            if(node.type === 'smart-group') return 'GRP';
+            if(node.type === 'smart-prompt') return 'TXT';
+            if(node.type === 'smart-loop') return 'LOOP';
+            return 'NODE';
+        }
+        function nodeTypeClass(node){
+            if(node.type === 'smart-prompt') return 'node-prompt';
+            if(node.type === 'smart-loop') return 'node-loop';
+            if(node.type === 'smart-group') return 'node-group';
+            return 'node-image';
+        }
+        function nodeImages(node){
+            if(!node) return [];
+            if(node.type === 'smart-image' || node.type === 'smart-group') return (node.images || []).filter(img => img?.url);
+            if(node.generatedOutputs?.length) return node.generatedOutputs.map((url, index) => ({url, name:`output-${index + 1}`}));
+            return [];
+        }
+        function inputNodesFor(node){
+            const ids = new Set((node?.inputNodeIds || []));
+            connections.forEach(conn => {
+                if(conn.to === node?.id) ids.add(conn.from);
+            });
+            return [...ids].map(id => nodes.find(n => n.id === id)).filter(Boolean);
+        }
+        function upstreamNodeIds(node){
+            const seen = new Set([node?.id]);
+            const order = [];
+            const walk = id => {
+                connections.filter(c => c.to === id).forEach(conn => {
+                    if(seen.has(conn.from)) return;
+                    seen.add(conn.from);
+                    walk(conn.from);
+                    order.push(conn.from);
+                });
+            };
+            if(node) walk(node.id);
+            return order;
+        }
+        function lineImagesFor(node){
+            const ids = [...upstreamNodeIds(node), node?.id].filter(Boolean);
+            const seen = new Set();
+            return ids.flatMap(id => nodeImages(nodes.find(n => n.id === id))).filter(img => {
+                if(!img?.url || seen.has(img.url)) return false;
+                seen.add(img.url);
+                return true;
+            });
+        }
+        function splitPromptIntoItems(text){
+            const trimmed = String(text || '').trim();
+            if(!trimmed) return [];
+            const numbered = trimmed.split(/\s*(?:^|\s)\d+\s*[.、)）．]\s+/).map(s => s.trim()).filter(Boolean);
+            if(numbered.length >= 2) return numbered;
+            const lines = trimmed.split(/\r?\n+/).map(s => s.trim()).filter(Boolean);
+            return lines.length >= 2 ? lines : [trimmed];
+        }
+        function loopTextFor(node, index=1){
+            const items = splitPromptIntoItems(node.text || node.variablePrompt || '');
+            const chosen = items.length ? items[(Math.max(1, index) - 1) % items.length] : '';
+            return chosen
+                .replaceAll('《计数》', String(index))
+                .replaceAll('《总数》', String(Math.max(1, Number(node.count || 1))))
+                .replaceAll('《进度》', `${index}/${Math.max(1, Number(node.count || 1))}`);
+        }
+        function textForNode(node, index=1){
+            if(!node) return '';
+            if(node.type === 'smart-prompt') return node.outputText || node.text || '';
+            if(node.type === 'smart-loop') return loopTextFor(node, index);
+            return '';
+        }
+        function inputPromptTextFor(node){
+            return inputNodesFor(node).map(n => textForNode(n)).filter(Boolean).join('\n\n');
+        }
+        function addNode(node){
+            nodes.push(node);
+            selectedIds = new Set([node.id]);
+            render();
+            scheduleSave();
+        }
+        function createImageNode(x, y, images=[], options={}){
+            const node = {id:uid('img'), type:'smart-image', x, y, w:options.w || 280, h:options.h || 0, title:options.title || 'Image', images};
+            if(options.aspectRatio) node.aspectRatio = Number(options.aspectRatio) || 0;
+            if(options.outputKind) node.outputKind = options.outputKind;
+            if(options.pending) node.pending = Math.max(1, Number(options.pending) || 1);
+            if(options.running || options.pending) node.running = true;
+            if(options.error) node.error = String(options.error);
+            return node;
+        }
+        function createPromptNode(x, y, options={}){
+            return {id:uid('sp'), type:'smart-prompt', x, y, w:300, h:220, title:'Prompt', text:options.text || '', outputText:'', systemPrompt:'You are a helpful assistant. Rewrite the input into a concise image prompt.', running:false};
+        }
+        function createLoopNode(x, y){
+            return {id:uid('sl'), type:'smart-loop', x, y, w:300, h:210, title:'Loop', count:3, loopStart:1, text:'1. 生成第《计数》张图\n2. 调整画面节奏\n3. 继续扩展主题'};
+        }
+        function defaultPoint(dx=0, dy=0){
+            return screenToWorld(window.innerWidth / 2 + dx, window.innerHeight / 2 + dy);
+        }
+        function addConnectionRecord(fromId, toId){
+            if(!fromId || !toId || fromId === toId) return false;
+            if(connections.some(c => c.from === fromId && c.to === toId)) return false;
+            connections.push({id:uid('c'), from:fromId, to:toId, kind:'input'});
+            const to = nodes.find(n => n.id === toId);
+            if(to) to.inputNodeIds = Array.from(new Set([...(to.inputNodeIds || []), fromId]));
+            return true;
+        }
+        function addConnection(fromId, toId){
+            if(!addConnectionRecord(fromId, toId)) return;
+            render();
+            scheduleSave();
+        }
+        function outputKindForEngine(engine){
+            return engine === 'video' ? 'video' : 'image';
+        }
+        function outputTitleForEngine(engine, count=1){
+            if(engine === 'video') return count > 1 ? 'Videos' : 'Video';
+            if(engine === 'comfy') return count > 1 ? 'Comfy Outputs' : 'Comfy Output';
+            return count > 1 ? 'Generated' : 'Generated';
+        }
+        function outputNameForEngine(engine, index){
+            return `${engine === 'video' ? 'video' : 'result'}-${index + 1}`;
+        }
+        function expectedOutputCount(engine){
+            if(engine === 'image') return Math.max(1, Math.min(4, Number($('countInput').value) || 1));
+            return 1;
+        }
+        function aspectRatioFromSize(size){
+            const match = String(size || '').match(/(\d+(?:\.\d+)?)\s*(?:x|:)\s*(\d+(?:\.\d+)?)/i);
+            if(!match) return 1;
+            const w = Number(match[1]);
+            const h = Number(match[2]);
+            return w > 0 && h > 0 ? w / h : 1;
+        }
+        function outputAspectForEngine(engine){
+            if(engine === 'video') return 16 / 9;
+            if(engine === 'image') return aspectRatioFromSize($('sizeSelect').value || '1:1');
+            return 1;
+        }
+        function mediaNodeHeight(width, aspect=1, count=1){
+            const safeAspect = Math.max(.2, Number(aspect) || 1);
+            const bodyWidth = Math.max(120, Number(width || 280) - 26);
+            const gap = 8;
+            const columns = count <= 1 ? 1 : Math.max(1, Math.min(count, Math.floor((bodyWidth + gap) / (86 + gap))));
+            const rows = Math.max(1, Math.ceil(Math.max(1, count) / columns));
+            const tileWidth = (bodyWidth - gap * (columns - 1)) / columns;
+            const tileHeight = Math.max(84, tileWidth / safeAspect);
+            return Math.round(36 + 22 + rows * tileHeight + gap * (rows - 1));
+        }
+        function nodeDisplayHeight(node){
+            const el = nodesEl.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
+            return Number(node.h || el?.offsetHeight || 160);
+        }
+        function outputPointFor(sourceNode){
+            return sourceNode ? {x:(sourceNode.x || 0) + (sourceNode.w || 280) + 80, y:sourceNode.y || 0} : defaultPoint(180, -60);
+        }
+        function canReuseAsOutput(node){
+            return node?.type === 'smart-image' && !nodeImages(node).length && !node.running && !node.pending;
+        }
+        function prepareOutputNode(engine, sourceNode, count=1){
+            const outputKind = outputKindForEngine(engine);
+            const aspectRatio = outputAspectForEngine(engine);
+            if(canReuseAsOutput(sourceNode)){
+                sourceNode.images = [];
+                sourceNode.pending = count;
+                sourceNode.running = true;
+                sourceNode.outputKind = outputKind;
+                sourceNode.aspectRatio = aspectRatio;
+                sourceNode.w = Math.max(Number(sourceNode.w || 0), engine === 'video' ? 360 : 320);
+                sourceNode.h = mediaNodeHeight(sourceNode.w, aspectRatio, count);
+                sourceNode.title = outputTitleForEngine(engine, count);
+                delete sourceNode.error;
+                selectedIds = new Set([sourceNode.id]);
+                render();
+                return sourceNode;
+            }
+            const p = outputPointFor(sourceNode);
+            const w = engine === 'video' ? 360 : 320;
+            const node = createImageNode(p.x, p.y, [], {title:outputTitleForEngine(engine, count), pending:count, outputKind, w, h:mediaNodeHeight(w, aspectRatio, count), aspectRatio});
+            nodes.push(node);
+            if(sourceNode) addConnectionRecord(sourceNode.id, node.id);
+            selectedIds = new Set([node.id]);
+            render();
+            return node;
+        }
+        function finalizeOutputNode(node, urls, engine){
+            const cleanUrls = Array.from(new Set((urls || []).map(url => String(url || '').trim()).filter(Boolean)));
+            if(!node || !cleanUrls.length) throw new Error('生成完成但没有返回可用的输出地址');
+            node.images = cleanUrls.map((url, index) => ({url, name:outputNameForEngine(engine, index), kind:outputKindForEngine(engine)}));
+            node.title = outputTitleForEngine(engine, cleanUrls.length);
+            node.outputKind = outputKindForEngine(engine);
+            node.pending = 0;
+            node.running = false;
+            delete node.error;
+        }
+        function failOutputNode(node, error){
+            if(!node) return;
+            node.pending = 0;
+            node.running = false;
+            node.error = String(error?.message || error || '运行失败');
+            node.title = 'Run Failed';
+        }
+        function removeNode(id){
+            nodes = nodes.filter(n => n.id !== id);
+            connections = connections.filter(c => c.from !== id && c.to !== id);
+            nodes.forEach(n => n.inputNodeIds = (n.inputNodeIds || []).filter(x => x !== id));
+            selectedIds.delete(id);
+        }
+        function render(){
+            nodesEl.innerHTML = nodes.map(node => renderNode(node)).join('');
+            bindNodeEvents();
+            renderLinks();
+            renderInputThumbs();
+            renderComposerControls();
+            refreshIcons();
+        }
+        function renderNode(node){
+            const selected = selectedIds.has(node.id);
+            const kind = node.type === 'smart-group' ? 'group-node' : '';
+            const stateClass = node.error ? 'node-error' : (node.running || node.pending ? 'node-running' : '');
+            const sizeClass = node.h ? 'node-sized' : '';
+            const images = nodeImages(node);
+            const stateLabel = node.error ? 'ERR' : (node.running || node.pending ? 'RUN' : '');
+            const rawAspect = Number(node.aspectRatio || 1);
+            const aspect = rawAspect > 0 ? Math.max(.2, rawAspect) : 1;
+            const style = `left:${node.x || 0}px;top:${node.y || 0}px;width:${node.w || 280}px;--node-aspect:${aspect};${node.h ? `height:${node.h}px;` : ''}`;
+            return `<div class="smart-node ${nodeTypeClass(node)} ${kind} ${stateClass} ${sizeClass} ${selected ? 'selected' : ''}" data-id="${escapeHtml(node.id)}" style="${style}">
+                <button class="port port-in" type="button" data-port-in="${escapeHtml(node.id)}" title="输入"></button>
+                <button class="port port-out" type="button" data-port-out="${escapeHtml(node.id)}" title="输出"></button>
+                <div class="node-head">
+                    <div class="node-title-wrap">
+                        <span class="node-type">${escapeHtml(nodeTypeLabel(node))}</span>
+                        <div class="node-title">${escapeHtml(nodeLabel(node))}</div>
+                    </div>
+                    <div class="node-actions">
+                        ${images.length || stateLabel ? `<span class="node-count">${escapeHtml(images.length || stateLabel)}</span>` : ''}
+                        <button class="icon-btn" type="button" data-delete="${escapeHtml(node.id)}"><svg class="pixel-icon"><use href="#cross"></use></svg></button>
+                    </div>
+                </div>
+                <div class="node-body">${renderNodeBody(node)}</div>
+                ${selected ? `<button class="resize-handle" type="button" data-resize="${escapeHtml(node.id)}" title="调整大小" aria-label="调整大小"></button>` : ''}
+            </div>`;
+        }
+        function renderNodeBody(node){
+            if(node.type === 'smart-image' || node.type === 'smart-group'){
+                const images = nodeImages(node);
+                if(node.error) return `<div class="node-error-box"><strong>RUN FAILED</strong><span>${escapeHtml(node.error)}</span></div>`;
+                if(node.running || node.pending){
+                    const count = Math.max(1, Math.min(8, Number(node.pending) || 1));
+                    return `<div class="pending-grid ${count === 1 ? 'pending-grid-single' : ''}">${Array.from({length:count}, (_, index) => `<div class="pending-cell"><span>${escapeHtml(outputKindForEngine(node.outputKind === 'video' ? 'video' : 'image'))} ${index + 1}</span></div>`).join('')}</div>`;
+                }
+                if(!images.length) return `<div class="empty-drop" data-empty-upload="${escapeHtml(node.id)}"><svg class="pixel-icon"><use href="#upload"></use></svg><span>点击或拖入图片</span></div>`;
+                return `<div class="image-grid ${images.length === 1 ? 'image-grid-single' : ''}">${images.map((img, index) => `
+                    <div class="image-tile" draggable="true" data-drag-image="${escapeHtml(node.id)}" data-image-index="${index}" data-url="${escapeHtml(img.url)}" data-name="${escapeHtml(img.name || 'image')}">
+                        ${imageIsVideo(img) ? `<video src="${escapeHtml(img.url)}" muted playsinline controls></video>` : `<img src="${escapeHtml(img.url)}" alt="">`}
+                        <div class="image-caption">${escapeHtml(img.name || `image-${index + 1}`)}</div>
+                        <div class="tile-tools">
+                            <button class="icon-btn" type="button" data-save-asset="${escapeHtml(node.id)}" data-image-index="${index}" title="保存资产"><svg class="pixel-icon"><use href="#folder"></use></svg></button>
+                        </div>
+                    </div>`).join('')}</div>`;
+            }
+            if(node.type === 'smart-prompt'){
+                return `<textarea class="smart-textarea" data-prompt-text="${escapeHtml(node.id)}" placeholder="写入提示词，或运行 LLM 生成文本">${escapeHtml(node.text || '')}</textarea>
+                    ${node.outputText ? `<div class="empty-note node-output">${escapeHtml(node.outputText)}</div>` : ''}
+                    <div class="node-foot"><button class="mini-btn" type="button" data-run-llm-node="${escapeHtml(node.id)}"><svg class="pixel-icon"><use href="#tool-llm"></use></svg>${node.running ? '运行中' : 'Run LLM'}</button></div>`;
+            }
+            if(node.type === 'smart-loop'){
+                return `<div class="node-foot">
+                    <label class="field" style="width:78px"><span class="field-title">Count</span><input class="input-lite" type="number" min="1" max="100" data-loop-count="${escapeHtml(node.id)}" value="${Number(node.count || 1)}"></label>
+                    <label class="field" style="width:78px"><span class="field-title">Start</span><input class="input-lite" type="number" min="1" max="999" data-loop-start="${escapeHtml(node.id)}" value="${Number(node.loopStart || 1)}"></label>
+                </div>
+                <textarea class="smart-textarea" data-loop-text="${escapeHtml(node.id)}" style="margin-top:8px" placeholder="多行或编号提示词，每轮取一条">${escapeHtml(node.text || '')}</textarea>
+                <div class="empty-note loop-preview">${escapeHtml(loopTextFor(node, Number(node.loopStart || 1)) || '无轮次提示词')}</div>`;
+            }
+            return '';
+        }
+        function bindNodeEvents(){
+            nodesEl.querySelectorAll('.smart-node').forEach(el => {
+                const node = nodes.find(n => n.id === el.dataset.id);
+                el.addEventListener('mousedown', e => {
+                    if(e.target.closest('button, textarea, input, select, .image-tile')) return;
+                    e.stopPropagation();
+                    if(e.shiftKey){
+                        selectedIds.has(node.id) ? selectedIds.delete(node.id) : selectedIds.add(node.id);
+                    } else if(!selectedIds.has(node.id)) {
+                        selectedIds = new Set([node.id]);
+                    }
+                    const start = selectedNodes().map(n => ({id:n.id, x:n.x || 0, y:n.y || 0}));
+                    dragState = {sx:e.clientX, sy:e.clientY, start};
+                    render();
+                });
+            });
+            nodesEl.querySelectorAll('[data-delete]').forEach(btn => btn.onclick = e => {
+                e.stopPropagation();
+                removeNode(btn.dataset.delete);
+                render();
+                scheduleSave();
+            });
+            nodesEl.querySelectorAll('[data-resize]').forEach(handle => {
+                handle.onmousedown = e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const target = nodes.find(n => n.id === handle.dataset.resize);
+                    if(!target) return;
+                    if(!selectedIds.has(target.id)) selectedIds = new Set([target.id]);
+                    const items = selectedNodes().map(n => ({
+                        id:n.id,
+                        w:Number(n.w || 280),
+                        h:nodeDisplayHeight(n)
+                    }));
+                    resizeState = {sx:e.clientX, sy:e.clientY, items};
+                    nodesEl.querySelector(`[data-id="${CSS.escape(target.id)}"]`)?.classList.add('resizing');
+                };
+            });
+            nodesEl.querySelectorAll('[data-empty-upload]').forEach(el => el.onclick = () => {
+                selectedIds = new Set([el.dataset.emptyUpload]);
+                $('fileInput').click();
+            });
+            nodesEl.querySelectorAll('[data-prompt-text]').forEach(input => input.oninput = e => {
+                const node = nodes.find(n => n.id === input.dataset.promptText);
+                if(node) node.text = e.target.value;
+                scheduleSave();
+                renderInputThumbs();
+            });
+            nodesEl.querySelectorAll('[data-loop-text]').forEach(input => input.oninput = e => {
+                const node = nodes.find(n => n.id === input.dataset.loopText);
+                if(node) node.text = e.target.value;
+                scheduleSave();
+                renderInputThumbs();
+            });
+            nodesEl.querySelectorAll('[data-loop-count]').forEach(input => input.oninput = e => {
+                const node = nodes.find(n => n.id === input.dataset.loopCount);
+                if(node) node.count = Math.max(1, Math.min(100, Number(e.target.value) || 1));
+                scheduleSave();
+            });
+            nodesEl.querySelectorAll('[data-loop-start]').forEach(input => input.oninput = e => {
+                const node = nodes.find(n => n.id === input.dataset.loopStart);
+                if(node) node.loopStart = Math.max(1, Number(e.target.value) || 1);
+                scheduleSave();
+            });
+            nodesEl.querySelectorAll('[data-run-llm-node]').forEach(btn => btn.onclick = e => {
+                e.stopPropagation();
+                runPromptLLMNode(btn.dataset.runLlmNode);
+            });
+            nodesEl.querySelectorAll('[data-save-asset]').forEach(btn => btn.onclick = async e => {
+                e.stopPropagation();
+                const node = nodes.find(n => n.id === btn.dataset.saveAsset);
+                const img = nodeImages(node)[Number(btn.dataset.imageIndex || 0)];
+                if(img?.url) await addUrlToAssetLibrary(img.url, img.name || nodeLabel(node));
+            });
+            nodesEl.querySelectorAll('[data-drag-image]').forEach(tile => {
+                tile.addEventListener('dragstart', e => {
+                    e.stopPropagation();
+                    e.dataTransfer.effectAllowed = 'copy';
+                    e.dataTransfer.setData('application/x-smart-image', JSON.stringify({url:tile.dataset.url, name:tile.dataset.name}));
+                    e.dataTransfer.setData('text/plain', tile.dataset.url || '');
+                });
+            });
+            nodesEl.querySelectorAll('[data-port-out]').forEach(port => {
+                port.onmousedown = e => {
+                    e.stopPropagation();
+                    linkState = {from:port.dataset.portOut, x:e.clientX, y:e.clientY};
+                    renderLinks();
+                };
+            });
+            nodesEl.querySelectorAll('[data-port-in]').forEach(port => {
+                port.onmouseup = e => {
+                    e.stopPropagation();
+                    if(linkState) addConnection(linkState.from, port.dataset.portIn);
+                    linkState = null;
+                    renderLinks();
+                };
+            });
+        }
+        function nodeAnchor(node, side){
+            const w = Number(node.w || 280);
+            const h = node.h || Math.max(160, nodesEl.querySelector(`[data-id="${CSS.escape(node.id)}"]`)?.offsetHeight || 160);
+            return {x:(node.x || 0) + (side === 'out' ? w : 0), y:(node.y || 0) + h / 2};
+        }
+        function renderLinks(){
+            const paths = [];
+            connections.forEach(conn => {
+                const from = nodes.find(n => n.id === conn.from);
+                const to = nodes.find(n => n.id === conn.to);
+                if(!from || !to) return;
+                const a = nodeAnchor(from, 'out');
+                const b = nodeAnchor(to, 'in');
+                const mid = Math.max(40, Math.abs(b.x - a.x) / 2);
+                paths.push(`<path class="link-line" d="M ${a.x} ${a.y} C ${a.x + mid} ${a.y}, ${b.x - mid} ${b.y}, ${b.x} ${b.y}"/>`);
+            });
+            if(linkState){
+                const from = nodes.find(n => n.id === linkState.from);
+                if(from){
+                    const a = nodeAnchor(from, 'out');
+                    const b = screenToWorld(linkState.x, linkState.y);
+                    const mid = Math.max(40, Math.abs(b.x - a.x) / 2);
+                    paths.push(`<path class="link-line temp" d="M ${a.x} ${a.y} C ${a.x + mid} ${a.y}, ${b.x - mid} ${b.y}, ${b.x} ${b.y}"/>`);
+                }
+            }
+            linksEl.innerHTML = paths.join('');
+        }
+        function renderInputThumbs(){
+            const node = selectedNode();
+            const refs = uniqueImages([...lineImagesFor(node), ...collectMentionedImages()]);
+            inputThumbs.innerHTML = refs.map(ref => `<div class="input-thumb" title="${escapeHtml(ref.name || '')}">${imageIsVideo(ref) ? `<video src="${escapeHtml(ref.url)}" muted playsinline></video>` : `<img src="${escapeHtml(ref.url)}" alt="">`}</div>`).join('');
+        }
+        function renderComposerControls(){
+            const engine = $('engineSelect').value;
+            const kind = engine === 'video' ? 'video' : engine === 'llm' ? 'chat' : 'image';
+            const provider = defaultProvider(kind);
+            const providers = enabledProviders(kind);
+            $('providerSelect').style.display = engine === 'comfy' ? 'none' : '';
+            $('modelSelect').style.display = engine === 'comfy' ? 'none' : '';
+            $('workflowSelect').style.display = engine === 'comfy' ? '' : 'none';
+            $('sizeSelect').closest('.field').style.display = engine === 'llm' ? 'none' : '';
+            $('countInput').closest('.field').style.display = engine === 'image' ? '' : 'none';
+            if(engine !== 'comfy'){
+                let currentProvider = $('providerSelect').value || provider.id;
+                if(!providers.some(p => p.id === currentProvider)) currentProvider = provider.id;
+                $('providerSelect').innerHTML = providers.length
+                    ? providers.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === currentProvider ? 'selected' : ''}>${escapeHtml(p.name || p.id)}</option>`).join('')
+                    : '<option value="">没有可用平台</option>';
+                $('providerSelect').value = currentProvider;
+                const models = providerModels(kind, currentProvider);
+                const currentModel = $('modelSelect').value || models[0] || '';
+                $('modelSelect').innerHTML = models.map(m => `<option value="${escapeHtml(m)}" ${m === currentModel ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+            } else {
+                $('workflowSelect').innerHTML = comfyWorkflows.length
+                    ? comfyWorkflows.map(w => `<option value="${escapeHtml(w.name)}">${escapeHtml(w.title || w.name)}</option>`).join('')
+                    : '<option value="">没有自定义工作流</option>';
+            }
+        }
+        async function uploadFiles(files, point=null){
+            const list = [...(files || [])].filter(file => file.type.startsWith('image/'));
+            if(!list.length) return;
+            const form = new FormData();
+            list.forEach(file => form.append('files', file));
+            const data = await fetchJson('/api/ai/upload', {method:'POST', body:form});
+            const p = point || defaultPoint(-120, -40);
+            (data.files || []).forEach((file, index) => addNode(createImageNode(p.x + index * 36, p.y + index * 36, [{url:file.url, name:file.name || `image-${index + 1}`}], {title:file.name || 'Image'})));
+        }
+
+        async function loadAssetLibrary(){
+            try {
+                const data = await fetchJson('/api/asset-library');
+                assetLibrary = data.library || {categories:[]};
+                renderAssetLibrary();
+            } catch(e) {
+                console.error(e);
+            }
+        }
+        function assetCategories(){ return assetLibrary.categories || []; }
+        function activeAssetCategory(){
+            const cats = assetCategories();
+            return cats.find(cat => cat.id === assetCategorySelect.value) || cats[0] || null;
+        }
+        function setAssetLibrary(data){
+            assetLibrary = data.library || assetLibrary;
+            renderAssetLibrary();
+        }
+        function renderAssetLibrary(){
+            const cats = assetCategories();
+            const current = assetCategorySelect.value || cats[0]?.id || '';
+            assetCategorySelect.innerHTML = cats.map(cat => `<option value="${escapeHtml(cat.id)}" ${cat.id === current ? 'selected' : ''}>${escapeHtml(cat.name || '图片资产')}</option>`).join('');
+            const cat = activeAssetCategory();
+            const items = cat?.items || [];
+            const assetCount = $('assetCount');
+            if(assetCount) assetCount.textContent = `${items.length} ITEMS`;
+            assetGrid.innerHTML = items.length ? items.map(item => `
+                <div class="asset-item" draggable="true" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name || 'asset')}">
+                    <img src="${escapeHtml(item.url)}" alt="">
+                    <div class="asset-meta">
+                        <span class="asset-name" title="${escapeHtml(item.name || '')}">${escapeHtml(item.name || 'asset')}</span>
+                        <button class="icon-btn" type="button" data-rename-asset="${escapeHtml(item.id)}"><svg class="pixel-icon"><use href="#nav-klein"></use></svg></button>
+                        <button class="icon-btn" type="button" data-delete-asset="${escapeHtml(item.id)}"><svg class="pixel-icon"><use href="#trash"></use></svg></button>
+                    </div>
+                </div>`).join('') : '<div class="empty-note" style="grid-column:1/-1">资产库为空。保存画布图片或拖入本地输出图片。</div>';
+            assetGrid.querySelectorAll('.asset-item').forEach(el => {
+                el.addEventListener('dragstart', e => {
+                    e.dataTransfer.effectAllowed = 'copy';
+                    e.dataTransfer.setData('application/x-smart-asset', JSON.stringify({url:el.dataset.url, name:el.dataset.name}));
+                    e.dataTransfer.setData('text/plain', el.dataset.url || '');
+                });
+            });
+            assetGrid.querySelectorAll('[data-rename-asset]').forEach(btn => btn.onclick = async e => {
+                e.stopPropagation();
+                const name = prompt('资产名称', btn.closest('.asset-item')?.dataset.name || '');
+                if(!name) return;
+                setAssetLibrary(await fetchJson(`/api/asset-library/items/${encodeURIComponent(btn.dataset.renameAsset)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}));
+            });
+            assetGrid.querySelectorAll('[data-delete-asset]').forEach(btn => btn.onclick = async e => {
+                e.stopPropagation();
+                if(!confirm('删除这个资产？')) return;
+                setAssetLibrary(await fetchJson(`/api/asset-library/items/${encodeURIComponent(btn.dataset.deleteAsset)}`, {method:'DELETE'}));
+            });
+            refreshIcons();
+        }
+        async function addUrlToAssetLibrary(url, name='asset'){
+            if(!assetLibraryOpen){
+                assetLibraryOpen = true;
+                assetPanel.classList.add('open');
+                await loadAssetLibrary();
+            }
+            const cat = activeAssetCategory();
+            if(!cat) throw new Error('没有资产文件夹');
+            setAssetLibrary(await fetchJson('/api/asset-library/items', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({category_id:cat.id, url, name})}));
+            setStatus('ASSET SAVED');
+        }
+
+        function uniqueImages(images){
+            const seen = new Set();
+            return (images || []).filter(img => {
+                if(!img?.url || seen.has(img.url)) return false;
+                seen.add(img.url);
+                return true;
+            });
+        }
+        function collectMentionedImages(){
+            const images = [];
+            promptInput.querySelectorAll('.mention-token').forEach(token => {
+                if(token.dataset.url) images.push({url:token.dataset.url, name:token.dataset.name || 'image', role:token.dataset.source || 'mention'});
+            });
+            return images;
+        }
+        function mentionCandidates(source=mentionSource){
+            if(source === 'asset'){
+                return assetCategories().flatMap(cat => (cat.items || []).map(item => ({url:item.url, name:item.name || 'asset', source:'asset'})));
+            }
+            return lineImagesFor(selectedNode()).map((img, index) => ({...img, name:img.name || `图片${index + 1}`, source:'input'}));
+        }
+        function saveMentionRange(){
+            const sel = window.getSelection();
+            if(sel && sel.rangeCount && promptInput.contains(sel.anchorNode)){
+                mentionRange = sel.getRangeAt(0).cloneRange();
+            }
+        }
+        function textBeforeCaret(){
+            const sel = window.getSelection();
+            if(!sel || !sel.rangeCount || !promptInput.contains(sel.anchorNode)) return '';
+            const range = sel.getRangeAt(0).cloneRange();
+            range.selectNodeContents(promptInput);
+            range.setEnd(sel.anchorNode, sel.anchorOffset);
+            return range.toString();
+        }
+        function renderMentionPicker(source=mentionSource){
+            mentionSource = source;
+            const inputItems = mentionCandidates('input');
+            const assetItems = mentionCandidates('asset');
+            if(mentionSource === 'input' && !inputItems.length && assetItems.length) mentionSource = 'asset';
+            if(mentionSource === 'asset' && !assetItems.length && inputItems.length) mentionSource = 'input';
+            const items = (mentionSource === 'asset' ? assetItems : inputItems).slice(0, 32);
+            if(!items.length){ closeMentionPicker(); return; }
+            mentionPicker.innerHTML = `
+                <div class="mention-tabs">
+                    <button type="button" data-mention-source="input" class="${mentionSource === 'input' ? 'active' : ''}" ${inputItems.length ? '' : 'disabled'}>上游图片</button>
+                    <button type="button" data-mention-source="asset" class="${mentionSource === 'asset' ? 'active' : ''}" ${assetItems.length ? '' : 'disabled'}>资产库</button>
+                </div>
+                <div class="mention-grid">${items.map((img, index) => `
+                    <button class="mention-option" type="button" data-mention-index="${index}">
+                        <img src="${escapeHtml(img.url)}" alt=""><span>${escapeHtml(img.name || 'image')}</span>
+                    </button>`).join('')}</div>`;
+            mentionPicker._items = items;
+            mentionPicker.classList.add('open');
+            mentionPicker.querySelectorAll('[data-mention-source]').forEach(btn => btn.onmousedown = e => {
+                e.preventDefault();
+                if(!btn.disabled) renderMentionPicker(btn.dataset.mentionSource);
+            });
+            mentionPicker.querySelectorAll('[data-mention-index]').forEach(btn => btn.onmousedown = e => {
+                e.preventDefault();
+                insertMentionToken(mentionPicker._items[Number(btn.dataset.mentionIndex)]);
+            });
+        }
+        function closeMentionPicker(){
+            mentionPicker.classList.remove('open');
+            mentionPicker.innerHTML = '';
+        }
+        function maybeOpenMentionPicker(){
+            saveMentionRange();
+            if(/@$/.test(textBeforeCaret())) renderMentionPicker();
+            else closeMentionPicker();
+        }
+        function insertMentionToken(img){
+            if(!img?.url) return;
+            promptInput.focus();
+            const sel = window.getSelection();
+            if(mentionRange){
+                sel.removeAllRanges();
+                sel.addRange(mentionRange);
+            }
+            const range = sel.rangeCount ? sel.getRangeAt(0) : document.createRange();
+            if(range.startContainer?.nodeType === Node.TEXT_NODE && range.startOffset > 0){
+                const text = range.startContainer.textContent || '';
+                if(text[range.startOffset - 1] === '@'){
+                    range.setStart(range.startContainer, range.startOffset - 1);
+                    range.deleteContents();
+                }
+            }
+            const token = document.createElement('span');
+            token.className = 'mention-token';
+            token.contentEditable = 'false';
+            token.dataset.url = img.url;
+            token.dataset.name = img.name || 'image';
+            token.dataset.source = img.source || '';
+            token.innerHTML = `<img src="${escapeHtml(img.url)}" alt=""><span>${escapeHtml(img.name || 'image')}</span>`;
+            range.insertNode(token);
+            const spacer = document.createTextNode(' ');
+            token.after(spacer);
+            range.setStartAfter(spacer);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            closeMentionPicker();
+            renderInputThumbs();
+        }
+        function collectPromptText(){
+            let text = '';
+            const walk = node => {
+                if(node.nodeType === Node.TEXT_NODE){ text += node.textContent || ''; return; }
+                if(node.nodeType !== Node.ELEMENT_NODE) return;
+                if(node.classList?.contains('mention-token')){ text += `@${node.dataset.name || 'image'}`; return; }
+                if(node.tagName === 'BR') text += '\n';
+                node.childNodes.forEach(walk);
+                if(node !== promptInput && ['DIV','P'].includes(node.tagName)) text += '\n';
+            };
+            promptInput.childNodes.forEach(walk);
+            return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        }
+        function promptRequestFor(node){
+            const composerText = collectPromptText();
+            const upstreamText = inputPromptTextFor(node);
+            const prompt = [upstreamText, composerText].filter(Boolean).join('\n\n').trim();
+            const refs = uniqueImages([...lineImagesFor(node), ...collectMentionedImages()]).map((img, index) => ({...img, role:img.role || `image_${index + 1}`}));
+            return {prompt:prompt || 'Edit the reference images.', refs};
+        }
+        async function pollImageTask(taskId){
+            const deadline = Date.now() + 30 * 60 * 1000;
+            while(Date.now() < deadline){
+                const task = await fetchJson(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
+                if(task.status === TASK_SUCCEEDED) return task.result || {};
+                if(task.status === TASK_FAILED || task.status === 'timeout') throw new Error(task.error || '生成失败');
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+            throw new Error('生成任务超时');
+        }
+        async function runGeneration(){
+            const engine = $('engineSelect').value;
+            const sourceNode = selectedNode();
+            const p = outputPointFor(sourceNode);
+            const request = promptRequestFor(sourceNode);
+            $('runBtn').disabled = true;
+            setStatus('RUNNING');
+            let outputNode = null;
+            try {
+                let urls = [];
+                let outNode = null;
+                if(engine === 'llm'){
+                    const providerId = selectedProviderId('chat');
+                    const result = await fetchJson('/api/canvas-llm', {
+                        method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body:JSON.stringify({
+                            message:request.prompt,
+                            images:request.refs.map(ref => ref.url),
+                            provider:providerId,
+                            model:$('modelSelect').value || providerModels('chat', providerId)[0] || '',
+                            system_prompt:'You are a helpful assistant. Rewrite the user input into a concise production-ready image prompt.'
+                        })
+                    });
+                    outNode = createPromptNode(p.x, p.y, {text:result.text || ''});
+                    outNode.outputText = result.text || '';
+                } else if(engine === 'video'){
+                    const providerId = selectedProviderId('video');
+                    outputNode = prepareOutputNode(engine, sourceNode, expectedOutputCount(engine));
+                    const result = await fetchJson('/api/canvas-video', {
+                        method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body:JSON.stringify({
+                            prompt:request.prompt,
+                            images:request.refs,
+                            provider_id:providerId,
+                            model:$('modelSelect').value || providerModels('video', providerId)[0] || '',
+                            duration:5,
+                            aspect_ratio:'16:9',
+                            resolution:''
+                        })
+                    });
+                    urls = result.videos || [];
+                } else if(engine === 'comfy'){
+                    const workflow = $('workflowSelect').value;
+                    if(!workflow) throw new Error('没有可运行的自定义工作流');
+                    outputNode = prepareOutputNode(engine, sourceNode, expectedOutputCount(engine));
+                    const result = await fetchJson('/api/generate', {
+                        method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body:JSON.stringify({prompt:request.prompt, workflow_json:workflow, type:'custom', width:1024, height:1024, params:{}, client_id:CLIENT_ID})
+                    });
+                    if(result.status === TASK_FAILED) throw new Error(result.error || 'ComfyUI 生成失败');
+                    urls = result.images || [];
+                } else {
+                    const providerId = selectedProviderId('image');
+                    const count = expectedOutputCount(engine);
+                    outputNode = prepareOutputNode(engine, sourceNode, count);
+                    const payload = {
+                        prompt:request.prompt,
+                        provider_id:providerId,
+                        model:$('modelSelect').value || providerModels('image', providerId)[0] || '',
+                        size:$('sizeSelect').value || '1024x1024',
+                        quality:'auto',
+                        reference_images:request.refs
+                    };
+                    const tasks = await Promise.all(Array.from({length:count}, () => fetchJson('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})));
+                    const results = await Promise.all(tasks.map(task => pollImageTask(task.task_id)));
+                    urls = results.flatMap(result => result.images || []);
+                }
+                if(outNode){
+                    nodes.push(outNode);
+                    if(sourceNode) addConnectionRecord(sourceNode.id, outNode.id);
+                    selectedIds = new Set([outNode.id]);
+                } else {
+                    finalizeOutputNode(outputNode, urls, engine);
+                    selectedIds = new Set([outputNode.id]);
+                }
+                render();
+                scheduleSave();
+                setStatus('DONE');
+            } catch(e) {
+                if(outputNode){
+                    failOutputNode(outputNode, e);
+                    selectedIds = new Set([outputNode.id]);
+                    render();
+                    scheduleSave();
+                }
+                setStatus('RUN FAILED');
+                alert(e.message || '运行失败');
+            } finally {
+                $('runBtn').disabled = false;
+            }
+        }
+        async function runPromptLLMNode(nodeId){
+            const node = nodes.find(n => n.id === nodeId);
+            if(!node || node.running) return;
+            node.running = true;
+            render();
+            try {
+                const text = [inputPromptTextFor(node), node.text || ''].filter(Boolean).join('\n\n') || 'Rewrite this into a concise image prompt.';
+                const images = lineImagesFor(node).map(img => img.url);
+                const providerId = defaultProvider('chat').id;
+                const result = await fetchJson('/api/canvas-llm', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text, images, provider:providerId, model:providerModels('chat', providerId)[0] || '', system_prompt:node.systemPrompt || 'You are a helpful assistant.'})});
+                node.outputText = result.text || '';
+                node.text = node.outputText;
+                scheduleSave();
+            } catch(e) {
+                alert(e.message || 'LLM 运行失败');
+            } finally {
+                node.running = false;
+                render();
+            }
+        }
+        function groupSelectedNodes(){
+            const imgs = selectedNodes().filter(n => ['smart-image','smart-group'].includes(n.type));
+            if(imgs.length < 2) return;
+            const images = uniqueImages(imgs.flatMap(nodeImages));
+            const minX = Math.min(...imgs.map(n => n.x || 0));
+            const minY = Math.min(...imgs.map(n => n.y || 0));
+            const group = {id:uid('grp'), type:'smart-group', x:minX - 24, y:minY - 24, w:330, title:'Group', images};
+            nodes.push(group);
+            selectedIds = new Set([group.id]);
+            render();
+            scheduleSave();
+        }
+        function copySelectedNodes(){
+            clipboard = selectedNodes().map(n => JSON.parse(JSON.stringify(n)));
+            setStatus(`COPIED ${clipboard.length}`);
+        }
+        function pasteNodes(){
+            if(!clipboard.length) return;
+            const idMap = {};
+            const pasted = clipboard.map(n => {
+                const next = JSON.parse(JSON.stringify(n));
+                idMap[n.id] = uid(n.type === 'smart-prompt' ? 'sp' : 'img');
+                next.id = idMap[n.id];
+                next.x = (next.x || 0) + 36;
+                next.y = (next.y || 0) + 36;
+                return next;
+            });
+            nodes.push(...pasted);
+            selectedIds = new Set(pasted.map(n => n.id));
+            render();
+            scheduleSave();
+        }
+
+        board.addEventListener('mousedown', e => {
+            if(e.target !== board && e.target !== world && e.target !== linksEl && e.target !== nodesEl) return;
+            selectedIds.clear();
+            panState = {sx:e.clientX, sy:e.clientY, x:viewport.x, y:viewport.y};
+            board.classList.add('dragging-board');
+            render();
+        });
+        window.addEventListener('mousemove', e => {
+            if(resizeState){
+                const dx = (e.clientX - resizeState.sx) / viewport.scale;
+                const dy = (e.clientY - resizeState.sy) / viewport.scale;
+                resizeState.items.forEach(item => {
+                    const node = nodes.find(n => n.id === item.id);
+                    if(!node) return;
+                    node.w = Math.round(Math.max(180, item.w + dx));
+                    node.h = Math.round(Math.max(150, item.h + dy));
+                    const el = nodesEl.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
+                    if(el){
+                        el.style.width = `${node.w}px`;
+                        el.style.height = `${node.h}px`;
+                        el.classList.add('node-sized', 'resizing');
+                    }
+                });
+                renderLinks();
+            } else if(dragState){
+                const dx = (e.clientX - dragState.sx) / viewport.scale;
+                const dy = (e.clientY - dragState.sy) / viewport.scale;
+                dragState.start.forEach(item => {
+                    const node = nodes.find(n => n.id === item.id);
+                    if(node){ node.x = item.x + dx; node.y = item.y + dy; }
+                });
+                nodesEl.querySelectorAll('.smart-node').forEach(el => {
+                    const node = nodes.find(n => n.id === el.dataset.id);
+                    if(node){ el.style.left = `${node.x}px`; el.style.top = `${node.y}px`; }
+                });
+                renderLinks();
+            } else if(panState){
+                viewport.x = panState.x + e.clientX - panState.sx;
+                viewport.y = panState.y + e.clientY - panState.sy;
+                applyViewport();
+            } else if(linkState){
+                linkState.x = e.clientX;
+                linkState.y = e.clientY;
+                renderLinks();
+            }
+        });
+        window.addEventListener('mouseup', () => {
+            if(resizeState){
+                render();
+                scheduleSave();
+            }
+            if(dragState || panState) scheduleSave();
+            resizeState = null;
+            dragState = null;
+            panState = null;
+            linkState = null;
+            board.classList.remove('dragging-board');
+            renderLinks();
+        });
+        board.addEventListener('wheel', e => {
+            if(!e.ctrlKey && !e.metaKey) return;
+            e.preventDefault();
+            const before = screenToWorld(e.clientX, e.clientY);
+            const nextScale = Math.max(.25, Math.min(2, viewport.scale * (e.deltaY > 0 ? .9 : 1.1)));
+            viewport.scale = nextScale;
+            const rect = board.getBoundingClientRect();
+            viewport.x = e.clientX - rect.left - before.x * viewport.scale;
+            viewport.y = e.clientY - rect.top - before.y * viewport.scale;
+            applyViewport();
+            scheduleSave();
+        }, {passive:false});
+        document.addEventListener('keydown', e => {
+            if(e.target.closest('input, textarea, [contenteditable="true"]')) return;
+            if(e.key === 'Delete' || e.key === 'Backspace'){
+                selectedIds.forEach(removeNode);
+                render();
+                scheduleSave();
+            }
+            if((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') copySelectedNodes();
+            if((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') pasteNodes();
+        });
+        document.addEventListener('dragover', e => {
+            e.preventDefault();
+            $('dropOverlay').classList.add('open');
+        });
+        document.addEventListener('dragleave', e => {
+            if(e.clientX <= 0 || e.clientY <= 0 || e.clientX >= innerWidth || e.clientY >= innerHeight) $('dropOverlay').classList.remove('open');
+        });
+        document.addEventListener('drop', async e => {
+            e.preventDefault();
+            $('dropOverlay').classList.remove('open');
+            const assetPayload = e.dataTransfer.getData('application/x-smart-asset') || e.dataTransfer.getData('application/x-smart-image');
+            const point = screenToWorld(e.clientX, e.clientY);
+            if(assetPayload){
+                const item = JSON.parse(assetPayload);
+                addNode(createImageNode(point.x, point.y, [{url:item.url, name:item.name || 'asset'}], {title:item.name || 'Asset'}));
+                return;
+            }
+            await uploadFiles(e.dataTransfer.files, point);
+        });
+        assetPanel.addEventListener('dragover', e => {
+            e.preventDefault();
+            assetPanel.classList.add('drag-over');
+        });
+        assetPanel.addEventListener('dragleave', () => assetPanel.classList.remove('drag-over'));
+        assetPanel.addEventListener('drop', async e => {
+            e.preventDefault();
+            assetPanel.classList.remove('drag-over');
+            const payload = e.dataTransfer.getData('application/x-smart-image');
+            if(payload){
+                const item = JSON.parse(payload);
+                await addUrlToAssetLibrary(item.url, item.name || 'asset');
+            }
+        });
+        promptInput.addEventListener('keyup', maybeOpenMentionPicker);
+        promptInput.addEventListener('mouseup', saveMentionRange);
+        promptInput.addEventListener('input', () => {
+            maybeOpenMentionPicker();
+            renderInputThumbs();
+        });
+        document.addEventListener('mousedown', e => {
+            if(!e.target.closest('.mention-picker') && !e.target.closest('#promptInput')) closeMentionPicker();
+        });
+        $('engineSelect').onchange = () => { renderComposerControls(); scheduleSave(); };
+        $('providerSelect').onchange = renderComposerControls;
+        $('runBtn').onclick = runGeneration;
+        $('backBtn').onclick = () => { saveCanvas(); location.href = '/static/canvas.html'; };
+        titleInput.oninput = scheduleSave;
+        $('uploadBtn').onclick = () => $('fileInput').click();
+        $('fileInput').onchange = e => uploadFiles(e.target.files);
+        $('promptNodeBtn').onclick = () => { const p = defaultPoint(-80, -40); addNode(createPromptNode(p.x, p.y)); };
+        $('loopNodeBtn').onclick = () => { const p = defaultPoint(-60, -30); addNode(createLoopNode(p.x, p.y)); };
+        $('groupBtn').onclick = groupSelectedNodes;
+        $('copyBtn').onclick = copySelectedNodes;
+        $('pasteBtn').onclick = pasteNodes;
+        $('deleteBtn').onclick = () => { selectedIds.forEach(removeNode); render(); scheduleSave(); };
+        $('assetToggle').onclick = async () => {
+            assetLibraryOpen = !assetLibraryOpen;
+            assetPanel.classList.toggle('open', assetLibraryOpen);
+            if(assetLibraryOpen) await loadAssetLibrary();
+        };
+        $('assetCloseBtn').onclick = () => {
+            assetLibraryOpen = false;
+            assetPanel.classList.remove('open');
+        };
+        assetCategorySelect.onchange = renderAssetLibrary;
+        $('assetAddFolderBtn').onclick = async () => {
+            const name = prompt('文件夹名称', '图片资产');
+            if(!name) return;
+            setAssetLibrary(await fetchJson('/api/asset-library/categories', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}));
+        };
+        $('assetRenameFolderBtn').onclick = async () => {
+            const cat = activeAssetCategory();
+            if(!cat) return;
+            const name = prompt('文件夹名称', cat.name || '图片资产');
+            if(!name) return;
+            setAssetLibrary(await fetchJson(`/api/asset-library/categories/${encodeURIComponent(cat.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}));
+        };
+        $('assetDeleteFolderBtn').onclick = async () => {
+            const cat = activeAssetCategory();
+            if(!cat || !confirm('删除这个资产文件夹？')) return;
+            setAssetLibrary(await fetchJson(`/api/asset-library/categories/${encodeURIComponent(cat.id)}`, {method:'DELETE'}));
+        };
+        window.addEventListener('beforeunload', () => {
+            if(dirtySinceSave) saveLocalDraft();
+            if(saveTimer) clearTimeout(saveTimer);
+        });
+        (async function init(){
+            try {
+                await loadConfig();
+                await loadCanvas();
+                await loadAssetLibrary();
+            } catch(e) {
+                console.error(e);
+                setStatus('LOAD FAILED');
+                alert(e.message || '智能画布加载失败');
+            }
+        })();
+    </script>
+</body>
+</html>
