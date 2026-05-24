@@ -15,10 +15,10 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.05.22.1"></script>
-    <script src="/static/vendor/js/lucide.js?v=2026.05.22.1"></script>
-    <script src="/static/js/theme.js?v=2026.05.22.1"></script>
-    <script src="/static/js/i18n.js?v=2026.05.22.1"></script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.05.24"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.05.24"></script>
+    <script src="/static/js/theme.js?v=2026.05.24"></script>
+    <script src="/static/js/i18n.js?v=2026.05.24"></script>
     <style>
         :root { --bg:#f7f8fa; --panel:#fff; --soft:#f1f4f8; --line:#e8ecf2; --line-strong:#dbe1ea; --text:#0f172a; --muted:#64748b; --faint:#94a3b8; --accent:#0f172a; }
         body.studio-theme-dark, html.studio-theme-dark body { --bg:#0e1014; --panel:#1c1e26; --soft:#272a33; --line:#323540; --line-strong:#3f424d; --text:#e8e8ea; --muted:#a4adbf; --faint:#7a8497; --accent:#f5f6f8; }
@@ -215,7 +215,11 @@
         .pfield-image-drop { padding:18px; border:1px dashed var(--line-strong); border-radius:12px; text-align:center; color:var(--muted); font-size:11.5px; font-weight:700; background:var(--soft); cursor:pointer; transition:all .15s ease; }
         .pfield-image-drop:hover { border-color:var(--text); color:var(--text); }
         .pfield-image-drop.has-image { padding:0; border-style:solid; }
-        .pfield-image-drop img { width:100%; max-height:160px; object-fit:contain; border-radius:11px; display:block; }
+        .pfield-image-drop img, .pfield-image-drop video { width:100%; max-height:160px; object-fit:contain; border-radius:11px; display:block; }
+        .pfield-image-drop audio { width:100%; margin:12px 0 4px; }
+        .media-file-chip { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; min-height:96px; padding:14px; color:var(--muted); }
+        .media-file-chip i { color:var(--text); }
+        .media-file-name { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:800; }
         .run-btn { width:100%; height:42px; padding:0 16px; border-radius:12px; background:var(--accent); color:var(--bg); display:inline-flex; align-items:center; justify-content:center; gap:8px; font-size:13px; font-weight:850; transition:all .15s ease; }
         .run-btn:hover { transform:translateY(-1px); box-shadow:0 8px 20px rgba(15,23,42,.18); }
         .run-btn:disabled { opacity:.6; cursor:not-allowed; transform:none; box-shadow:none; }
@@ -243,7 +247,8 @@
         .mini-textarea { width:100%; min-height:92px; resize:vertical; border:1px solid var(--line); border-radius:10px; background:var(--soft); color:var(--text); outline:none; padding:8px; font-size:12px; font-weight:650; line-height:1.45; user-select:text; }
         .mini-input { width:100%; height:32px; border:1px solid var(--line); border-radius:9px; background:var(--soft); color:var(--text); outline:none; padding:0 9px; font-size:12px; font-weight:650; user-select:text; }
         .mini-image-drop { min-height:120px; border:1px dashed var(--line-strong); border-radius:10px; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--muted); background:var(--soft); font-size:11px; font-weight:800; cursor:pointer; }
-        .mini-image-drop img { width:100%; max-height:170px; object-fit:contain; border-radius:9px; display:block; }
+        .mini-image-drop img, .mini-image-drop video { width:100%; max-height:170px; object-fit:contain; border-radius:9px; display:block; }
+        .mini-image-drop audio { width:100%; padding:0 8px; }
         .mini-settings-list { display:flex; flex-direction:column; gap:8px; max-height:230px; overflow:auto; }
         .mini-result img { width:100%; border-radius:9px; display:block; cursor:zoom-in; }
         .image-lightbox { position:fixed; inset:0; z-index:100; display:none; align-items:center; justify-content:center; padding:36px; background:rgba(15,23,42,.42); backdrop-filter:blur(16px); }
@@ -256,7 +261,7 @@
         .mini-run { margin-top:10px; }
         @media (max-width:1100px) { .layout { grid-template-columns:1fr; } .sidebar, .preview { position:static; } }
     </style>
-    <link rel="stylesheet" href="/static/css/theme.css?v=2026.05.22.1">
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.05.24">
 </head>
 <body>
     <div class="page">
@@ -384,6 +389,8 @@
             { v:'slider', zh:'滑块', en:'Slider' },
             { v:'dropdown', zh:'下拉框', en:'Dropdown' },
             { v:'image', zh:'图片', en:'Image' },
+            { v:'video', zh:'视频', en:'Video' },
+            { v:'audio', zh:'音频', en:'Audio' },
             { v:'boolean', zh:'开关', en:'Switch' },
         ];
         function currentLang(){ return window.StudioI18n?.lang?.() === 'en' ? 'en' : 'zh'; }
@@ -508,10 +515,40 @@
         function escapeHtml(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
         function escapeAttr(s){ return escapeHtml(s); }
         function fieldKind(f){
-            if(f.type === 'image') return 'image';
+            if(['image','video','audio'].includes(f.type)) return f.type;
             const key = `${f.input || ''} ${f.name || ''}`.toLowerCase();
             if(f.type === 'textarea' || /prompt|text|提示词|正向|负向/.test(key)) return 'prompt';
             return 'setting';
+        }
+        function isMediaField(f){ return ['image','video','audio'].includes(fieldKind(f)); }
+        function mediaFieldLabel(kind, count){
+            const labels = currentLang() === 'en'
+                ? {image:'Images', video:'Videos', audio:'Audio'}
+                : {image:'图片', video:'视频', audio:'音频'};
+            return `${labels[kind] || kind} ${count}`;
+        }
+        function mediaAccept(kind){
+            if(kind === 'video') return 'video/*';
+            if(kind === 'audio') return 'audio/*';
+            return 'image/*';
+        }
+        function mediaUploadText(kind){
+            if(kind === 'video') return tr('comfy.clickUploadVideo');
+            if(kind === 'audio') return tr('comfy.clickUploadAudio');
+            return tr('comfy.clickUploadImage');
+        }
+        function mediaUploadFailedText(kind){
+            if(kind === 'video') return tr('comfy.videoUploadFailed');
+            if(kind === 'audio') return tr('comfy.audioUploadFailed');
+            return tr('comfy.imageUploadFailed');
+        }
+        function mediaPreviewHtml(kind, url, name='', compact=false){
+            const safeUrl = escapeAttr(url || '');
+            const safeName = escapeHtml(name || typeLabel(kind));
+            if(!url) return mediaUploadText(kind);
+            if(kind === 'video') return `<video src="${safeUrl}" muted preload="metadata" playsinline controls></video>`;
+            if(kind === 'audio') return `<div class="media-file-chip"><i data-lucide="file-audio" class="${compact ? 'w-5 h-5' : 'w-6 h-6'}"></i><span class="media-file-name">${safeName}</span><audio src="${safeUrl}" controls preload="metadata"></audio></div>`;
+            return `<img src="${safeUrl}">`;
         }
         function defaultMiniCards(){
             return {
@@ -713,7 +750,9 @@
             }
             if(typeof value === 'string'){
                 if(/prompt|text|description/.test(lc) || (value && value.length > 60)) return 'textarea';
-                if(/image|filename/.test(lc)) return 'image';
+                if(/video|movie|mp4|webm|mov|m4v|vhs/.test(lc) || /\.(mp4|webm|mov|m4v|avi|mkv)(\?|$)/i.test(value)) return 'video';
+                if(/audio|sound|music|voice|wav|mp3/.test(lc) || /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(value)) return 'audio';
+                if(/image|img|mask|filename|file/.test(lc) || /\.(png|jpe?g|webp|gif|bmp|tiff?)(\?|$)/i.test(value)) return 'image';
                 return 'text';
             }
             return 'text';
@@ -1299,11 +1338,11 @@
                 const opts = (f.options || []).map(o => `<option value="${escapeAttr(o)}" ${String(v)===String(o)?'selected':''}>${escapeHtml(o)}</option>`).join('');
                 return `<div class="pfield">${label}<select class="pfield-select" onchange="setPreviewValue('${f.id}',this.value)">${opts || `<option value="">${tr('comfy.noOptions')}</option>`}</select></div>`;
             }
-            if(f.type === 'image'){
+            if(isMediaField(f)){
                 // 浏览器显示用本地 blob URL；如果没有就尝试用 /output/ 之类的可访问 URL；都没有显示占位文字
                 const displayUrl = previewImageUrls[f.id] || (typeof v === 'string' && /^(\/|https?:|blob:|data:)/.test(v) ? v : '');
                 return `<div class="pfield">${label}<div class="pfield-image-drop ${displayUrl?'has-image':''}" onclick="pickImage('${f.id}')">
-                    ${displayUrl ? `<img src="${escapeAttr(displayUrl)}">` : tr('comfy.clickUploadImage')}
+                    ${mediaPreviewHtml(fieldKind(f), displayUrl, v)}
                 </div></div>`;
             }
             if(f.type === 'boolean'){
@@ -1356,9 +1395,11 @@
             if(!target) return;
             const promptFields = currentConfig.fields.filter(f => fieldKind(f) === 'prompt');
             const imageFields = currentConfig.fields.filter(f => fieldKind(f) === 'image');
+            const videoFields = currentConfig.fields.filter(f => fieldKind(f) === 'video');
+            const audioFields = currentConfig.fields.filter(f => fieldKind(f) === 'audio');
             const settingFields = currentConfig.fields.filter(f => fieldKind(f) === 'setting');
             const prompts = miniTestNodes.filter(n => n.type === 'prompt');
-            const images = miniTestNodes.filter(n => n.type === 'image');
+            const mediaNodes = miniTestNodes.filter(n => ['image','video','audio'].includes(n.type));
             const comfy = miniTestNodes.find(n => n.type === 'comfy') || defaultMiniTestNodes().find(n => n.type === 'comfy');
             const output = miniTestNodes.find(n => n.type === 'output') || defaultMiniTestNodes().find(n => n.type === 'output');
             const resultHtml = runResult
@@ -1370,9 +1411,11 @@
                     <div class="mini-toolbar">
                         <button class="mini-tool" type="button" onclick="addMiniNode('prompt')"><i data-lucide="text-cursor-input" class="w-3.5 h-3.5"></i>${tr('comfy.addPrompt')}</button>
                         <button class="mini-tool" type="button" onclick="addMiniNode('image')"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i>${tr('comfy.addImage')}</button>
+                        <button class="mini-tool" type="button" onclick="addMiniNode('video')"><i data-lucide="file-video" class="w-3.5 h-3.5"></i>${typeLabel('video')}</button>
+                        <button class="mini-tool" type="button" onclick="addMiniNode('audio')"><i data-lucide="file-audio" class="w-3.5 h-3.5"></i>${typeLabel('audio')}</button>
                     </div>
                     <div id="miniWorld" class="mini-world" style="transform:translate(${miniView.x}px,${miniView.y}px) scale(${miniView.k})">
-                        ${[...prompts, ...images].map(n => miniLineBetween(n, comfy)).join('')}
+                        ${[...prompts, ...mediaNodes].map(n => miniLineBetween(n, comfy)).join('')}
                         ${miniLineBetween(comfy, output)}
                         ${prompts.map((n,i) => `
                             <div class="mini-card" data-node="${n.id}" style="left:${n.x}px;top:${n.y}px">
@@ -1380,11 +1423,11 @@
                                 <div class="mini-card-head"><i data-lucide="text-cursor-input" class="w-3.5 h-3.5"></i><span class="mini-node-title">${tr('comfy.promptNode')} ${i+1}</span>${miniDeleteButton(n)}</div>
                                 <div class="mini-card-body"><textarea class="mini-textarea" oninput="updateMiniNode('${n.id}','text',this.value)" placeholder="${escapeAttr(tr('comfy.promptPlaceholder'))}">${escapeHtml(n.text || '')}</textarea></div>
                             </div>`).join('')}
-                        ${images.map((n,i) => `
+                        ${mediaNodes.map((n,i) => `
                             <div class="mini-card" data-node="${n.id}" style="left:${n.x}px;top:${n.y}px">
                                 <span class="mini-port out"></span>
-                                <div class="mini-card-head"><i data-lucide="image" class="w-3.5 h-3.5"></i><span class="mini-node-title">${tr('comfy.imageNode')} ${i+1}</span>${miniDeleteButton(n)}</div>
-                                <div class="mini-card-body"><div class="mini-image-drop" onclick="pickMiniImage('${n.id}')">${n.url ? `<img src="${escapeAttr(n.url)}">` : tr('comfy.clickUploadImage')}</div></div>
+                                <div class="mini-card-head"><i data-lucide="${n.type === 'video' ? 'file-video' : n.type === 'audio' ? 'file-audio' : 'image'}" class="w-3.5 h-3.5"></i><span class="mini-node-title">${typeLabel(n.type)} ${i+1}</span>${miniDeleteButton(n)}</div>
+                                <div class="mini-card-body"><div class="mini-image-drop" onclick="pickMiniImage('${n.id}')">${mediaPreviewHtml(n.type, n.url, n.name || n.value, true)}</div></div>
                             </div>`).join('')}
                         <div class="mini-card comfy-card" data-node="${comfy.id}" style="left:${comfy.x}px;top:${comfy.y}px">
                             <span class="mini-port in"></span><span class="mini-port out"></span>
@@ -1392,7 +1435,7 @@
                             <div class="mini-card-body">
                                 <div class="text-[10px] font-black uppercase" style="color:var(--faint)">${tr('comfy.inputs')}</div>
                                 <div class="preview-empty" style="padding:10px;font-size:11px;text-align:left">
-                                    ${tf('comfy.needsImages', {count:imageFields.length})} · ${promptFields.length ? tr('comfy.acceptsPrompt') : tr('comfy.noPromptField')}
+                                    ${mediaFieldLabel('image', imageFields.length)} · ${mediaFieldLabel('video', videoFields.length)} · ${mediaFieldLabel('audio', audioFields.length)} · ${promptFields.length ? tr('comfy.acceptsPrompt') : tr('comfy.noPromptField')}
                                 </div>
                                 <div class="mini-settings-list">
                                     ${settingFields.length ? settingFields.map(f => renderMiniField(f)).join('') : `<div class="preview-empty" style="padding:16px 10px">${tr('comfy.otherParamsHere')}</div>`}
@@ -1417,9 +1460,9 @@
         function renderMiniField(f){
             const label = `<div class="pfield-label">${escapeHtml(f.name || f.input)}</div>`;
             const v = previewValues[f.id] ?? f.default ?? (f.type==='boolean'?false:(f.type==='number'||f.type==='slider'?0:''));
-            if(f.type === 'image'){
+            if(isMediaField(f)){
                 const displayUrl = previewImageUrls[f.id] || (typeof v === 'string' && /^(\/|https?:|blob:|data:)/.test(v) ? v : '');
-                return `<div class="pfield">${label}<div class="mini-image-drop" onclick="pickImage('${f.id}')">${displayUrl ? `<img src="${escapeAttr(displayUrl)}">` : tr('comfy.clickUploadImage')}</div></div>`;
+                return `<div class="pfield">${label}<div class="mini-image-drop" onclick="pickImage('${f.id}')">${mediaPreviewHtml(fieldKind(f), displayUrl, v, true)}</div></div>`;
             }
             if(f.type === 'textarea'){
                 return `<div class="pfield">${label}<textarea class="mini-textarea" oninput="setPreviewValue('${f.id}',this.value)">${escapeHtml(v)}</textarea></div>`;
@@ -1485,21 +1528,22 @@
         async function pickMiniImage(nodeId){
             const input = document.createElement('input');
             input.type = 'file';
-            input.accept = 'image/*';
+            const node = miniTestNodes.find(n => n.id === nodeId);
+            input.accept = mediaAccept(node?.type || 'image');
             input.onchange = async () => {
                 const file = input.files[0];
                 if(!file) return;
-                const node = miniTestNodes.find(n => n.id === nodeId);
                 if(!node) return;
                 if(node.url && node.url.startsWith('blob:')) URL.revokeObjectURL(node.url);
                 node.url = URL.createObjectURL(file);
+                node.name = file.name;
                 renderWorkspaceView();
                 const form = new FormData();
                 form.append('files', file);
                 try {
                     const data = await fetch('/api/upload', { method:'POST', body:form }).then(r=>r.json());
                     node.value = data.files?.[0]?.comfy_name || data.files?.[0]?.filename || file.name;
-                } catch(e){ alert(tr('comfy.imageUploadFailed')); }
+                } catch(e){ alert(mediaUploadFailedText(node.type)); }
             };
             input.click();
         }
@@ -1569,7 +1613,9 @@
         async function pickImage(fieldId){
             const input = document.createElement('input');
             input.type = 'file';
-            input.accept = 'image/*';
+            const field = currentConfig.fields.find(f => f.id === fieldId);
+            const kind = fieldKind(field || {type:'image'});
+            input.accept = mediaAccept(kind);
             input.onchange = async () => {
                 const file = input.files[0];
                 if(!file) return;
@@ -1584,7 +1630,7 @@
                     const data = await fetch('/api/upload', { method:'POST', body:form }).then(r=>r.json());
                     const filename = data.files?.[0]?.comfy_name || data.files?.[0]?.filename || file.name;
                     previewValues[fieldId] = filename;
-                } catch(e){ alert(tr('comfy.imageUploadFailed')); }
+                } catch(e){ alert(mediaUploadFailedText(kind)); }
             };
             input.click();
         }
@@ -1618,12 +1664,15 @@
 
         function fieldsFromMiniCanvas(){
             const fields = {...previewValues};
-            const imageFields = currentConfig.fields.filter(f => fieldKind(f) === 'image');
+            const mediaKinds = ['image','video','audio'];
             const promptFields = currentConfig.fields.filter(f => fieldKind(f) === 'prompt');
-            const images = miniTestNodes.filter(n => n.type === 'image' && n.value);
             const prompt = miniTestNodes.filter(n => n.type === 'prompt').map(n => n.text || '').filter(Boolean).join('\n\n');
-            imageFields.forEach((f, i) => {
-                fields[f.id] = images[i]?.value || fields[f.id] || '';
+            mediaKinds.forEach(kind => {
+                const mediaFields = currentConfig.fields.filter(f => fieldKind(f) === kind);
+                const mediaNodes = miniTestNodes.filter(n => n.type === kind && n.value);
+                mediaFields.forEach((f, i) => {
+                    fields[f.id] = mediaNodes[i]?.value || fields[f.id] || '';
+                });
             });
             promptFields.forEach(f => {
                 fields[f.id] = prompt || fields[f.id] || '';

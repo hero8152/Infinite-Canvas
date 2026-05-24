@@ -1064,6 +1064,7 @@ class OnlineImageRequest(BaseModel):
     model: str = ""
     size: str = "1024x1024"
     quality: str = "auto"
+    n: int = 1
     reference_images: List[AIReference] = []
 
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
@@ -1197,6 +1198,27 @@ def check_images_exist(backend_addr, images):
             if r.status_code != 200: return False
         except: return False
     return True
+
+MEDIA_INPUT_KEYS = ("image", "video", "audio", "mask", "filename", "file")
+MEDIA_INPUT_EXT_RE = re.compile(r"\.(png|jpe?g|webp|gif|bmp|tiff?|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)(?:\?|$)", re.I)
+
+def is_comfy_input_media_value(input_name: str, value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    key = str(input_name or "").lower()
+    if any(token in key for token in MEDIA_INPUT_KEYS):
+        return True
+    return bool(MEDIA_INPUT_EXT_RE.search(value))
+
+def collect_required_comfy_media(params: Dict[str, Any]) -> List[str]:
+    required = []
+    for node_inputs in (params or {}).values():
+        if not isinstance(node_inputs, dict):
+            continue
+        for input_name, value in node_inputs.items():
+            if is_comfy_input_media_value(input_name, value):
+                required.append(value)
+    return list(dict.fromkeys(required))
 
 def get_best_backend(required_images: List[str] = None):
     best_backend = COMFYUI_INSTANCES[0]
@@ -1811,6 +1833,21 @@ def content_type_for_path(path):
     if ext == ".webp":
         return "image/webp"
     return "image/png"
+
+def is_image_reference_value(value):
+    if not isinstance(value, str) or not value:
+        return False
+    if value.startswith("data:image/"):
+        return True
+    if value.startswith("data:"):
+        return False
+    if value.startswith("/output/") or value.startswith("/assets/"):
+        path = output_file_from_url(value)
+        return bool(path and content_type_for_path(path).startswith("image/"))
+    clean = value.split("?", 1)[0].lower()
+    if re.search(r"\.(mp4|webm|mov|m4v|mp3|wav|m4a|aac|ogg|flac)$", clean):
+        return False
+    return True
 
 def convert_output_to_jpg(url, quality=88):
     path = output_file_from_url(url)
@@ -3020,9 +3057,13 @@ async def build_online_image_result(payload: OnlineImageRequest):
     default_model = (provider.get("image_models") or [IMAGE_MODEL])[0]
     model = selected_model(payload.model, default_model)
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
-    try:
-        image_data, raw = await generate_ai_image(payload.prompt, payload.size, payload.quality, model, refs, provider["id"])
+    count = max(1, min(8, int(payload.n or 1)))
+    async def generate_one():
+        image_data, raw_item = await generate_ai_image(payload.prompt, payload.size, payload.quality, model, refs, provider["id"])
         local_url = await save_ai_image_to_output(image_data, prefix="online_")
+        return local_url, raw_item
+    try:
+        generated = await asyncio.gather(*(generate_one() for _ in range(count)))
     except httpx.HTTPStatusError as exc:
         text = exc.response.text or ''
         # 把上游英文错误转成中文友好提示
@@ -3044,9 +3085,11 @@ async def build_online_image_result(payload: OnlineImageRequest):
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
 
+    local_urls = [url for url, _raw in generated if url]
+    raw = generated[0][1] if generated else {}
     result = {
         "prompt": payload.prompt,
-        "images": [local_url],
+        "images": local_urls,
         "timestamp": time.time(),
         "type": "online",
         "model": model,
@@ -3054,7 +3097,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "provider_name": provider.get("name") or provider["id"],
         "task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
         "request_id": raw.get("id") if isinstance(raw, dict) else None,
-        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "reference_images": refs},
+        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
     save_to_history(result)
@@ -3422,10 +3465,11 @@ async def canvas_llm(payload: CanvasLLMRequest):
         if role in {"user", "assistant"} and content:
             upstream_messages.append({"role": role, "content": content})
     # 构造用户消息：有图片时用 OpenAI vision 多模态格式
-    if payload.images:
+    image_inputs = [img for img in (payload.images or []) if is_image_reference_value(img)]
+    if image_inputs:
         content_parts = [{"type": "text", "text": payload.message}]
         ok_imgs = 0
-        for img in payload.images[:8]:
+        for img in image_inputs[:8]:
             if not img or not isinstance(img, str):
                 continue
             # 本地 /output/* 或 /assets/* 路径转为 data URL；http(s) 或 data URL 直接用
@@ -4404,12 +4448,7 @@ def generate(req: GenerateRequest):
         QUEUE.append(current_task)
 
     try:
-        required_images = []
-        for node_id, node_inputs in req.params.items():
-            if isinstance(node_inputs, dict) and "image" in node_inputs:
-                image_name = node_inputs["image"]
-                if isinstance(image_name, str) and image_name:
-                    required_images.append(image_name)
+        required_images = collect_required_comfy_media(req.params)
 
         target_backend = get_best_backend(required_images)
         with LOAD_LOCK:
