@@ -70,7 +70,7 @@
         .board { position:absolute; inset:0; overflow:hidden; cursor:grab; }
         .board.dragging-board { cursor:grabbing; }
         .world { position:absolute; left:0; top:0; width:10000px; height:10000px; transform-origin:0 0; }
-        .links { position:absolute; inset:0; width:10000px; height:10000px; pointer-events:none; overflow:visible; }
+        .links { position:absolute; inset:0; width:10000px; height:10000px; pointer-events:none; overflow:visible; display:none; }
         .link-line { fill:none; stroke:var(--ink); stroke-width:2.5; stroke-linecap:square; stroke-linejoin:miter; }
         .link-line.temp { stroke:var(--orange); stroke-dasharray:8 6; }
         .nodes { position:absolute; inset:0; }
@@ -132,7 +132,7 @@
         .field-title { color:var(--muted); font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; }
         .input-lite, .select-lite { height:34px; border:1px solid var(--line); background:var(--card); color:var(--ink); outline:none; padding:0 9px; font-size:12px; font-weight:850; }
         .select-lite { min-width:120px; }
-        .port { position:absolute; top:50%; width:18px; height:18px; margin-top:-9px; background:var(--card); border:2px solid var(--ink); z-index:5; }
+        .port { position:absolute; top:50%; width:18px; height:18px; margin-top:-9px; background:var(--card); border:2px solid var(--ink); z-index:5; display:none; }
         .port::before { content:""; position:absolute; inset:4px; background:var(--line); }
         .port-in { left:-11px; }
         .port-out { right:-11px; }
@@ -141,11 +141,19 @@
         .resize-handle::before { content:""; position:absolute; right:3px; bottom:3px; width:7px; height:7px; background:var(--orange); border-left:2px solid var(--ink); border-top:2px solid var(--ink); }
         .smart-node.selected .resize-handle { display:block; }
         .smart-node.resizing { outline:2px solid var(--orange); outline-offset:4px; }
-        .composer { position:absolute; left:50%; bottom:20px; transform:translateX(-50%); z-index:50; width:min(760px, calc(100vw - 36px)); border:2px solid var(--ink); background:var(--panel-bg); box-shadow:none; padding:12px; display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:9px; }
+        .composer { position:absolute; left:50%; bottom:20px; transform:translateX(-50%); z-index:50; width:min(840px, calc(100vw - 36px)); border:2px solid var(--ink); background:var(--panel-bg); box-shadow:none; padding:12px; display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:9px; }
         .composer::before { content:""; position:absolute; left:0; right:0; top:0; height:5px; background:repeating-linear-gradient(90deg, var(--ink) 0 14px, var(--orange) 14px 28px, var(--line) 28px 42px); pointer-events:none; }
-        .composer-head { grid-column:1/-1; display:grid; grid-template-columns:1.05fr 1fr 1.3fr; align-items:center; gap:8px; padding-top:3px; }
-        .input-thumbs { grid-column:1/-1; display:flex; align-items:center; gap:6px; min-height:0; overflow-x:auto; padding-bottom:1px; }
-        .input-thumbs:empty::before { content:"NO INPUTS"; height:22px; display:inline-flex; align-items:center; padding:0 8px; border:1px dashed var(--line); color:var(--faint); font-size:9px; font-weight:950; letter-spacing:.1em; }
+        .composer-head { grid-column:1/-1; display:grid; grid-template-columns:minmax(180px, .72fr) minmax(0, 1fr) auto; align-items:center; gap:8px; padding-top:3px; }
+        .composer-kicker { min-width:0; color:var(--muted); font-size:10px; font-weight:950; text-transform:uppercase; letter-spacing:.1em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .composer-advanced-toggle { height:34px; min-width:96px; border:1px solid var(--line); background:var(--card); color:var(--ink); display:inline-flex; align-items:center; justify-content:center; gap:7px; font-size:11px; font-weight:950; }
+        .composer-advanced-toggle.active { background:var(--ink); border-color:var(--ink); color:#fff; }
+        .input-thumbs { grid-column:1/-1; display:flex; align-items:center; gap:6px; min-height:26px; overflow-x:auto; padding-bottom:1px; }
+        .input-thumbs:empty::before { content:"NO CONTEXT"; height:22px; display:inline-flex; align-items:center; padding:0 8px; border:1px dashed var(--line); color:var(--faint); font-size:9px; font-weight:950; letter-spacing:.1em; }
+        .context-chip { height:30px; max-width:190px; display:inline-flex; align-items:center; gap:7px; flex:0 0 auto; border:1px solid var(--line); background:var(--soft); color:var(--ink); padding:3px 8px 3px 3px; font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
+        .context-chip img,
+        .context-chip video { width:22px; height:22px; object-fit:cover; border:1px solid var(--ink); background:var(--card); }
+        .context-chip .pixel-icon { width:14px; height:14px; color:var(--orange); }
+        .context-chip span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .input-thumb { position:relative; width:48px; height:48px; border:1px solid var(--ink); background:var(--soft); flex:0 0 auto; }
         .input-thumb::after { content:""; position:absolute; right:3px; bottom:3px; width:7px; height:7px; background:var(--orange); border:1px solid var(--ink); }
         .input-thumb img, .input-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
@@ -153,13 +161,19 @@
         .prompt-input { width:100%; min-height:96px; max-height:250px; overflow:auto; resize:none; border:1px solid var(--ink); background:var(--card); color:var(--ink); outline:none; padding:12px 12px 12px 14px; font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; background-image:linear-gradient(to bottom, transparent 23px, rgba(230,213,168,.48) 24px); background-size:100% 24px; }
         .prompt-input:empty::before { content:attr(data-placeholder); color:var(--faint); }
         .prompt-input:focus { border-color:var(--orange); outline:1px solid var(--orange); }
+        .composer-advanced { grid-column:1/-1; display:none; grid-template-columns:minmax(150px, .75fr) minmax(180px, 1fr) minmax(180px, 1.1fr) auto auto; gap:8px; align-items:end; padding:9px; border:1px solid var(--line); background:var(--soft); }
+        .composer-advanced.open { display:grid; }
+        .composer-advanced .field { min-width:0; }
+        .composer-advanced .select-lite { width:100%; min-width:0; }
         .composer-params { min-width:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
         .run-btn { align-self:end; min-width:126px; height:42px; display:inline-flex; align-items:center; justify-content:center; gap:8px; background:var(--ink); color:#fff; border:1px solid var(--ink); font-size:12px; font-weight:950; letter-spacing:.04em; }
         .run-btn:hover { background:#000; color:var(--orange-soft); }
         .run-btn:disabled { background:var(--line); border-color:var(--line); color:var(--muted); cursor:wait; }
-        .mention-token { display:inline-flex; align-items:center; gap:5px; height:25px; max-width:158px; margin:0 3px 2px; padding:2px 7px 2px 3px; border:1px solid var(--ink); background:var(--soft); color:var(--ink); vertical-align:middle; font-size:11px; font-weight:900; white-space:nowrap; }
+        .mention-token { display:inline-flex; align-items:center; gap:5px; height:25px; max-width:188px; margin:0 3px 2px; padding:2px 3px 2px 3px; border:1px solid var(--ink); background:var(--soft); color:var(--ink); vertical-align:middle; font-size:11px; font-weight:900; white-space:nowrap; }
         .mention-token img { width:19px; height:19px; object-fit:cover; border:1px solid var(--line); }
         .mention-token span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+        .mention-remove { width:17px; height:17px; border:1px solid var(--line); background:var(--card); color:var(--muted); display:inline-flex; align-items:center; justify-content:center; font-size:10px; line-height:1; font-weight:950; }
+        .mention-remove:hover { border-color:var(--ink); color:var(--orange); }
         .mention-picker { position:absolute; left:8px; bottom:calc(100% + 6px); z-index:70; width:min(372px, calc(100vw - 40px)); max-height:292px; overflow:auto; padding:9px; border:2px solid var(--ink); background:var(--card); display:none; }
         .mention-picker.open { display:block; }
         .mention-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-bottom:7px; }
@@ -187,6 +201,16 @@
         .asset-item img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--soft); }
         .asset-meta { display:flex; align-items:center; gap:4px; min-height:32px; padding:5px; border-top:1px solid var(--line); }
         .asset-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; font-weight:850; }
+        .selection-tools { position:absolute; z-index:55; display:none; align-items:center; gap:0; border:2px solid var(--ink); background:var(--panel-bg); padding:5px; transform:translate(-50%, -100%); }
+        .selection-tools.open { display:flex; }
+        .selection-tools .tool-btn { height:30px; min-width:30px; padding:0 8px; }
+        .selection-tools .tool-btn + .tool-btn { margin-left:-1px; }
+        .selection-tools .tool-btn:disabled { opacity:.42; cursor:not-allowed; color:var(--faint); }
+        .run-meta { margin-top:8px; border:1px solid var(--line); background:var(--soft); color:var(--muted); font-size:10px; line-height:1.45; }
+        .run-meta summary { height:26px; display:flex; align-items:center; padding:0 8px; cursor:pointer; color:var(--ink); font-weight:950; text-transform:uppercase; letter-spacing:.08em; }
+        .run-meta-body { padding:7px 8px 8px; border-top:1px solid var(--line); display:grid; gap:5px; }
+        .run-meta-row { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .run-meta-row strong { color:var(--ink); font-weight:950; }
         .empty-note { min-height:84px; display:flex; align-items:center; justify-content:center; border:1px dashed var(--line); background:var(--soft); color:var(--muted); text-align:center; font-size:11px; font-weight:800; padding:12px; }
         .drop-overlay { position:absolute; inset:0; z-index:80; display:none; align-items:center; justify-content:center; background:rgba(255,250,235,.82); color:var(--ink); font-size:22px; font-weight:950; pointer-events:none; }
         .drop-overlay.open { display:flex; }
@@ -228,11 +252,13 @@
         .theme-dark .smart-node,
         .theme-dark .composer,
         .theme-dark .asset-panel,
-        .theme-dark .mention-picker { background:#1c1c1e; border-color:#5a5a5d; }
+        .theme-dark .mention-picker,
+        .theme-dark .selection-tools { background:#1c1c1e; border-color:#5a5a5d; }
         .theme-dark .node-head { background:#0e0e10; border-color:#3a3a3d; }
         .theme-dark .tool-btn.primary,
         .theme-dark .run-btn,
-        .theme-dark .mention-tabs button.active { background:#f5f5f5; border-color:#f5f5f5; color:#0e0e10; }
+        .theme-dark .mention-tabs button.active,
+        .theme-dark .composer-advanced-toggle.active { background:#f5f5f5; border-color:#f5f5f5; color:#0e0e10; }
         .theme-dark .input-lite,
         .theme-dark .select-lite,
         .theme-dark .smart-textarea,
@@ -249,6 +275,7 @@
             .composer { bottom:12px; width:calc(100vw - 24px); grid-template-columns:minmax(0, 1fr); }
             .composer-head { grid-template-columns:1fr; }
             .composer-head .select-lite { flex:1 1 132px; min-width:0; }
+            .composer-advanced { grid-template-columns:1fr; }
             .composer-params { grid-column:1/-1; }
             .run-btn { width:100%; }
         }
@@ -267,7 +294,6 @@
             <div class="panel toolbar">
                 <button id="uploadBtn" class="tool-btn" type="button" title="上传图片"><svg class="pixel-icon"><use href="#upload"></use></svg>图片</button>
                 <button id="promptNodeBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#tool-prompt"></use></svg>Prompt</button>
-                <button id="loopNodeBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#tool-loop"></use></svg>Loop</button>
                 <button id="groupBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#tool-group"></use></svg>分组</button>
                 <button id="copyBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#copy"></use></svg>复制</button>
                 <button id="pasteBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#plus"></use></svg>粘贴</button>
@@ -299,25 +325,28 @@
             </div>
         </div>
         <div id="dropOverlay" class="drop-overlay">拖放图片到智能画布</div>
+        <div id="selectionTools" class="selection-tools"></div>
 
         <div class="composer">
             <div class="composer-head">
                 <select id="engineSelect" class="select-lite">
-                    <option value="image">API 图片生成</option>
-                    <option value="video">API 视频生成</option>
-                    <option value="comfy">ComfyUI 工作流</option>
-                    <option value="llm">LLM 文本节点</option>
+                    <option value="image">图片生成 / 编辑</option>
+                    <option value="video">视频生成</option>
+                    <option value="comfy">ComfyUI</option>
+                    <option value="llm">文本润色</option>
                 </select>
-                <select id="providerSelect" class="select-lite"></select>
-                <select id="modelSelect" class="select-lite"></select>
-                <select id="workflowSelect" class="select-lite" style="display:none"></select>
+                <div id="composerKicker" class="composer-kicker">选择图片、Prompt 或资产作为上下文</div>
+                <button id="advancedToggle" class="composer-advanced-toggle" type="button"><svg class="pixel-icon"><use href="#settings"></use></svg>Advanced</button>
             </div>
             <div id="inputThumbs" class="input-thumbs"></div>
             <div class="prompt-row">
                 <div id="promptInput" class="prompt-input" contenteditable="true" data-placeholder="描述你要生成或编辑的内容，输入 @ 可引用图片"></div>
                 <div id="mentionPicker" class="mention-picker"></div>
             </div>
-            <div class="composer-params">
+            <div id="composerAdvanced" class="composer-advanced">
+                <label class="field"><span class="field-title">Provider</span><select id="providerSelect" class="select-lite"></select></label>
+                <label class="field"><span class="field-title">Model</span><select id="modelSelect" class="select-lite"></select></label>
+                <label class="field"><span class="field-title">Workflow</span><select id="workflowSelect" class="select-lite" style="display:none"></select></label>
                 <label class="field"><span class="field-title">Size</span><select id="sizeSelect" class="select-lite"><option value="1024x1024">1:1</option><option value="1024x1536">2:3</option><option value="1536x1024">3:2</option><option value="1792x1024">16:9</option><option value="1024x1792">9:16</option></select></label>
                 <label class="field"><span class="field-title">Count</span><input id="countInput" class="input-lite" type="number" min="1" max="4" value="1" style="width:74px"></label>
             </div>
@@ -349,6 +378,7 @@
         let clipboard = [];
         let assetLibrary = {categories:[]};
         let assetLibraryOpen = false;
+        let smartAdvancedOpen = false;
         let mentionSource = 'input';
         let mentionRange = null;
         let apiProviders = [];
@@ -367,6 +397,7 @@
         const promptInput = $('promptInput');
         const mentionPicker = $('mentionPicker');
         const inputThumbs = $('inputThumbs');
+        const selectionTools = $('selectionTools');
         const assetPanel = $('assetPanel');
         const assetGrid = $('assetGrid');
         const assetCategorySelect = $('assetCategorySelect');
@@ -443,7 +474,8 @@
                     ...(canvas.settings || {}),
                     smartEngine:$('engineSelect').value,
                     smartSize:$('sizeSelect').value,
-                    smartCount:Number($('countInput').value) || 1
+                    smartCount:Number($('countInput').value) || 1,
+                    smartAdvanced:smartAdvancedOpen
                 },
                 base_updated_at:canvasBaseUpdatedAt,
                 draft_updated_at:Date.now()
@@ -480,6 +512,7 @@
             $('engineSelect').value = canvas.settings.smartEngine || 'image';
             $('sizeSelect').value = canvas.settings.smartSize || '1024x1024';
             $('countInput').value = canvas.settings.smartCount || 1;
+            smartAdvancedOpen = Boolean(canvas.settings.smartAdvanced);
             applyViewport();
             render();
         }
@@ -494,7 +527,8 @@
                 ...(canvas.settings || {}),
                 smartEngine: $('engineSelect').value,
                 smartSize: $('sizeSelect').value,
-                smartCount: Number($('countInput').value) || 1
+                smartCount: Number($('countInput').value) || 1,
+                smartAdvanced: smartAdvancedOpen
             };
             try {
                 const res = await fetch(`/api/canvases/${encodeURIComponent(canvas.id)}`, {
@@ -574,6 +608,7 @@
             $('engineSelect').value = canvas.settings.smartEngine || 'image';
             $('sizeSelect').value = canvas.settings.smartSize || '1024x1024';
             $('countInput').value = canvas.settings.smartCount || 1;
+            smartAdvancedOpen = Boolean(canvas.settings.smartAdvanced);
             applyViewport();
             render();
             const draft = loadLocalDraft();
@@ -591,17 +626,19 @@
         }
 
         function nodeLabel(node){
+            if(node.cardRole === 'result-group') return node.title || 'Results';
             if(node.type === 'smart-image') return node.title || 'Image';
             if(node.type === 'smart-group') return node.title || 'Group';
             if(node.type === 'smart-prompt') return node.title || 'Prompt';
-            if(node.type === 'smart-loop') return node.title || 'Loop';
+            if(node.type === 'smart-loop') return node.title || 'Prompt Note';
             return 'Node';
         }
         function nodeTypeLabel(node){
+            if(node.cardRole === 'result-group') return 'RESULT';
             if(node.type === 'smart-image') return 'IMG';
             if(node.type === 'smart-group') return 'GRP';
             if(node.type === 'smart-prompt') return 'TXT';
-            if(node.type === 'smart-loop') return 'LOOP';
+            if(node.type === 'smart-loop') return 'TXT';
             return 'NODE';
         }
         function nodeTypeClass(node){
@@ -671,6 +708,31 @@
         function inputPromptTextFor(node){
             return inputNodesFor(node).map(n => textForNode(n)).filter(Boolean).join('\n\n');
         }
+        function selectedContextNodes(){
+            return selectedNodes().filter(Boolean);
+        }
+        function selectedContextImages(){
+            return uniqueImages(selectedContextNodes().flatMap(nodeImages));
+        }
+        function selectedContextText(){
+            return selectedContextNodes().map(n => textForNode(n)).filter(Boolean).join('\n\n');
+        }
+        function recentCanvasImages(limit=12){
+            return uniqueImages([...nodes].reverse().flatMap(nodeImages)).slice(0, limit);
+        }
+        function selectedMediaImages(){
+            return uniqueImages(selectedContextNodes().flatMap(nodeImages));
+        }
+        function contextSourceIds(){
+            return selectedContextNodes().map(n => n.id);
+        }
+        function contextSummary(){
+            const selectedCount = selectedContextNodes().length;
+            const imageCount = selectedContextImages().length;
+            const mentionCount = collectMentionedImages().length;
+            if(selectedCount || mentionCount) return `${selectedCount} selected · ${imageCount + mentionCount} images`;
+            return '选择图片、Prompt 或资产作为上下文';
+        }
         function addNode(node){
             nodes.push(node);
             selectedIds = new Set([node.id]);
@@ -681,6 +743,11 @@
             const node = {id:uid('img'), type:'smart-image', x, y, w:options.w || 280, h:options.h || 0, title:options.title || 'Image', images};
             if(options.aspectRatio) node.aspectRatio = Number(options.aspectRatio) || 0;
             if(options.outputKind) node.outputKind = options.outputKind;
+            if(options.cardRole) node.cardRole = options.cardRole;
+            if(options.layoutMode) node.layoutMode = options.layoutMode;
+            if(options.sourceIds) node.sourceIds = [...options.sourceIds];
+            if(options.sourceIds) node.inputNodeIds = [...options.sourceIds];
+            if(options.runMeta) node.runMeta = options.runMeta;
             if(options.pending) node.pending = Math.max(1, Number(options.pending) || 1);
             if(options.running || options.pending) node.running = true;
             if(options.error) node.error = String(options.error);
@@ -749,13 +816,31 @@
             const el = nodesEl.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
             return Number(node.h || el?.offsetHeight || 160);
         }
-        function outputPointFor(sourceNode){
-            return sourceNode ? {x:(sourceNode.x || 0) + (sourceNode.w || 280) + 80, y:sourceNode.y || 0} : defaultPoint(180, -60);
+        function contextList(input){
+            if(Array.isArray(input)) return input.filter(Boolean);
+            return input ? [input] : [];
+        }
+        function contextBounds(context){
+            const list = contextList(context);
+            if(!list.length) return null;
+            const boxes = list.map(n => ({x:n.x || 0, y:n.y || 0, w:Number(n.w || 280), h:nodeDisplayHeight(n)}));
+            const minX = Math.min(...boxes.map(b => b.x));
+            const minY = Math.min(...boxes.map(b => b.y));
+            const maxX = Math.max(...boxes.map(b => b.x + b.w));
+            const maxY = Math.max(...boxes.map(b => b.y + b.h));
+            return {x:minX, y:minY, w:maxX - minX, h:maxY - minY, maxX, maxY};
+        }
+        function outputPointFor(context){
+            const bounds = contextBounds(context);
+            return bounds ? {x:bounds.maxX + 80, y:bounds.y} : defaultPoint(180, -60);
         }
         function canReuseAsOutput(node){
             return node?.type === 'smart-image' && !nodeImages(node).length && !node.running && !node.pending;
         }
-        function prepareOutputNode(engine, sourceNode, count=1){
+        function prepareOutputNode(engine, context, count=1, request=null){
+            const sources = contextList(context);
+            const sourceNode = sources.length === 1 ? sources[0] : null;
+            const sourceIds = sources.map(n => n.id);
             const outputKind = outputKindForEngine(engine);
             const aspectRatio = outputAspectForEngine(engine);
             if(canReuseAsOutput(sourceNode)){
@@ -767,26 +852,51 @@
                 sourceNode.w = Math.max(Number(sourceNode.w || 0), engine === 'video' ? 360 : 320);
                 sourceNode.h = mediaNodeHeight(sourceNode.w, aspectRatio, count);
                 sourceNode.title = outputTitleForEngine(engine, count);
+                sourceNode.cardRole = 'result-group';
+                sourceNode.layoutMode = 'grid';
+                sourceNode.sourceIds = sourceIds;
+                sourceNode.inputNodeIds = sourceIds;
+                sourceNode.runMeta = request ? runMetaFor(engine, request) : sourceNode.runMeta;
                 delete sourceNode.error;
                 selectedIds = new Set([sourceNode.id]);
                 render();
                 return sourceNode;
             }
-            const p = outputPointFor(sourceNode);
+            const p = outputPointFor(sources);
             const w = engine === 'video' ? 360 : 320;
-            const node = createImageNode(p.x, p.y, [], {title:outputTitleForEngine(engine, count), pending:count, outputKind, w, h:mediaNodeHeight(w, aspectRatio, count), aspectRatio});
+            const node = createImageNode(p.x, p.y, [], {title:outputTitleForEngine(engine, count), pending:count, outputKind, w, h:mediaNodeHeight(w, aspectRatio, count), aspectRatio, cardRole:'result-group', layoutMode:'grid', sourceIds, runMeta:request ? runMetaFor(engine, request) : null});
             nodes.push(node);
-            if(sourceNode) addConnectionRecord(sourceNode.id, node.id);
+            sources.forEach(source => addConnectionRecord(source.id, node.id));
             selectedIds = new Set([node.id]);
             render();
             return node;
         }
-        function finalizeOutputNode(node, urls, engine){
+        function runMetaFor(engine, request){
+            const kind = engine === 'llm' ? 'chat' : engine === 'video' ? 'video' : 'image';
+            const providerId = engine === 'comfy' ? 'comfy' : selectedProviderId(kind);
+            return {
+                engine,
+                prompt: request?.prompt || '',
+                provider: providerId,
+                model: engine === 'comfy' ? $('workflowSelect').value : ($('modelSelect').value || providerModels(kind, providerId)[0] || ''),
+                size: $('sizeSelect').value || '',
+                reference_images: (request?.refs || []).map(ref => ({url:ref.url, name:ref.name || '', role:ref.role || ''})),
+                sourceIds: request?.sourceIds || []
+            };
+        }
+        function finalizeOutputNode(node, urls, engine, request=null){
             const cleanUrls = Array.from(new Set((urls || []).map(url => String(url || '').trim()).filter(Boolean)));
             if(!node || !cleanUrls.length) throw new Error('生成完成但没有返回可用的输出地址');
             node.images = cleanUrls.map((url, index) => ({url, name:outputNameForEngine(engine, index), kind:outputKindForEngine(engine)}));
             node.title = outputTitleForEngine(engine, cleanUrls.length);
             node.outputKind = outputKindForEngine(engine);
+            node.cardRole = 'result-group';
+            node.layoutMode = 'grid';
+            if(request) node.runMeta = runMetaFor(engine, request);
+            if(request?.sourceIds) {
+                node.sourceIds = [...request.sourceIds];
+                node.inputNodeIds = [...request.sourceIds];
+            }
             node.pending = 0;
             node.running = false;
             delete node.error;
@@ -810,6 +920,7 @@
             renderLinks();
             renderInputThumbs();
             renderComposerControls();
+            renderSelectionTools();
             refreshIcons();
         }
         function renderNode(node){
@@ -823,8 +934,6 @@
             const aspect = rawAspect > 0 ? Math.max(.2, rawAspect) : 1;
             const style = `left:${node.x || 0}px;top:${node.y || 0}px;width:${node.w || 280}px;--node-aspect:${aspect};${node.h ? `height:${node.h}px;` : ''}`;
             return `<div class="smart-node ${nodeTypeClass(node)} ${kind} ${stateClass} ${sizeClass} ${selected ? 'selected' : ''}" data-id="${escapeHtml(node.id)}" style="${style}">
-                <button class="port port-in" type="button" data-port-in="${escapeHtml(node.id)}" title="输入"></button>
-                <button class="port port-out" type="button" data-port-out="${escapeHtml(node.id)}" title="输出"></button>
                 <div class="node-head">
                     <div class="node-title-wrap">
                         <span class="node-type">${escapeHtml(nodeTypeLabel(node))}</span>
@@ -855,7 +964,7 @@
                         <div class="tile-tools">
                             <button class="icon-btn" type="button" data-save-asset="${escapeHtml(node.id)}" data-image-index="${index}" title="保存资产"><svg class="pixel-icon"><use href="#folder"></use></svg></button>
                         </div>
-                    </div>`).join('')}</div>`;
+                    </div>`).join('')}</div>${renderRunMeta(node)}`;
             }
             if(node.type === 'smart-prompt'){
                 return `<textarea class="smart-textarea" data-prompt-text="${escapeHtml(node.id)}" placeholder="写入提示词，或运行 LLM 生成文本">${escapeHtml(node.text || '')}</textarea>
@@ -871,6 +980,22 @@
                 <div class="empty-note loop-preview">${escapeHtml(loopTextFor(node, Number(node.loopStart || 1)) || '无轮次提示词')}</div>`;
             }
             return '';
+        }
+        function renderRunMeta(node){
+            const meta = node?.runMeta;
+            if(!meta || !nodeImages(node).length) return '';
+            const provider = [meta.provider, meta.model].filter(Boolean).join(' / ') || 'custom';
+            const refs = Array.isArray(meta.reference_images) ? meta.reference_images.length : 0;
+            return `<details class="run-meta">
+                <summary>Source</summary>
+                <div class="run-meta-body">
+                    <div class="run-meta-row"><strong>Task</strong> ${escapeHtml(meta.engine || 'image')}</div>
+                    <div class="run-meta-row" title="${escapeHtml(provider)}"><strong>Model</strong> ${escapeHtml(provider)}</div>
+                    ${meta.size ? `<div class="run-meta-row"><strong>Size</strong> ${escapeHtml(meta.size)}</div>` : ''}
+                    ${refs ? `<div class="run-meta-row"><strong>Refs</strong> ${refs}</div>` : ''}
+                    ${meta.prompt ? `<div class="run-meta-row" title="${escapeHtml(meta.prompt)}"><strong>Prompt</strong> ${escapeHtml(meta.prompt)}</div>` : ''}
+                </div>
+            </details>`;
         }
         function bindNodeEvents(){
             nodesEl.querySelectorAll('.smart-node').forEach(el => {
@@ -954,21 +1079,6 @@
                     e.dataTransfer.setData('text/plain', tile.dataset.url || '');
                 });
             });
-            nodesEl.querySelectorAll('[data-port-out]').forEach(port => {
-                port.onmousedown = e => {
-                    e.stopPropagation();
-                    linkState = {from:port.dataset.portOut, x:e.clientX, y:e.clientY};
-                    renderLinks();
-                };
-            });
-            nodesEl.querySelectorAll('[data-port-in]').forEach(port => {
-                port.onmouseup = e => {
-                    e.stopPropagation();
-                    if(linkState) addConnection(linkState.from, port.dataset.portIn);
-                    linkState = null;
-                    renderLinks();
-                };
-            });
         }
         function nodeAnchor(node, side){
             const w = Number(node.w || 280);
@@ -976,40 +1086,37 @@
             return {x:(node.x || 0) + (side === 'out' ? w : 0), y:(node.y || 0) + h / 2};
         }
         function renderLinks(){
-            const paths = [];
-            connections.forEach(conn => {
-                const from = nodes.find(n => n.id === conn.from);
-                const to = nodes.find(n => n.id === conn.to);
-                if(!from || !to) return;
-                const a = nodeAnchor(from, 'out');
-                const b = nodeAnchor(to, 'in');
-                const mid = Math.max(40, Math.abs(b.x - a.x) / 2);
-                paths.push(`<path class="link-line" d="M ${a.x} ${a.y} C ${a.x + mid} ${a.y}, ${b.x - mid} ${b.y}, ${b.x} ${b.y}"/>`);
-            });
-            if(linkState){
-                const from = nodes.find(n => n.id === linkState.from);
-                if(from){
-                    const a = nodeAnchor(from, 'out');
-                    const b = screenToWorld(linkState.x, linkState.y);
-                    const mid = Math.max(40, Math.abs(b.x - a.x) / 2);
-                    paths.push(`<path class="link-line temp" d="M ${a.x} ${a.y} C ${a.x + mid} ${a.y}, ${b.x - mid} ${b.y}, ${b.x} ${b.y}"/>`);
-                }
-            }
-            linksEl.innerHTML = paths.join('');
+            linksEl.innerHTML = '';
         }
         function renderInputThumbs(){
-            const node = selectedNode();
-            const refs = uniqueImages([...lineImagesFor(node), ...collectMentionedImages()]);
-            inputThumbs.innerHTML = refs.map(ref => `<div class="input-thumb" title="${escapeHtml(ref.name || '')}">${imageIsVideo(ref) ? `<video src="${escapeHtml(ref.url)}" muted playsinline></video>` : `<img src="${escapeHtml(ref.url)}" alt="">`}</div>`).join('');
+            const selected = selectedContextNodes();
+            const mentioned = collectMentionedImages();
+            const chips = [];
+            selected.forEach(node => {
+                const images = nodeImages(node);
+                if(images.length){
+                    const first = images[0];
+                    chips.push(`<div class="context-chip" title="${escapeHtml(nodeLabel(node))}">${imageIsVideo(first) ? `<video src="${escapeHtml(first.url)}" muted playsinline></video>` : `<img src="${escapeHtml(first.url)}" alt="">`}<span>${escapeHtml(nodeLabel(node))}${images.length > 1 ? ` · ${images.length}` : ''}</span></div>`);
+                } else {
+                    chips.push(`<div class="context-chip" title="${escapeHtml(nodeLabel(node))}"><svg class="pixel-icon"><use href="#tool-prompt"></use></svg><span>${escapeHtml(nodeLabel(node))}</span></div>`);
+                }
+            });
+            mentioned.forEach(ref => chips.push(`<div class="context-chip" title="@${escapeHtml(ref.name || 'image')}">${imageIsVideo(ref) ? `<video src="${escapeHtml(ref.url)}" muted playsinline></video>` : `<img src="${escapeHtml(ref.url)}" alt="">`}<span>@${escapeHtml(ref.name || 'image')}</span></div>`));
+            inputThumbs.innerHTML = chips.join('');
+            $('composerKicker').textContent = contextSummary();
         }
         function renderComposerControls(){
             const engine = $('engineSelect').value;
             const kind = engine === 'video' ? 'video' : engine === 'llm' ? 'chat' : 'image';
             const provider = defaultProvider(kind);
             const providers = enabledProviders(kind);
-            $('providerSelect').style.display = engine === 'comfy' ? 'none' : '';
-            $('modelSelect').style.display = engine === 'comfy' ? 'none' : '';
-            $('workflowSelect').style.display = engine === 'comfy' ? '' : 'none';
+            $('composerAdvanced').classList.toggle('open', smartAdvancedOpen);
+            $('advancedToggle').classList.toggle('active', smartAdvancedOpen);
+            $('advancedToggle').setAttribute('aria-expanded', smartAdvancedOpen ? 'true' : 'false');
+            $('providerSelect').closest('.field').style.display = engine === 'comfy' ? 'none' : '';
+            $('modelSelect').closest('.field').style.display = engine === 'comfy' ? 'none' : '';
+            $('workflowSelect').closest('.field').style.display = engine === 'comfy' ? '' : 'none';
+            $('workflowSelect').style.display = '';
             $('sizeSelect').closest('.field').style.display = engine === 'llm' ? 'none' : '';
             $('countInput').closest('.field').style.display = engine === 'image' ? '' : 'none';
             if(engine !== 'comfy'){
@@ -1027,6 +1134,43 @@
                     ? comfyWorkflows.map(w => `<option value="${escapeHtml(w.name)}">${escapeHtml(w.title || w.name)}</option>`).join('')
                     : '<option value="">没有自定义工作流</option>';
             }
+        }
+        function selectionBounds(){
+            const selected = selectedContextNodes();
+            if(!selected.length) return null;
+            const boxes = selected.map(n => ({x:n.x || 0, y:n.y || 0, w:Number(n.w || 280), h:nodeDisplayHeight(n)}));
+            const minX = Math.min(...boxes.map(b => b.x));
+            const minY = Math.min(...boxes.map(b => b.y));
+            const maxX = Math.max(...boxes.map(b => b.x + b.w));
+            return {x:minX, y:minY, centerX:(minX + maxX) / 2};
+        }
+        function renderSelectionTools(){
+            const bounds = selectionBounds();
+            if(!bounds){
+                selectionTools.classList.remove('open');
+                selectionTools.innerHTML = '';
+                return;
+            }
+            const boardRect = board.getBoundingClientRect();
+            const x = boardRect.left + viewport.x + bounds.centerX * viewport.scale;
+            const y = boardRect.top + viewport.y + bounds.y * viewport.scale - 12;
+            const hasImages = selectedMediaImages().length > 0;
+            const hasPrompt = selectedContextNodes().some(n => textForNode(n) || n.runMeta?.prompt);
+            selectionTools.style.left = `${Math.max(78, Math.min(window.innerWidth - 78, x))}px`;
+            selectionTools.style.top = `${Math.max(78, y)}px`;
+            selectionTools.innerHTML = `
+                <button class="tool-btn" type="button" data-selection-action="variant" ${hasImages ? '' : 'disabled'}><svg class="pixel-icon"><use href="#plus"></use></svg>变体</button>
+                <button class="tool-btn" type="button" data-selection-action="edit" ${hasImages ? '' : 'disabled'}><svg class="pixel-icon"><use href="#tool-prompt"></use></svg>编辑</button>
+                <button class="tool-btn" type="button" data-selection-action="asset" ${hasImages ? '' : 'disabled'}><svg class="pixel-icon"><use href="#folder"></use></svg>入库</button>
+                <button class="tool-btn" type="button" data-selection-action="copy-prompt" ${hasPrompt ? '' : 'disabled'}><svg class="pixel-icon"><use href="#copy"></use></svg>提示词</button>
+                <button class="tool-btn" type="button" data-selection-action="download" ${hasImages ? '' : 'disabled'}><svg class="pixel-icon"><use href="#download"></use></svg>下载</button>`;
+            selectionTools.classList.add('open');
+            selectionTools.querySelectorAll('[data-selection-action]').forEach(btn => btn.onclick = e => {
+                e.stopPropagation();
+                if(btn.disabled) return;
+                runSelectionAction(btn.dataset.selectionAction);
+            });
+            refreshIcons();
         }
         async function uploadFiles(files, point=null){
             const list = [...(files || [])].filter(file => file.type.startsWith('image/'));
@@ -1124,7 +1268,7 @@
             if(source === 'asset'){
                 return assetCategories().flatMap(cat => (cat.items || []).map(item => ({url:item.url, name:item.name || 'asset', source:'asset'})));
             }
-            return lineImagesFor(selectedNode()).map((img, index) => ({...img, name:img.name || `图片${index + 1}`, source:'input'}));
+            return uniqueImages([...selectedContextImages(), ...recentCanvasImages()]).map((img, index) => ({...img, name:img.name || `图片${index + 1}`, source:'input'}));
         }
         function saveMentionRange(){
             const sel = window.getSelection();
@@ -1150,7 +1294,7 @@
             if(!items.length){ closeMentionPicker(); return; }
             mentionPicker.innerHTML = `
                 <div class="mention-tabs">
-                    <button type="button" data-mention-source="input" class="${mentionSource === 'input' ? 'active' : ''}" ${inputItems.length ? '' : 'disabled'}>上游图片</button>
+                    <button type="button" data-mention-source="input" class="${mentionSource === 'input' ? 'active' : ''}" ${inputItems.length ? '' : 'disabled'}>画布图片</button>
                     <button type="button" data-mention-source="asset" class="${mentionSource === 'asset' ? 'active' : ''}" ${assetItems.length ? '' : 'disabled'}>资产库</button>
                 </div>
                 <div class="mention-grid">${items.map((img, index) => `
@@ -1199,7 +1343,7 @@
             token.dataset.url = img.url;
             token.dataset.name = img.name || 'image';
             token.dataset.source = img.source || '';
-            token.innerHTML = `<img src="${escapeHtml(img.url)}" alt=""><span>${escapeHtml(img.name || 'image')}</span>`;
+            token.innerHTML = `<img src="${escapeHtml(img.url)}" alt=""><span>${escapeHtml(img.name || 'image')}</span><button class="mention-remove" type="button" aria-label="移除引用">×</button>`;
             range.insertNode(token);
             const spacer = document.createTextNode(' ');
             token.after(spacer);
@@ -1223,12 +1367,12 @@
             promptInput.childNodes.forEach(walk);
             return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
         }
-        function promptRequestFor(node){
+        function promptRequestFor(context){
             const composerText = collectPromptText();
-            const upstreamText = inputPromptTextFor(node);
+            const upstreamText = selectedContextText();
             const prompt = [upstreamText, composerText].filter(Boolean).join('\n\n').trim();
-            const refs = uniqueImages([...lineImagesFor(node), ...collectMentionedImages()]).map((img, index) => ({...img, role:img.role || `image_${index + 1}`}));
-            return {prompt:prompt || 'Edit the reference images.', refs};
+            const refs = uniqueImages([...selectedContextImages(), ...collectMentionedImages()]).map((img, index) => ({...img, role:img.role || `image_${index + 1}`}));
+            return {prompt:prompt || 'Edit the reference images.', refs, sourceIds:contextSourceIds()};
         }
         async function pollImageTask(taskId){
             const deadline = Date.now() + 30 * 60 * 1000;
@@ -1242,9 +1386,9 @@
         }
         async function runGeneration(){
             const engine = $('engineSelect').value;
-            const sourceNode = selectedNode();
-            const p = outputPointFor(sourceNode);
-            const request = promptRequestFor(sourceNode);
+            const contextNodes = selectedContextNodes();
+            const p = outputPointFor(contextNodes);
+            const request = promptRequestFor(contextNodes);
             $('runBtn').disabled = true;
             setStatus('RUNNING');
             let outputNode = null;
@@ -1266,9 +1410,12 @@
                     });
                     outNode = createPromptNode(p.x, p.y, {text:result.text || ''});
                     outNode.outputText = result.text || '';
+                    outNode.sourceIds = request.sourceIds || [];
+                    outNode.inputNodeIds = request.sourceIds || [];
+                    outNode.runMeta = runMetaFor(engine, request);
                 } else if(engine === 'video'){
                     const providerId = selectedProviderId('video');
-                    outputNode = prepareOutputNode(engine, sourceNode, expectedOutputCount(engine));
+                    outputNode = prepareOutputNode(engine, contextNodes, expectedOutputCount(engine), request);
                     const result = await fetchJson('/api/canvas-video', {
                         method:'POST',
                         headers:{'Content-Type':'application/json'},
@@ -1286,7 +1433,7 @@
                 } else if(engine === 'comfy'){
                     const workflow = $('workflowSelect').value;
                     if(!workflow) throw new Error('没有可运行的自定义工作流');
-                    outputNode = prepareOutputNode(engine, sourceNode, expectedOutputCount(engine));
+                    outputNode = prepareOutputNode(engine, contextNodes, expectedOutputCount(engine), request);
                     const result = await fetchJson('/api/generate', {
                         method:'POST',
                         headers:{'Content-Type':'application/json'},
@@ -1297,7 +1444,7 @@
                 } else {
                     const providerId = selectedProviderId('image');
                     const count = expectedOutputCount(engine);
-                    outputNode = prepareOutputNode(engine, sourceNode, count);
+                    outputNode = prepareOutputNode(engine, contextNodes, count, request);
                     const payload = {
                         prompt:request.prompt,
                         provider_id:providerId,
@@ -1312,10 +1459,10 @@
                 }
                 if(outNode){
                     nodes.push(outNode);
-                    if(sourceNode) addConnectionRecord(sourceNode.id, outNode.id);
+                    contextNodes.forEach(node => addConnectionRecord(node.id, outNode.id));
                     selectedIds = new Set([outNode.id]);
                 } else {
-                    finalizeOutputNode(outputNode, urls, engine);
+                    finalizeOutputNode(outputNode, urls, engine, request);
                     selectedIds = new Set([outputNode.id]);
                 }
                 render();
@@ -1386,12 +1533,65 @@
             render();
             scheduleSave();
         }
+        function setComposerTextIfEmpty(text){
+            if(!collectPromptText()) promptInput.textContent = text;
+            promptInput.focus();
+            saveMentionRange();
+            renderInputThumbs();
+        }
+        function focusComposerForSelection(mode){
+            if(!selectedMediaImages().length) return;
+            $('engineSelect').value = 'image';
+            if(mode === 'variant'){
+                $('countInput').value = Math.max(2, Math.min(4, Number($('countInput').value) || 4));
+                if(Number($('countInput').value) < 4) $('countInput').value = 4;
+                setComposerTextIfEmpty('基于选中内容生成 4 个方向不同的变体。');
+            } else {
+                setComposerTextIfEmpty('根据我的描述编辑选中内容：');
+            }
+            renderComposerControls();
+            setStatus(mode === 'variant' ? 'VARIANT READY' : 'EDIT READY');
+        }
+        async function saveSelectedToAssets(){
+            const images = selectedMediaImages();
+            if(!images.length) return;
+            for(const img of images) await addUrlToAssetLibrary(img.url, img.name || 'smart-image');
+            setStatus(`SAVED ${images.length} ASSETS`);
+        }
+        async function copySelectedPrompt(){
+            const prompts = selectedContextNodes().map(node => node.runMeta?.prompt || textForNode(node)).filter(Boolean);
+            if(!prompts.length) return;
+            const text = prompts.join('\n\n');
+            try {
+                await navigator.clipboard.writeText(text);
+                setStatus('PROMPT COPIED');
+            } catch(e) {
+                alert(text);
+            }
+        }
+        function downloadSelectedImages(){
+            selectedMediaImages().forEach((img, index) => {
+                const a = document.createElement('a');
+                a.href = img.url;
+                a.download = `${(img.name || `smart-${index + 1}`).replace(/[^\w.-]+/g, '_')}`;
+                a.target = '_blank';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            });
+        }
+        function runSelectionAction(action){
+            if(action === 'variant') return focusComposerForSelection('variant');
+            if(action === 'edit') return focusComposerForSelection('edit');
+            if(action === 'asset') return saveSelectedToAssets();
+            if(action === 'copy-prompt') return copySelectedPrompt();
+            if(action === 'download') return downloadSelectedImages();
+        }
 
         board.addEventListener('mousedown', e => {
             if(e.target !== board && e.target !== world && e.target !== linksEl && e.target !== nodesEl) return;
             selectedIds.clear();
-            panState = {sx:e.clientX, sy:e.clientY, x:viewport.x, y:viewport.y};
-            board.classList.add('dragging-board');
+            panState = {sx:e.clientX, sy:e.clientY, x:viewport.x, y:viewport.y, moved:false};
             render();
         });
         window.addEventListener('mousemove', e => {
@@ -1411,6 +1611,7 @@
                     }
                 });
                 renderLinks();
+                renderSelectionTools();
             } else if(dragState){
                 const dx = (e.clientX - dragState.sx) / viewport.scale;
                 const dy = (e.clientY - dragState.sy) / viewport.scale;
@@ -1423,10 +1624,17 @@
                     if(node){ el.style.left = `${node.x}px`; el.style.top = `${node.y}px`; }
                 });
                 renderLinks();
+                renderSelectionTools();
             } else if(panState){
-                viewport.x = panState.x + e.clientX - panState.sx;
-                viewport.y = panState.y + e.clientY - panState.sy;
+                const dx = e.clientX - panState.sx;
+                const dy = e.clientY - panState.sy;
+                if(Math.abs(dx) + Math.abs(dy) > 3) panState.moved = true;
+                if(!panState.moved) return;
+                viewport.x = panState.x + dx;
+                viewport.y = panState.y + dy;
                 applyViewport();
+                board.classList.add('dragging-board');
+                renderSelectionTools();
             } else if(linkState){
                 linkState.x = e.clientX;
                 linkState.y = e.clientY;
@@ -1438,7 +1646,7 @@
                 render();
                 scheduleSave();
             }
-            if(dragState || panState) scheduleSave();
+            if(dragState || panState?.moved) scheduleSave();
             resizeState = null;
             dragState = null;
             panState = null;
@@ -1456,6 +1664,7 @@
             viewport.x = e.clientX - rect.left - before.x * viewport.scale;
             viewport.y = e.clientY - rect.top - before.y * viewport.scale;
             applyViewport();
+            renderSelectionTools();
             scheduleSave();
         }, {passive:false});
         document.addEventListener('keydown', e => {
@@ -1507,18 +1716,34 @@
             maybeOpenMentionPicker();
             renderInputThumbs();
         });
+        promptInput.addEventListener('click', e => {
+            const remove = e.target.closest('.mention-remove');
+            if(!remove) return;
+            e.preventDefault();
+            remove.closest('.mention-token')?.remove();
+            renderInputThumbs();
+        });
         document.addEventListener('mousedown', e => {
             if(!e.target.closest('.mention-picker') && !e.target.closest('#promptInput')) closeMentionPicker();
         });
+        selectionTools.addEventListener('mousedown', e => e.stopPropagation());
         $('engineSelect').onchange = () => { renderComposerControls(); scheduleSave(); };
-        $('providerSelect').onchange = renderComposerControls;
+        $('providerSelect').onchange = () => { renderComposerControls(); scheduleSave(); };
+        $('modelSelect').onchange = scheduleSave;
+        $('workflowSelect').onchange = scheduleSave;
+        $('sizeSelect').onchange = () => { renderComposerControls(); scheduleSave(); };
+        $('countInput').oninput = scheduleSave;
+        $('advancedToggle').onclick = () => {
+            smartAdvancedOpen = !smartAdvancedOpen;
+            renderComposerControls();
+            scheduleSave();
+        };
         $('runBtn').onclick = runGeneration;
         $('backBtn').onclick = () => { saveCanvas(); location.href = '/static/canvas.html'; };
         titleInput.oninput = scheduleSave;
         $('uploadBtn').onclick = () => $('fileInput').click();
         $('fileInput').onchange = e => uploadFiles(e.target.files);
         $('promptNodeBtn').onclick = () => { const p = defaultPoint(-80, -40); addNode(createPromptNode(p.x, p.y)); };
-        $('loopNodeBtn').onclick = () => { const p = defaultPoint(-60, -30); addNode(createLoopNode(p.x, p.y)); };
         $('groupBtn').onclick = groupSelectedNodes;
         $('copyBtn').onclick = copySelectedNodes;
         $('pasteBtn').onclick = pasteNodes;
@@ -1554,6 +1779,7 @@
             if(dirtySinceSave) saveLocalDraft();
             if(saveTimer) clearTimeout(saveTimer);
         });
+        window.addEventListener('resize', renderSelectionTools);
         (async function init(){
             try {
                 await loadConfig();
