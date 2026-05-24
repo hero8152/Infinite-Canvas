@@ -2550,6 +2550,27 @@ function nodeTitleForMedia(node){
     if(kind === 'audio') return 'Audio';
     return 'Image';
 }
+const IMAGE_DROP_EXT_RE = /\.(png|jpe?g|webp)$/i;
+const IMAGE_DROP_TEXT_TYPES = [
+    'text/uri-list',
+    'text/plain',
+    'text/html',
+    'DownloadURL',
+    'text/x-moz-url',
+    'text/x-file-url',
+    'public.file-url',
+    'public.url',
+    'UniformResourceLocator',
+    'FileName',
+    'FileNameW'
+];
+const IMAGE_DROP_TYPE_HINT_RE = /^(?:files?|image\/.+|text\/(?:uri-list|html|plain|x-moz-url|x-file-url)|downloadurl|public\.(?:file-url|url)|uniformresourcelocator|filenamew?)$|application\/x-qt-(?:windows-mime|image)|application\/x-moz-file|com\.eagle/i;
+function isLikelyImageFile(file){
+    return !!file && ((file.type || '').startsWith('image/') || IMAGE_DROP_EXT_RE.test(file.name || ''));
+}
+function imageFilesFromDataTransfer(dataTransfer){
+    return [...(dataTransfer?.files || [])].filter(isLikelyImageFile);
+}
 async function uploadMediaFiles(files, point, onlyImages=false){
     if(!ensureCanvas()) return;
     const supported = [...files].filter(file => {
@@ -2579,19 +2600,114 @@ async function uploadMediaFiles(files, point, onlyImages=false){
 async function uploadImages(files, point){
     return uploadMediaFiles(files, point, false);
 }
+function dropDataTypes(dataTransfer){
+    return [...(dataTransfer?.types || [])].map(type => String(type || ''));
+}
+function readDropData(dataTransfer, type){
+    try { return dataTransfer?.getData?.(type) || ''; } catch(_) { return ''; }
+}
+function decodeDropText(value){
+    const text = String(value || '').trim();
+    if(!text) return '';
+    try { return decodeURIComponent(text); } catch(_) { return text; }
+}
+function imageDropTextFragments(value){
+    const text = String(value || '').trim();
+    if(!text) return [];
+    const fragments = [];
+    if(/<img|<a\s/i.test(text)){
+        const doc = new DOMParser().parseFromString(text, 'text/html');
+        doc.querySelectorAll('img[src],a[href]').forEach(el => fragments.push(el.getAttribute('src') || el.getAttribute('href') || ''));
+    }
+    text.split(/\r?\n/).forEach(line => {
+        const item = line.trim();
+        if(item) fragments.push(item);
+    });
+    const downloadUrl = text.match(/^image\/[^\s:]+:(.+)$/i);
+    if(downloadUrl) fragments.push(downloadUrl[1]);
+    return fragments;
+}
+function uniqueValues(values){
+    const seen = new Set();
+    return values.filter(value => {
+        const key = String(value || '').trim();
+        if(!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+function dropTextCandidates(dataTransfer){
+    if(!dataTransfer) return [];
+    const types = uniqueValues([...IMAGE_DROP_TEXT_TYPES, ...dropDataTypes(dataTransfer)]);
+    const values = types.map(type => readDropData(dataTransfer, type)).filter(Boolean);
+    return uniqueValues(values.flatMap(imageDropTextFragments).map(decodeDropText))
+        .filter(s => s && !s.startsWith('#'));
+}
+function isRemoteImageDropValue(value){
+    const text = String(value || '').trim();
+    return /^https?:\/\/.+/i.test(text) || /^data:image\//i.test(text) || /^blob:/i.test(text);
+}
+function isLocalImageDropValue(value){
+    const text = String(value || '').trim();
+    if(!text) return false;
+    let path = text;
+    if(/^file:/i.test(path)){
+        try {
+            const url = new URL(path);
+            if(url.protocol !== 'file:') return false;
+            path = decodeURIComponent(url.pathname || path);
+        } catch(_) {
+            return false;
+        }
+    }
+    if(/^\/[a-zA-Z]:[\\/]/.test(path)) path = path.slice(1);
+    const clean = path.split(/[?#]/, 1)[0];
+    const isWindowsPath = /^[a-zA-Z]:[\\/]/.test(clean);
+    const isPosixPath = clean.startsWith('/');
+    return (isWindowsPath || isPosixPath) && IMAGE_DROP_EXT_RE.test(clean);
+}
+function localImagePathsFromDataTransfer(dataTransfer){
+    return uniqueValues(dropTextCandidates(dataTransfer).filter(isLocalImageDropValue));
+}
 function imageUrlFromDataTransfer(dataTransfer){
-    if(!dataTransfer) return '';
-    const values = [
-        dataTransfer.getData?.('text/uri-list') || '',
-        dataTransfer.getData?.('text/plain') || ''
-    ].join('\n');
-    const html = dataTransfer.getData?.('text/html') || '';
-    const htmlMatch = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-    const candidates = [
-        htmlMatch?.[1] || '',
-        ...values.split(/\r?\n/)
-    ].map(s => String(s || '').trim()).filter(Boolean);
-    return candidates.find(s => /^https?:\/\/.+/i.test(s) || /^data:image\//i.test(s) || /^blob:/i.test(s)) || '';
+    return dropTextCandidates(dataTransfer).find(isRemoteImageDropValue) || '';
+}
+function imageDropPayload(dataTransfer){
+    const files = imageFilesFromDataTransfer(dataTransfer);
+    if(files.length) return {type:'files', files};
+    const localPaths = localImagePathsFromDataTransfer(dataTransfer);
+    if(localPaths.length) return {type:'localPaths', localPaths};
+    const url = imageUrlFromDataTransfer(dataTransfer);
+    if(url) return {type:'url', url};
+    return {type:'none'};
+}
+async function importLocalImages(paths){
+    if(!paths?.length) return [];
+    const response = await fetch('/api/ai/import-local-image', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({paths})
+    });
+    if(!response.ok) throw new Error(await responseErrorMessage(response, '导入本地图片失败'));
+    const data = await response.json();
+    return data.files || [];
+}
+async function createImageCardsFromLocalPaths(paths, point){
+    if(!ensureCanvas()) return;
+    setStatus('导入图片...');
+    try {
+        const files = await importLocalImages(paths);
+        const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
+        files.forEach((file, i) => {
+            nodes.push({id:uid('img'), type:'image', x:base.x + i * 36, y:base.y + i * 36, url:file.url, name:file.name, mediaKind:'image'});
+        });
+        if(files.length){
+            render();
+            scheduleSave();
+        }
+    } finally {
+        setStatus('Ready');
+    }
 }
 function createImageCardFromUrl(url, point, name='image'){
     if(!ensureCanvas() || !url) return;
@@ -2617,6 +2733,73 @@ async function fillImageNode(nodeId, files){
         render();
         scheduleSave();
     }
+}
+async function fillImageNodeFromLocalPath(nodeId, path){
+    if(!ensureCanvas() || !path) return;
+    setStatus('导入图片...');
+    try {
+        const file = (await importLocalImages([path]))[0];
+        const node = nodes.find(n => n.id === nodeId);
+        if(file && node){
+            node.url = file.url;
+            node.name = file.name;
+            node.mediaKind = 'image';
+            render();
+            scheduleSave();
+        }
+    } finally {
+        setStatus('Ready');
+    }
+}
+async function applyImageDropPayloadToNode(nodeId, payload){
+    if(payload.type === 'files') await fillImageNode(nodeId, payload.files);
+    else if(payload.type === 'localPaths') await fillImageNodeFromLocalPath(nodeId, payload.localPaths[0]);
+    else if(payload.type === 'url') {
+        const node = nodes.find(n => n.id === nodeId);
+        if(node && payload.url){
+            node.url = payload.url;
+            node.name = outputImageName(payload.url);
+            node.mediaKind = isVideoUrl(payload.url) ? 'video' : isAudioUrl(payload.url) ? 'audio' : 'image';
+            render();
+            scheduleSave();
+        }
+    }
+}
+function allowImageNodeDropEvent(e, highlightEl){
+    if(hasImageDropData(e.dataTransfer) || hasOutputImageDrag(e.dataTransfer)){
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        highlightEl?.classList.add('drag-over');
+        dropOverlay.classList.remove('active');
+    }
+}
+function clearImageNodeDropState(e, highlightEl){
+    e.preventDefault();
+    e.stopPropagation();
+    highlightEl?.classList.remove('drag-over');
+    dropOverlay.classList.remove('active');
+}
+async function handleImageNodeDropEvent(e, nodeId, highlightEl){
+    if(hasOutputImageDrag(e.dataTransfer)){
+        clearImageNodeDropState(e, highlightEl);
+        setImageNodeFromOutput(nodeId, e.dataTransfer.getData('application/x-canvas-output-image'));
+        return;
+    }
+    const payload = imageDropPayload(e.dataTransfer);
+    clearImageNodeDropState(e, highlightEl);
+    if(payload.type === 'none') return;
+    try {
+        await applyImageDropPayloadToNode(nodeId, payload);
+    } catch(err) {
+        setStatus('Ready');
+        showErrorModal(err.message || '导入图片失败', '导入图片失败');
+    }
+}
+async function applyImageDropPayloadToBoard(payload, point){
+    if(payload.type === 'files') await uploadImages(payload.files, point);
+    else if(payload.type === 'localPaths') await createImageCardsFromLocalPaths(payload.localPaths, point);
+    else if(payload.type === 'url') createImageCardFromUrl(payload.url, point, outputImageName(payload.url));
 }
 function setImageNodeFromOutput(nodeId, url){
     const node = nodes.find(n => n.id === nodeId);
@@ -3850,48 +4033,12 @@ function renderNode(node){
                 }
                 startNodeDrag(e, node);
             };
-            body.ondragover = e => {
-                if(hasImageDropData(e.dataTransfer) || hasOutputImageDrag(e.dataTransfer)){
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.dataTransfer.dropEffect = hasOutputImageDrag(e.dataTransfer) ? 'copy' : 'move';
-                    previewWrap.classList.add('drag-over');
-                    /* 节点内拖拽时把画布全局的毛玻璃覆盖层关掉，避免 stopPropagation 后 board 没机会清它 */
-                    dropOverlay.classList.remove('active');
-                }
-            };
+            body.ondragover = e => allowImageNodeDropEvent(e, previewWrap);
             body.ondragleave = e => {
                 e.stopPropagation();
                 previewWrap.classList.remove('drag-over');
             };
-            body.ondrop = e => {
-                if(hasOutputImageDrag(e.dataTransfer)){
-                    e.preventDefault();
-                    e.stopPropagation();
-                    previewWrap.classList.remove('drag-over');
-                    dropOverlay.classList.remove('active');
-                    setImageNodeFromOutput(node.id, e.dataTransfer.getData('application/x-canvas-output-image'));
-                } else if(hasImageFiles(e.dataTransfer?.items)){
-                    e.preventDefault();
-                    e.stopPropagation();
-                    previewWrap.classList.remove('drag-over');
-                    dropOverlay.classList.remove('active');
-                    fillImageNode(node.id, e.dataTransfer.files);
-                } else {
-                    const droppedUrl = imageUrlFromDataTransfer(e.dataTransfer);
-                    if(droppedUrl){
-                        e.preventDefault();
-                        e.stopPropagation();
-                        previewWrap.classList.remove('drag-over');
-                        dropOverlay.classList.remove('active');
-                        node.url = droppedUrl;
-                        node.name = outputImageName(droppedUrl);
-                        node.mediaKind = isVideoUrl(droppedUrl) ? 'video' : isAudioUrl(droppedUrl) ? 'audio' : 'image';
-                        render();
-                        scheduleSave();
-                    }
-                }
-            };
+            body.ondrop = e => handleImageNodeDropEvent(e, node.id, previewWrap);
             body.oncontextmenu = e => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -3913,36 +4060,9 @@ function renderNode(node){
         body.innerHTML = `<div class="blank-image"><i data-lucide="image-plus" class="w-7 h-7"></i><div class="text-[11px] font-bold">${tr('canvas.clickDragPasteImage')}</div></div>`;
             const blank = body.querySelector('.blank-image');
             blank.onclick = () => pickImageForNode(node.id);
-            blank.ondragover = e => { if(hasImageDropData(e.dataTransfer) || hasOutputImageDrag(e.dataTransfer)){ e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = hasOutputImageDrag(e.dataTransfer) ? 'copy' : 'move'; blank.classList.add('drag-over'); dropOverlay.classList.remove('active'); } };
+            blank.ondragover = e => allowImageNodeDropEvent(e, blank);
             blank.ondragleave = e => { e.stopPropagation(); blank.classList.remove('drag-over'); };
-            blank.ondrop = e => {
-                if(hasOutputImageDrag(e.dataTransfer)){
-                    e.preventDefault();
-                    e.stopPropagation();
-                    blank.classList.remove('drag-over');
-                    dropOverlay.classList.remove('active');
-                    setImageNodeFromOutput(node.id, e.dataTransfer.getData('application/x-canvas-output-image'));
-                } else if(hasImageFiles(e.dataTransfer?.items)){
-                    e.preventDefault();
-                    e.stopPropagation();
-                    blank.classList.remove('drag-over');
-                    dropOverlay.classList.remove('active');
-                    fillImageNode(node.id, e.dataTransfer.files);
-                } else {
-                    const droppedUrl = imageUrlFromDataTransfer(e.dataTransfer);
-                    if(droppedUrl){
-                        e.preventDefault();
-                        e.stopPropagation();
-                        blank.classList.remove('drag-over');
-                        dropOverlay.classList.remove('active');
-                        node.url = droppedUrl;
-                        node.name = outputImageName(droppedUrl);
-                        node.mediaKind = isVideoUrl(droppedUrl) ? 'video' : isAudioUrl(droppedUrl) ? 'audio' : 'image';
-                        render();
-                        scheduleSave();
-                    }
-                }
-            };
+            blank.ondrop = e => handleImageNodeDropEvent(e, node.id, blank);
         }
     }
     if(node.type === 'prompt') {
@@ -8183,14 +8303,14 @@ board.addEventListener('dragover', e => {
     }
     if(hasImageDropData(e.dataTransfer) || hasOutputImageDrag(e.dataTransfer)){
         e.preventDefault();
-        e.dataTransfer.dropEffect = hasOutputImageDrag(e.dataTransfer) ? 'copy' : 'move';
+        e.dataTransfer.dropEffect = 'copy';
         dropOverlay.classList.add('active');
     }
 });
 board.addEventListener('dragleave', e => {
     if(e.target === board || !board.contains(e.relatedTarget)) dropOverlay.classList.remove('active');
 });
-board.addEventListener('drop', e => {
+board.addEventListener('drop', async e => {
     e.preventDefault();
     dropOverlay.classList.remove('active');
     if(e.target.closest?.('.image-node')) return;
@@ -8202,12 +8322,14 @@ board.addEventListener('drop', e => {
         internalDrag = false;
         return;
     }
-    if(hasImageFiles(e.dataTransfer?.items)){
-        uploadImages(e.dataTransfer.files, screenToWorld(e.clientX, e.clientY));
-        return;
+    const payload = imageDropPayload(e.dataTransfer);
+    if(payload.type === 'none') return;
+    try {
+        await applyImageDropPayloadToBoard(payload, screenToWorld(e.clientX, e.clientY));
+    } catch(err) {
+        setStatus('Ready');
+        showErrorModal(err.message || '导入图片失败', '导入图片失败');
     }
-    const droppedUrl = imageUrlFromDataTransfer(e.dataTransfer);
-    if(droppedUrl) createImageCardFromUrl(droppedUrl, screenToWorld(e.clientX, e.clientY), outputImageName(droppedUrl));
 });
 window.addEventListener('dragend', () => dropOverlay.classList.remove('active'));
 window.addEventListener('drop', () => dropOverlay.classList.remove('active'));
@@ -8305,9 +8427,10 @@ function deleteSelectedNodes(){
 function hasImageFiles(items){ return [...(items || [])].some(item => item.kind === 'file' && /^(image|video|audio)\//.test(String(item.type || ''))); }
 function hasImageDropData(dataTransfer){
     if(!dataTransfer) return false;
-    if(hasImageFiles(dataTransfer.items)) return true;
-    const types = [...(dataTransfer.types || [])];
-    return types.includes('text/uri-list') || types.includes('text/html') || types.includes('text/plain');
+    if(imageFilesFromDataTransfer(dataTransfer).length) return true;
+    const types = dropDataTypes(dataTransfer);
+    if(types.some(type => IMAGE_DROP_TYPE_HINT_RE.test(type.toLowerCase()))) return true;
+    return imageDropPayload(dataTransfer).type !== 'none';
 }
 function hasOutputImageDrag(dataTransfer){ return [...(dataTransfer?.types || [])].includes('application/x-canvas-output-image'); }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }

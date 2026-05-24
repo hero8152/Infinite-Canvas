@@ -298,6 +298,8 @@ VIDEO_POLL_TIMEOUT = float(os.getenv("VIDEO_POLL_TIMEOUT", "1800"))
 ONLINE_IMAGE_PROMPT_MAX_LENGTH = int(os.getenv("ONLINE_IMAGE_PROMPT_MAX_LENGTH", "20000"))
 VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "4000"))
 LLM_MESSAGE_MAX_LENGTH = int(os.getenv("LLM_MESSAGE_MAX_LENGTH", "20000"))
+LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
+LOCAL_IMAGE_IMPORT_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 FIELD_LABELS = {
     "prompt": "提示词",
@@ -1174,6 +1176,10 @@ class SmartCanvasGroupExportRequest(BaseModel):
     group_name: str = "group"
     items: List[SmartCanvasGroupExportItem] = []
 
+class LocalImageImportRequest(BaseModel):
+    path: str = ""
+    paths: List[str] = Field(default_factory=list)
+
 class AssetLibraryCategoryRequest(BaseModel):
     name: str = "新文件夹"
     type: str = "image"
@@ -1746,6 +1752,73 @@ def output_file_from_url(url):
     if os.path.commonpath([output_root, path]) != output_root or not os.path.exists(path):
         return None
     return path
+
+def origin_from_url(value):
+    parsed = urllib.parse.urlparse(str(value or ""))
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}".lower()
+
+def ensure_same_origin_request(request: Request):
+    host = str(request.headers.get("host") or "").lower()
+    expected = f"{request.url.scheme}://{host}".lower() if host else ""
+    origin = origin_from_url(request.headers.get("origin", ""))
+    referer = origin_from_url(request.headers.get("referer", ""))
+    actual = origin or referer
+    if expected and actual != expected:
+        raise HTTPException(status_code=403, detail="只允许从当前页面导入本地图片")
+
+def normalize_local_image_path(value):
+    text = str(value or "").strip().strip('"').strip("'")
+    if not text:
+        raise HTTPException(status_code=400, detail="本地图片路径为空")
+    if text.lower().startswith("file:"):
+        parsed = urllib.parse.urlparse(text)
+        if parsed.scheme.lower() != "file":
+            raise HTTPException(status_code=400, detail="只支持本地图片路径")
+        if parsed.netloc and re.match(r"^[a-zA-Z]:$", parsed.netloc) and os.name == "nt":
+            path = f"{parsed.netloc}{urllib.request.url2pathname(parsed.path or '')}"
+        elif parsed.netloc and parsed.netloc.lower() not in ("localhost",):
+            raise HTTPException(status_code=400, detail="只支持本机图片路径")
+        else:
+            path = urllib.request.url2pathname(parsed.path or "")
+    else:
+        path = text
+    path = path.strip().strip('"').strip("'")
+    if re.match(r"^/[a-zA-Z]:[\\/]", path):
+        path = path[1:]
+    if re.match(r"^[a-zA-Z]:[\\/]", path):
+        return os.path.abspath(path)
+    if path.startswith("/") and os.name != "nt":
+        return os.path.abspath(path)
+    raise HTTPException(status_code=400, detail="只支持本机绝对图片路径")
+
+def import_local_image_file(path):
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in LOCAL_IMAGE_IMPORT_EXTS:
+        raise HTTPException(status_code=400, detail="仅支持 PNG、JPG、JPEG、WEBP 图片")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="本地图片不存在或无法读取")
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        raise HTTPException(status_code=404, detail="本地图片不存在或无法读取")
+    if size <= 0:
+        raise HTTPException(status_code=400, detail="本地图片为空")
+    if size > LOCAL_IMAGE_IMPORT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="本地图片过大，请使用 50MB 以内的图片")
+    try:
+        with Image.open(path) as img:
+            img.verify()
+    except Exception:
+        raise HTTPException(status_code=400, detail="文件不是可识别的图片")
+    filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
+    dest = output_path_for(filename, "input")
+    try:
+        shutil.copyfile(path, dest)
+    except OSError:
+        raise HTTPException(status_code=500, detail="导入本地图片失败")
+    return {"url": output_url_for(filename, "input"), "name": os.path.basename(path) or filename}
 
 def default_asset_library():
     return {
@@ -2791,6 +2864,16 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
             f.write(content)
         uploaded.append({"url": output_url_for(filename, "input"), "name": file.filename or filename, "kind": kind})
     return {"files": uploaded}
+
+@app.post("/api/ai/import-local-image")
+async def import_local_ai_reference(payload: LocalImageImportRequest, request: Request):
+    ensure_same_origin_request(request)
+    requested = [payload.path] if payload.path else []
+    requested.extend(payload.paths or [])
+    requested = [p for p in requested if str(p or "").strip()][:20]
+    if not requested:
+        raise HTTPException(status_code=400, detail="没有可导入的本地图片")
+    return {"files": [import_local_image_file(normalize_local_image_path(path)) for path in requested]}
 
 @app.get("/api/config")
 async def ai_config():
