@@ -41,16 +41,24 @@ jobs:
         id: image
         run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      - name: Read VERSION tag
+        id: version
+        shell: bash
+        run: |
+          version="$(head -n 1 VERSION | tr -d '\r' | xargs)"
+          tag="$(echo "$version" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[.-]+//; s/[.-]+$//')"
+          if [ -n "$tag" ]; then
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.event_name != 'pull_request' }}
+            type=raw,value=${{ steps.version.outputs.tag }},enable=${{ steps.version.outputs.tag != '' && github.event_name != 'pull_request' }}
 
       - name: Build and publish
         uses: docker/build-push-action@v6
