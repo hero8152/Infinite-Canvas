@@ -1,0 +1,20 @@
+# Python/runtime cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+
+# Local agent/workflow state
+.workflow/
+
+# Local Docker runtime data
+docker-data/
+
+# Application runtime data
+API/
+assets/
+data/
+output/
+history.json
+global_config.json
+_self_restart.*
