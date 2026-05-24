@@ -1105,6 +1105,11 @@ class ApiProviderPayload(BaseModel):
     api_key: Optional[str] = None
     clear_key: bool = False
 
+class ApiProviderModelsPayload(BaseModel):
+    image_models: List[str] = []
+    chat_models: List[str] = []
+    video_models: List[str] = []
+
 class ChatRequest(BaseModel):
     conversation_id: str = ""
     message: str = Field(min_length=1, max_length=LLM_MESSAGE_MAX_LENGTH)
@@ -2856,6 +2861,33 @@ async def save_providers(payload: List[ApiProviderPayload]):
         update_env_values(env_updates)
         reload_env_globals()   # 立即将最新 env 值同步回模块全局变量，无需重启
     return {"providers": [public_provider(p) for p in providers]}
+
+def provider_model_env_updates(provider):
+    env_updates = {}
+    if provider["id"] == "comfly":
+        env_updates["IMAGE_MODELS"] = ",".join(provider["image_models"])
+        env_updates["CHAT_MODELS"] = ",".join(provider["chat_models"])
+        env_updates["VIDEO_MODELS"] = ",".join(provider.get("video_models") or [])
+    if provider["id"] == "modelscope":
+        env_updates["MODELSCOPE_CHAT_MODELS"] = ",".join(provider["chat_models"])
+    return env_updates
+
+@app.put("/api/providers/{provider_id}/models")
+async def save_provider_models(provider_id: str, payload: ApiProviderModelsPayload):
+    providers = load_api_providers()
+    target = (provider_id or "").strip().lower()
+    provider = next((p for p in providers if p["id"] == target), None)
+    if not provider:
+        raise HTTPException(status_code=404, detail=f"未找到 API 平台：{target or '(empty)'}")
+    provider["image_models"] = model_list_from_values(payload.image_models)
+    provider["chat_models"] = model_list_from_values(payload.chat_models)
+    provider["video_models"] = model_list_from_values(payload.video_models)
+    save_api_providers(providers)
+    env_updates = provider_model_env_updates(provider)
+    if env_updates:
+        update_env_values(env_updates)
+        reload_env_globals()
+    return {"provider": public_provider(provider)}
 
 # --- ModelScope Token (从 env 读取，不再支持通过 UI 修改) ---
 

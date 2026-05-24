@@ -216,7 +216,7 @@
         .picker-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px; border-bottom:1px solid var(--line); }
         .picker-title { font-size:15px; font-weight:900; color:var(--text); }
         .picker-count { font-size:11px; color:var(--muted); font-weight:700; margin-top:2px; }
-        .picker-close { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); cursor:pointer; transition:all .15s ease; }
+        .picker-close { width:30px; height:30px; border:0; border-radius:8px; padding:0; display:flex; align-items:center; justify-content:center; background:transparent; color:var(--muted); cursor:pointer; transition:all .15s ease; }
         .picker-close:hover { background:var(--soft); color:var(--text); }
         .picker-toolbar { display:flex; align-items:center; gap:10px; padding:12px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
         .picker-search { flex:1; min-width:160px; height:34px; padding:0 12px; border:1px solid var(--line); border-radius:9px; background:var(--soft); color:var(--text); outline:none; font-size:12.5px; }
@@ -227,10 +227,17 @@
         .picker-cat-tab.active { background:var(--panel); color:var(--text); box-shadow:0 1px 2px rgba(15,23,42,.06); }
         .picker-cat-tab .cat-count { font-size:10px; padding:1px 5px; border-radius:5px; background:var(--line); color:var(--muted); font-weight:800; }
         .picker-cat-tab.active .cat-count { background:var(--soft); color:var(--text); }
+        .picker-mode-toggle { height:32px; padding:0 12px; border:1px solid var(--line); border-radius:9px; background:var(--panel); color:var(--muted); font-size:11px; font-weight:900; cursor:pointer; transition:all .15s ease; }
+        .picker-mode-toggle:hover { color:var(--text); border-color:var(--line-strong); }
+        .picker-mode-toggle.active { background:var(--text); color:var(--bg); border-color:var(--text); }
+        body.studio-theme-dark .picker-mode-toggle.active { background:#f5f6f8; color:#0e1014; border-color:#f5f6f8; }
+        .picker-note { padding:8px 20px 9px; border-bottom:1px solid var(--line); background:rgba(15,23,42,.025); color:var(--muted); font-size:11.5px; line-height:1.35; font-weight:750; }
+        body.studio-theme-dark .picker-note { background:rgba(255,255,255,.035); }
         .picker-body { flex:1; overflow:auto; -webkit-overflow-scrolling:touch; padding:8px 12px 12px; }
         .picker-row { display:flex; align-items:center; gap:12px; padding:11px 12px; border-bottom:1px solid var(--line); cursor:pointer; transition:background .12s ease; }
         .picker-row:hover { background:var(--soft); }
         .picker-row.has-sel { background:rgba(15,23,42,.04); }
+        .picker-row.is-anchor { box-shadow:inset 3px 0 0 var(--text); }
         body.studio-theme-dark .picker-row.has-sel { background:rgba(255,255,255,.04); }
         .picker-checkbox { width:18px; height:18px; border:1.5px solid var(--line-strong); border-radius:5px; display:flex; align-items:center; justify-content:center; background:var(--panel); flex:0 0 auto; color:var(--bg); transition:all .15s ease; }
         .picker-row:hover .picker-checkbox { border-color:var(--text); }
@@ -240,6 +247,24 @@
         .picker-checkbox.checked svg { opacity:1; }
         .picker-model-name { min-width:0; flex:1; font-size:13px; font-weight:650; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
         .picker-row.has-sel .picker-model-name { font-weight:850; }
+        .picker-type-wrap { position:relative; flex:0 0 auto; }
+        .picker-type-btn { min-width:74px; height:28px; padding:0 8px 0 10px; border:1px solid var(--line); border-radius:8px; display:inline-flex; align-items:center; justify-content:center; gap:5px; font-size:11px; font-weight:900; cursor:pointer; transition:background-color .16s ease, border-color .16s ease, color .16s ease, transform .16s cubic-bezier(.22,1,.36,1); }
+        .picker-type-btn:hover,
+        .picker-type-btn.is-open { transform:translateY(-1px); border-color:var(--line-strong); }
+        .picker-type-btn i { width:12px; height:12px; }
+        .picker-type-btn .type-label { max-width:38px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .picker-type-btn.cat-image { background:rgba(16,185,129,.12); color:#047857; border-color:rgba(16,185,129,.24); }
+        .picker-type-btn.cat-chat { background:rgba(59,130,246,.12); color:#1d4ed8; border-color:rgba(59,130,246,.24); }
+        .picker-type-btn.cat-video { background:rgba(245,158,11,.13); color:#b45309; border-color:rgba(245,158,11,.28); }
+        body.studio-theme-dark .picker-type-btn.cat-image { background:rgba(16,185,129,.16); color:#34d399; border-color:rgba(52,211,153,.28); }
+        body.studio-theme-dark .picker-type-btn.cat-chat { background:rgba(96,165,250,.16); color:#60a5fa; border-color:rgba(96,165,250,.28); }
+        body.studio-theme-dark .picker-type-btn.cat-video { background:rgba(251,191,36,.17); color:#fbbf24; border-color:rgba(251,191,36,.3); }
+        .picker-type-menu { position:absolute; right:0; top:34px; width:112px; padding:5px; border:1px solid var(--line-strong); border-radius:10px; background:var(--panel); box-shadow:0 14px 32px rgba(15,23,42,.22); z-index:3; opacity:0; transform:translateY(-4px) scale(.98); pointer-events:none; transition:opacity .16s ease, transform .16s cubic-bezier(.22,1,.36,1); }
+        .picker-type-menu.open { opacity:1; transform:translateY(0) scale(1); pointer-events:auto; }
+        .picker-type-option { width:100%; height:28px; padding:0 8px; border-radius:7px; display:flex; align-items:center; justify-content:space-between; gap:6px; color:var(--muted); font-size:11px; font-weight:900; cursor:pointer; transition:background-color .14s ease, color .14s ease; }
+        .picker-type-option:hover { background:var(--soft); color:var(--text); }
+        .picker-type-option.active { background:var(--text); color:var(--bg); }
+        body.studio-theme-dark .picker-type-option.active { background:#f5f6f8; color:#0e1014; }
         /* 当前模型在其他类别中也被选中时，右侧显示提示标签 */
         .picker-other-cats { display:flex; gap:4px; flex:0 0 auto; }
         .picker-other-tag { font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:5px; letter-spacing:.04em; }
@@ -498,7 +523,7 @@
                     <div class="picker-title">从上游拉取的模型清单</div>
                     <div id="pickerCount" class="picker-count">—</div>
                 </div>
-                <div class="picker-close" onclick="closeModelPicker()"><i data-lucide="x" class="w-4 h-4"></i></div>
+                <button class="picker-close" type="button" onclick="closeModelPicker()" title="关闭" aria-label="关闭"><i data-lucide="x" class="w-4 h-4"></i></button>
             </div>
             <div class="picker-toolbar">
                 <input id="pickerFilter" class="picker-search" type="text" placeholder="按名称搜索模型…" oninput="renderModelPicker()">
@@ -508,7 +533,9 @@
                     <button class="picker-cat-tab" data-cat="chat" onclick="selectPickerCat('chat')">LLM <span class="cat-count">0</span></button>
                     <button class="picker-cat-tab" data-cat="video" onclick="selectPickerCat('video')">视频 <span class="cat-count">0</span></button>
                 </div>
+                <button id="pickerManageModeBtn" class="picker-mode-toggle" type="button" onclick="togglePickerManageMode()">管理模式</button>
             </div>
+            <div class="picker-note">注：请按供应商实际模型类型选择；手动切换仅用于修正自动识别，选错可能导致调用报错。多选支持 Shift 范围选择、Ctrl/Cmd 追加选择。</div>
             <div id="pickerList" class="picker-body"></div>
             <div id="pickerSummary" class="picker-summary">
                 <span class="picker-summary-title">将应用：</span>
@@ -518,8 +545,8 @@
                 <span id="sumUnsel" style="margin-left:auto;color:var(--faint)">未选 0</span>
             </div>
             <div class="picker-foot">
-                <button class="action-btn" type="button" onclick="closeModelPicker()">取消</button>
-                <button class="action-btn save-btn" type="button" onclick="applyModelPicker()">应用到模型列表</button>
+                <button class="action-btn" type="button" onclick="closeModelPicker()" data-i18n="common.close">关闭</button>
+                <button id="applyModelPickerBtn" class="action-btn save-btn" type="button" onclick="applyModelPicker()">应用到模型列表</button>
             </div>
         </div>
     </div>
@@ -935,7 +962,43 @@
         // —— 模型选择器浮层 ——
         // 每个模型只归一类（根据用户已配置 或 关键字猜测）；勾选 = 纳入该分类
         let pickerState = { category: {}, selected: {} };
+        const PICKER_CATEGORY_OVERRIDES_KEY = 'api_settings_picker_category_overrides_v1';
+        let pickerCategoryOverrides = loadPickerCategoryOverrides();
         let pickerVisibleIds = [];
+        let pickerTypeMenuId = null;
+        let pickerAnchorIndex = null;
+        let pickerManageMode = false;
+        let pickerManageSelected = {};
+        const pickerTypeMeta = {
+            image: { label: '生图', icon: 'image' },
+            chat: { label: 'LLM', icon: 'bot' },
+            video: { label: '视频', icon: 'clapperboard' },
+        };
+        function loadPickerCategoryOverrides(){
+            try {
+                const raw = localStorage.getItem(PICKER_CATEGORY_OVERRIDES_KEY);
+                const data = raw ? JSON.parse(raw) : {};
+                return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+            } catch(e) {
+                return {};
+            }
+        }
+        function savePickerCategoryOverrides(){
+            try {
+                localStorage.setItem(PICKER_CATEGORY_OVERRIDES_KEY, JSON.stringify(pickerCategoryOverrides));
+            } catch(e) {}
+        }
+        function providerPickerScope(item){
+            return String(item?.id || selectedId || 'default');
+        }
+        function rememberPickerCategoryOverride(id, cat){
+            const item = provider();
+            if(!item || typeof id !== 'string' || !pickerTypeMeta[cat]) return;
+            const scope = providerPickerScope(item);
+            pickerCategoryOverrides[scope] = pickerCategoryOverrides[scope] || {};
+            pickerCategoryOverrides[scope][id] = cat;
+            savePickerCategoryOverrides();
+        }
         function openModelPicker(){
             const item = provider();
             if(!item || !lastFetchedAll.length){ alert('没有拉取到模型'); return; }
@@ -943,11 +1006,13 @@
             const allIds = new Set([...lastFetchedAll, ...(item.image_models||[]), ...(item.chat_models||[]), ...(item.video_models||[])]);
             pickerState = { category: {}, selected: {} };
             allIds.forEach(id => {
-                // 类别归属：用户已配置 > 关键字建议 > 默认 chat
+                // 类别归属：已保存列表 > 本次手动调整 > 关键字建议 > 默认 chat
+                const overrideCat = pickerCategoryOverrides[providerPickerScope(item)]?.[id];
                 let cat;
                 if(existing.image.has(id)) cat = 'image';
                 else if(existing.video.has(id)) cat = 'video';
                 else if(existing.chat.has(id)) cat = 'chat';
+                else if(overrideCat && pickerTypeMeta[overrideCat]) cat = overrideCat;
                 else if(lastFetchedSuggestion?.image?.has(id)) cat = 'image';
                 else if(lastFetchedSuggestion?.video?.has(id)) cat = 'video';
                 else cat = 'chat';
@@ -957,10 +1022,56 @@
             });
             // 默认 tab 切回「全部」
             document.querySelectorAll('.picker-cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === 'all'));
+            pickerTypeMenuId = null;
+            pickerAnchorIndex = null;
+            pickerManageMode = false;
+            pickerManageSelected = {};
             document.getElementById('modelPickerOverlay').style.display = 'flex';
             renderModelPicker();
         }
-        function closeModelPicker(){ document.getElementById('modelPickerOverlay').style.display = 'none'; }
+        function closeModelPicker(){
+            pickerTypeMenuId = null;
+            document.getElementById('modelPickerOverlay').style.display = 'none';
+        }
+        function updateModelPickerModeUi(){
+            const modeBtn = document.getElementById('pickerManageModeBtn');
+            const applyBtn = document.getElementById('applyModelPickerBtn');
+            const summaryTitle = document.querySelector('#pickerSummary .picker-summary-title');
+            if(modeBtn){
+                modeBtn.classList.toggle('active', pickerManageMode);
+                modeBtn.textContent = pickerManageMode ? '退出管理模式' : '管理模式';
+                modeBtn.setAttribute('aria-pressed', pickerManageMode ? 'true' : 'false');
+            }
+            if(applyBtn) applyBtn.textContent = pickerManageMode ? '确定更改模型类型' : '应用到模型列表';
+            if(summaryTitle) summaryTitle.textContent = pickerManageMode ? '将调整类型：' : '将应用：';
+        }
+        function togglePickerManageMode(){
+            pickerManageMode = !pickerManageMode;
+            pickerTypeMenuId = null;
+            pickerAnchorIndex = null;
+            pickerManageSelected = {};
+            renderModelPicker();
+        }
+        function pickerTypeButtonHtml(id, cat){
+            const meta = pickerTypeMeta[cat] || pickerTypeMeta.chat;
+            const open = pickerTypeMenuId === id;
+            const options = open ? Object.entries(pickerTypeMeta).map(([key, item]) => `
+                <button class="picker-type-option ${key === cat ? 'active' : ''}" type="button" role="menuitem" onclick="setPickerTypeByIndex(event, ${pickerVisibleIds.indexOf(id)}, '${key}')">
+                    <span>${item.label}</span>
+                    ${key === cat ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''}
+                </button>
+            `).join('') : '';
+            return `
+                <div class="picker-type-wrap">
+                    <button class="picker-type-btn cat-${cat} ${open ? 'is-open' : ''}" type="button" title="调整模型类型" aria-label="调整模型类型：${meta.label}" aria-expanded="${open ? 'true' : 'false'}" onclick="togglePickerTypeMenuByIndex(event, ${pickerVisibleIds.indexOf(id)})">
+                        <i data-lucide="${meta.icon}" class="w-3 h-3"></i>
+                        <span class="type-label">${meta.label}</span>
+                        <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                    </button>
+                    <div class="picker-type-menu ${open ? 'open' : ''}" role="menu" aria-hidden="${open ? 'false' : 'true'}" onclick="event.stopPropagation()">${options}</div>
+                </div>
+            `;
+        }
         function renderModelPicker(){
             const filter = (document.getElementById('pickerFilter')?.value || '').toLowerCase();
             const currentTab = document.querySelector('.picker-cat-tab.active')?.dataset.cat || 'all';
@@ -971,7 +1082,8 @@
             ids.forEach(id => {
                 const cat = pickerState.category[id];
                 totals[cat]++;
-                if(pickerState.selected[id]){ selecteds[cat]++; selecteds.all++; }
+                const rowSelected = pickerManageMode ? pickerManageSelected[id] === true : pickerState.selected[id] === true;
+                if(rowSelected){ selecteds[cat]++; selecteds.all++; }
             });
             // 过滤显示
             const list = ids.filter(id => {
@@ -980,6 +1092,7 @@
                 return pickerState.category[id] === currentTab;
             });
             pickerVisibleIds = list;
+            if(pickerTypeMenuId && !list.includes(pickerTypeMenuId)) pickerTypeMenuId = null;
             document.getElementById('pickerCount').textContent = `共 ${totals.all} 个模型 · 当前显示 ${list.length} 个`;
             document.querySelectorAll('.picker-cat-tab').forEach(tab => {
                 const cat = tab.dataset.cat;
@@ -987,17 +1100,21 @@
             });
             // 列表
             const html = list.map((id, index) => {
-                const checked = pickerState.selected[id];
+                const checked = pickerManageMode ? pickerManageSelected[id] === true : pickerState.selected[id] === true;
+                const cat = pickerState.category[id] || 'chat';
+                const isAnchor = index === pickerAnchorIndex;
                 return `
-                    <div class="picker-row ${checked?'has-sel':''}" onclick="togglePickerRowByIndex(${index})">
+                    <div class="picker-row ${checked?'has-sel':''} ${isAnchor?'is-anchor':''}" onclick="togglePickerRowByIndex(event, ${index})">
                         <div class="picker-checkbox ${checked?'checked':''}">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                         </div>
                         <div class="picker-model-name" title="${escapeAttr(id)}">${escapeHtml(id)}</div>
+                        ${pickerTypeButtonHtml(id, cat)}
                     </div>
                 `;
             }).join('');
             document.getElementById('pickerList').innerHTML = html || `<div style="padding:32px;text-align:center;color:var(--faint);font-size:12px">无匹配</div>`;
+            refreshIcons();
             // 底部汇总
             const sumImage = document.getElementById('sumImage');
             const sumChat = document.getElementById('sumChat');
@@ -1007,37 +1124,190 @@
             if(sumChat){ sumChat.textContent = `LLM ${selecteds.chat}`; sumChat.classList.toggle('picker-sum-chip-empty', selecteds.chat === 0); }
             if(sumVideo){ sumVideo.textContent = `视频 ${selecteds.video}`; sumVideo.classList.toggle('picker-sum-chip-empty', selecteds.video === 0); }
             if(sumUnsel){ sumUnsel.textContent = `未选 ${totals.all - selecteds.all}`; }
+            updateModelPickerModeUi();
         }
         function togglePickerRow(id){
+            pickerTypeMenuId = null;
             pickerState.selected[id] = !pickerState.selected[id];
             renderModelPicker();
         }
-        function togglePickerRowByIndex(index){
+        function togglePickerRowByIndex(event, index){
             const id = pickerVisibleIds[index];
             if(typeof id !== 'string') return;
-            togglePickerRow(id);
+            pickerTypeMenuId = null;
+            let selection = pickerManageMode ? pickerManageSelected : pickerState.selected;
+            const additive = Boolean(event?.ctrlKey || event?.metaKey);
+            const hasRange = event?.shiftKey && pickerAnchorIndex !== null && pickerVisibleIds[pickerAnchorIndex] !== undefined;
+            if(hasRange){
+                const start = Math.min(pickerAnchorIndex, index);
+                const end = Math.max(pickerAnchorIndex, index);
+                const nextValue = !selection[id];
+                if(pickerManageMode && !additive){
+                    pickerManageSelected = {};
+                    selection = pickerManageSelected;
+                }
+                for(let i = start; i <= end; i++){
+                    const rangeId = pickerVisibleIds[i];
+                    if(typeof rangeId === 'string') selection[rangeId] = nextValue;
+                }
+            } else if(pickerManageMode && !additive) {
+                pickerManageSelected = { [id]: true };
+            } else {
+                selection[id] = !selection[id];
+            }
+            pickerAnchorIndex = index;
+            renderModelPicker();
         }
         function selectPickerCat(cat){
+            pickerTypeMenuId = null;
+            pickerAnchorIndex = null;
             document.querySelectorAll('.picker-cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
             renderModelPicker();
         }
-        function applyModelPicker(){
-            const item = provider(); if(!item) return;
-            const image = [], chat = [], video = [];
+        function togglePickerTypeMenuByIndex(event, index){
+            event.stopPropagation();
+            const id = pickerVisibleIds[index];
+            if(typeof id !== 'string') return;
+            pickerTypeMenuId = pickerTypeMenuId === id ? null : id;
+            renderModelPicker();
+        }
+        function selectedPickerIds(){
+            const selection = pickerManageMode ? pickerManageSelected : pickerState.selected;
+            return Object.entries(selection).filter(([, sel]) => sel).map(([id]) => id);
+        }
+        function pickerTypeTargets(id, index){
+            if(!pickerManageMode) return [id];
+            if(!pickerManageSelected[id]){
+                pickerManageSelected = { [id]: true };
+                pickerAnchorIndex = index;
+                return [id];
+            }
+            const ids = selectedPickerIds();
+            return ids.length ? ids : [id];
+        }
+        async function setPickerTypeByIndex(event, index, cat){
+            event.stopPropagation();
+            const id = pickerVisibleIds[index];
+            if(typeof id !== 'string' || !pickerTypeMeta[cat]) return;
+            const targets = pickerTypeTargets(id, index);
+            targets.forEach(targetId => {
+                pickerState.category[targetId] = cat;
+                rememberPickerCategoryOverride(targetId, cat);
+            });
+            pickerTypeMenuId = null;
+            if(pickerManageMode){
+                setStatus(`已准备将 ${targets.length} 个模型类型改为 ${pickerTypeMeta[cat].label}，点击「确定更改模型类型」后保存`);
+                renderModelPicker();
+                return;
+            }
+            const shouldPersistMove = pickerState.selected[id] === true;
+            const listedBeforeMove = shouldPersistMove && isProviderModelListed(id);
+            const moved = listedBeforeMove ? moveProviderModelToPickerCategory(id, cat) : false;
+            if(moved){
+                setStatus(`已切换模型类型为 ${pickerTypeMeta[cat].label}，正在保存...`);
+                const item = provider();
+                const ok = item ? await saveProviderModelLists(item.image_models || [], item.chat_models || [], item.video_models || []) : false;
+                if(ok) setStatus(`已切换并保存模型类型为 ${pickerTypeMeta[cat].label}`);
+            } else {
+                setStatus(`已标记模型类型为 ${pickerTypeMeta[cat].label}，勾选并应用后会保存到模型列表`);
+            }
+            renderModelPicker();
+        }
+        function collectPickerModels(){
+            const buckets = { image: [], chat: [], video: [] };
             Object.entries(pickerState.selected).forEach(([id, sel]) => {
                 if(!sel) return;
-                const cat = pickerState.category[id];
-                if(cat === 'image') image.push(id);
-                else if(cat === 'video') video.push(id);
-                else chat.push(id);
+                const cat = pickerTypeMeta[pickerState.category[id]] ? pickerState.category[id] : 'chat';
+                buckets[cat].push(id);
             });
-            item.image_models = image;
-            item.chat_models = chat;
-            item.video_models = video;
+            return buckets;
+        }
+        function renderProviderModelLists(){
             renderModels('image'); renderModels('chat'); renderModels('video');
             renderMsLoras();
-            setStatus(`已应用 · 生图 ${image.length} / LLM ${chat.length} / 视频 ${video.length}，点保存生效`);
-            closeModelPicker();
+        }
+        function isProviderModelListed(id){
+            const item = provider(); if(!item) return false;
+            return ['image_models', 'chat_models', 'video_models'].some(key => (item[key] || []).includes(id));
+        }
+        function moveProviderModelToPickerCategory(id, cat){
+            const item = provider(); if(!item || !pickerTypeMeta[cat]) return false;
+            const keys = { image:'image_models', chat:'chat_models', video:'video_models' };
+            const wasListed = Object.values(keys).some(key => (item[key] || []).includes(id));
+            if(!wasListed) return false;
+            Object.values(keys).forEach(key => item[key] = (item[key] || []).filter(model => model !== id));
+            item[keys[cat]] = unique([...(item[keys[cat]] || []), id]);
+            renderProviderModelLists();
+            return true;
+        }
+        async function applyModelPicker(){
+            const item = provider(); if(!item) return;
+            const btn = document.getElementById('applyModelPickerBtn');
+            const oldText = btn?.textContent || (pickerManageMode ? '确定更改模型类型' : '应用到模型列表');
+            if(btn){ btn.disabled = true; btn.textContent = '保存中...'; }
+            let image, chat, video;
+            if(pickerManageMode){
+                selectedPickerIds().forEach(id => {
+                    if(isProviderModelListed(id)) moveProviderModelToPickerCategory(id, pickerState.category[id]);
+                });
+                image = item.image_models || [];
+                chat = item.chat_models || [];
+                video = item.video_models || [];
+                setStatus(`正在保存模型类型 · 生图 ${image.length} / LLM ${chat.length} / 视频 ${video.length}`);
+            } else {
+                ({ image, chat, video } = collectPickerModels());
+                item.image_models = image;
+                item.chat_models = chat;
+                item.video_models = video;
+                renderProviderModelLists();
+                setStatus(`正在保存模型列表 · 生图 ${image.length} / LLM ${chat.length} / 视频 ${video.length}`);
+            }
+            const ok = await saveProviderModelLists(image, chat, video);
+            if(btn){ btn.disabled = false; btn.textContent = oldText; }
+            if(ok){
+                const message = pickerManageMode
+                    ? `已保存模型类型 · 生图 ${image.length} / LLM ${chat.length} / 视频 ${video.length}`
+                    : `已应用并保存 · 生图 ${image.length} / LLM ${chat.length} / 视频 ${video.length}`;
+                pickerManageMode = false;
+                setStatus(message);
+                closeModelPicker();
+            }
+        }
+        async function saveProviderModelLists(imageModels, chatModels, videoModels){
+            const item = provider();
+            if(!item) return false;
+            const payload = {
+                image_models: unique(imageModels || []),
+                chat_models: unique(chatModels || []),
+                video_models: unique(videoModels || []),
+            };
+            try {
+                const res = await fetch(`/api/providers/${encodeURIComponent(item.id)}/models`, {
+                    method:'PUT',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify(payload)
+                });
+                if(!res.ok){
+                    let detail = tr('api.saveFailed') || '保存失败';
+                    try { detail = (await res.json()).detail || detail; } catch(e) {}
+                    throw new Error(detail);
+                }
+                const data = await res.json();
+                const saved = data.provider || {};
+                item.image_models = saved.image_models || payload.image_models;
+                item.chat_models = saved.chat_models || payload.chat_models;
+                item.video_models = saved.video_models || payload.video_models;
+                if(Object.prototype.hasOwnProperty.call(saved, 'has_key')) item.has_key = saved.has_key;
+                if(saved.key_preview !== undefined) item.key_preview = saved.key_preview;
+                if(saved.key_env !== undefined) item.key_env = saved.key_env;
+                renderProviderModelLists();
+                renderProviderList();
+                try { new BroadcastChannel('studio-api').postMessage({ type:'providers-changed' }); } catch(e) {}
+                return true;
+            } catch(err) {
+                setStatus(err.message || tr('api.saveFailed') || '保存失败');
+                return false;
+            }
         }
         async function saveKeyOnly(){
             const item = provider();
