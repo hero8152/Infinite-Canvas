@@ -16,12 +16,12 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.05.24"></script>
-    <script src="/static/vendor/js/lucide.js?v=2026.05.24"></script>
-    <script src="/static/js/theme.js?v=2026.05.24"></script>
-    <script src="/static/js/i18n.js?v=2026.05.24"></script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.05.24">
-    <link rel="stylesheet" href="/static/css/theme.css?v=2026.05.24">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.05.25"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.05.25"></script>
+    <script src="/static/js/theme.js?v=2026.05.25"></script>
+    <script src="/static/js/i18n.js?v=2026.05.25"></script>
+    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.05.25">
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.05.25">
 </head>
 <body>
     <div id="shell" class="shell no-canvas">
@@ -44,6 +44,7 @@
                     <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
                     <button class="tool-btn" onclick="addMsGenNode()"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.msGenerate">MS生成</span></button>
                     <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
+                    <button class="tool-btn" onclick="addRhNode()"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
                     <button class="tool-btn" onclick="addComfyNode()"><i data-lucide="workflow" class="w-4 h-4"></i>ComfyUI</button>
                     <button class="tool-btn" onclick="addOutputNode()"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
                     <button class="tool-btn" onclick="groupSelectedImages()"><i data-lucide="group" class="w-4 h-4"></i><span data-i18n="canvas.group">分组</span></button>
@@ -100,6 +101,7 @@
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('msgen')"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.modelscopeGenerate">Modelscope生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
+                <button class="menu-btn" onclick="menuAdd('rh')"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('comfy')"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.comfyGenerate">ComfyUI 生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
             </div>
@@ -259,6 +261,6 @@
         </div>
     </div>
 
-    <script src="/static/js/canvas.js?v=2026.05.24"></script>
+    <script src="/static/js/canvas.js?v=2026.05.25"></script>
 </body>
 </html>

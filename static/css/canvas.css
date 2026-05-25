@@ -112,6 +112,7 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .node.sized.video-node .gen-btn { margin-top:auto; }
 .node.sized.generator-node .gen-run-row,
 .node.sized.comfy-node .gen-run-row,
+.node.sized.rh-node .gen-run-row,
 .node.sized.llm-node .gen-run-row { margin-top:auto; }
 .gen-cascade-btn { height:40px; width:100%; flex:0 0 40px; border-radius:16px; background:transparent; border:1.5px solid var(--strong); color:var(--strong); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; font-weight:800; letter-spacing:.12em; transition:all .15s ease; }
 .gen-cascade-btn:hover { background:var(--strong); color:var(--strong-text); }
@@ -240,9 +241,54 @@ body.canvas-selecting .node .llm-bubble { pointer-events:none !important; }
 .loop-variable-editor.is-disabled { opacity:.55; color:var(--faint); background:var(--soft); cursor:not-allowed; }
 .loop-variable-editor.is-disabled .loop-token-chip { opacity:.6; }
 .generator-node { width:380px; }
+.rh-node { width:430px; }
 .comfy-node { width:420px; height:460px; }
 .generator-body { min-height:0; }
 .node.sized.generator-node .generator-body { height:100%; display:flex; flex-direction:column; }
+.node.sized.rh-node .node-body { overflow:auto; }
+.rh-body { min-height:0; display:flex; flex-direction:column; gap:8px; }
+.rh-mode-tabs { flex:0 0 auto; }
+.rh-top { display:grid; grid-template-columns:minmax(0,1fr) 116px 68px; gap:7px; align-items:end; flex:0 0 auto; }
+.rh-webapp-field { flex:1; min-width:0; }
+.rh-payment-field,
+.rh-machine-field { min-width:0; }
+.rh-entry-select,
+.rh-payment-select,
+.rh-machine-select { width:100%; }
+.spin-icon { animation:nodeStatusPulse 1s ease-in-out infinite; }
+.rh-settings { flex:0 0 auto; margin:0; }
+.rh-media-section { flex:0 0 auto; min-height:0; }
+.rh-input-list { min-height:0; }
+.rh-input-item video,
+.rh-param-thumb video { width:100%; height:100%; object-fit:cover; border-radius:12px; background:#0f172a; }
+.rh-param-head { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; color:var(--muted); font-size:10px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+.rh-prompt-list { flex:0 0 auto; display:flex; flex-direction:column; gap:7px; }
+.rh-prompt-field textarea { height:78px; padding-top:8px; resize:vertical; line-height:1.35; background:var(--panel); border-color:var(--line-2); box-shadow:inset 0 1px 0 rgba(255,255,255,.38); }
+.rh-param-list { flex:0 0 auto; min-height:0; overflow:visible; display:grid; grid-template-columns:repeat(auto-fit, minmax(128px, 1fr)); gap:7px; align-content:start; padding-right:0; }
+.rh-param-row { margin:0; }
+.rh-param-row.wide { grid-column:1 / -1; }
+.rh-param-row .field { min-width:0; }
+.rh-empty { padding:14px 10px; border:1px dashed var(--line-2); border-radius:14px; color:var(--faint); font-size:11px; font-weight:700; text-align:center; }
+.rh-param-list .rh-empty { grid-column:1 / -1; }
+.rh-param-input { width:100%; }
+.theme-dark .rh-prompt-field textarea,
+body.theme-dark .rh-prompt-field textarea,
+html.theme-dark .rh-prompt-field textarea,
+html.studio-theme-dark .rh-prompt-field textarea,
+body.studio-theme-dark .rh-prompt-field textarea,
+.studio-theme-dark .rh-prompt-field textarea {
+    background:#111827;
+    border-color:#475569;
+    color:#f8fafc;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 1px rgba(148,163,184,.16);
+}
+.rh-param-thumb { grid-row:span 2; width:48px; height:48px; border-radius:12px; border:1px solid var(--line); background:var(--soft); overflow:hidden; display:flex; align-items:center; justify-content:center; color:var(--faint); }
+.rh-param-thumb img { width:100%; height:100%; object-fit:cover; }
+.rh-param-thumb.empty { border-style:dashed; }
+.output-audio-wrap { min-height:118px; }
+.output-audio-card { width:100%; height:100%; min-height:116px; padding:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:var(--text); background:var(--soft); border-radius:16px; }
+.output-audio-card span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:800; color:var(--muted); }
+.output-audio-card audio { width:100%; max-width:220px; }
 .node.sized.comfy-node .node-body { overflow:hidden; }
 .comfy-body { min-height:0; height:100%; display:flex; flex-direction:column; gap:10px; }
 .node.sized.comfy-node .comfy-body { height:100%; }

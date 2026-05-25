@@ -141,6 +141,7 @@ let apiProviders = [];
 let comfyBackendCount = 1;
 let comfyWorkflows = [];
 let comfyWorkflowCache = {};
+let runningHubWorkflowCache = {};
 let managedProviderId = 'comfly';
 let localImageModels = [];
 let localChatModels = [];
@@ -921,6 +922,12 @@ async function loadConfig(){
         } catch(_) {
             comfyWorkflows = [];
         }
+        runningHubWorkflowCache = {};
+        const rhProvider = apiProviders.find(p => p.id === 'runninghub');
+        const rhWorkflowIds = (rhProvider?.rh_workflows || []).map(item => String(item.workflowId || item.id || '').trim()).filter(Boolean);
+        await Promise.all(rhWorkflowIds.map(async workflowId => {
+            try { await ensureRunningHubWorkflow(workflowId); } catch(_) {}
+        }));
     } catch(e) {
         apiProviders = defaultApiProviders();
     }
@@ -1626,6 +1633,16 @@ function addGroupNode(point){
     const p = point || defaultPoint(40, 0);
     return addNode({id:uid('grp'), type:'group', x:p.x, y:p.y, w:300, h:220, items:[]});
 }
+function pickMediaForNode(nodeId){
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,video/*,audio/*';
+    input.multiple = true;
+    input.onchange = () => {
+        if(input.files?.length) fillImageNode(nodeId, input.files, {group:input.files.length > 1});
+    };
+    input.click();
+}
 function addLLMNode(point){
     const p = point || defaultPoint(80, 0);
     const providerId = chatApiProviders()[0]?.id || 'comfly';
@@ -1695,6 +1712,27 @@ function addVideoNode(point){
         cameraFixed:false,
         generateAudio:false,
         useFrameRoles:false,
+        inputs:[],
+        running:false
+    });
+}
+function addRhNode(point){
+    const p = point || defaultPoint(180, 0);
+    return addNode({
+        id:uid('rh'),
+        type:'rh',
+        x:p.x,
+        y:p.y,
+        w:430,
+        h:0,
+        rhMode:'app',
+        rhPayment:'free',
+        webappId:'',
+        workflowId:'',
+        instanceType:'',
+        rhAppInfo:null,
+        rhWorkflowInfo:null,
+        rhParams:{},
         inputs:[],
         running:false
     });
@@ -2208,6 +2246,7 @@ function linkCreateOptions(state){
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'msgen', label:tr('canvas.modelscopeGenerate'), icon:'cloud-lightning'},
                 {type:'comfy', label:tr('canvas.comfyGenerate'), icon:'workflow'},
+                {type:'rh', label:tr('canvas.rhGenerate'), icon:'workflow'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
                 {type:'llm', label:'LLM', icon:'message-square-text'}
             ];
@@ -2495,6 +2534,7 @@ function createNodeByType(type, point){
     if(type === 'generator') return addGeneratorNode(point);
     if(type === 'msgen') return addMsGenNode(point);
     if(type === 'video') return addVideoNode(point);
+    if(type === 'rh') return addRhNode(point);
     if(type === 'comfy') return addComfyNode(point);
     if(type === 'output') return addOutputNode(point);
     return null;
@@ -2508,6 +2548,7 @@ function menuAdd(type){
     if(type === 'generator') addGeneratorNode(menuPoint);
     if(type === 'msgen') addMsGenNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
+    if(type === 'rh') addRhNode(menuPoint);
     if(type === 'comfy') addComfyNode(menuPoint);
     if(type === 'output') addOutputNode(menuPoint);
 }
@@ -2517,6 +2558,39 @@ function mediaKindForUpload(file){
     if(type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)(\?|$)/.test(name)) return 'video';
     if(type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name)) return 'audio';
     return 'image';
+}
+function isSupportedUploadFile(file){
+    const type = String(file?.type || '').toLowerCase();
+    const name = String(file?.name || '').toLowerCase();
+    return type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/')
+        || /\.(png|jpe?g|webp|gif|bmp|avif|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name);
+}
+function dataTransferItemEntry(item){
+    try { return item?.webkitGetAsEntry?.() || null; } catch { return null; }
+}
+async function filesFromEntry(entry){
+    if(!entry) return [];
+    if(entry.isFile){
+        return new Promise(resolve => entry.file(file => resolve(file ? [file] : []), () => resolve([])));
+    }
+    if(!entry.isDirectory) return [];
+    const reader = entry.createReader();
+    const children = [];
+    while(true){
+        const batch = await new Promise(resolve => reader.readEntries(resolve, () => resolve([])));
+        if(!batch.length) break;
+        children.push(...batch);
+    }
+    const nested = await Promise.all(children.map(filesFromEntry));
+    return nested.flat();
+}
+async function uploadFilesFromDataTransfer(dataTransfer){
+    const items = [...(dataTransfer?.items || [])];
+    const entries = items.map(dataTransferItemEntry).filter(Boolean);
+    const raw = entries.length
+        ? (await Promise.all(entries.map(filesFromEntry))).flat()
+        : [...(dataTransfer?.files || [])];
+    return raw.filter(isSupportedUploadFile);
 }
 function isAudioUrl(url){
     return /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(String(url || ''));
@@ -2550,20 +2624,53 @@ function nodeTitleForMedia(node){
     if(kind === 'audio') return 'Audio';
     return 'Image';
 }
-async function uploadMediaFiles(files, point, onlyImages=false){
+function layoutUploadedMediaNodes(created, base){
+    const list = [...(created || [])];
+    if(!list.length) return;
+    const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(list.length))));
+    const gapX = 280;
+    const gapY = 250;
+    const startX = base.x - ((cols - 1) * gapX) / 2;
+    list.forEach((node, i) => {
+        node.x = startX + (i % cols) * gapX;
+        node.y = base.y + Math.floor(i / cols) * gapY;
+    });
+}
+function createGroupForUploadedNodes(created, point){
+    const targets = [...(created || [])].filter(n => n?.type === 'image');
+    if(targets.length < 2) return null;
+    render();
+    const box = nodeBounds(targets.map(n => n.id));
+    const fallback = point || defaultPoint(0, 0);
+    const group = {
+        id:uid('grp'),
+        type:'group',
+        x:Number.isFinite(box.x) ? box.x - 24 : fallback.x - 24,
+        y:Number.isFinite(box.y) ? box.y - 58 : fallback.y - 58,
+        w:Number.isFinite(box.w) ? box.w + 48 : 600,
+        h:Number.isFinite(box.h) ? box.h + 90 : 420,
+        items:targets.map(n => n.id)
+    };
+    nodes.push(group);
+    selected.clear();
+    selected.add(group.id);
+    return group;
+}
+async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     if(!ensureCanvas()) return;
     const supported = [...files].filter(file => {
         const kind = mediaKindForUpload(file);
         return onlyImages ? kind === 'image' : ['image','video','audio'].includes(kind);
     });
-    if(!supported.length) return;
+    if(!supported.length) return [];
     const form = new FormData();
     supported.forEach(file => form.append('files', file));
     const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
+    const created = [];
     (data.files || []).forEach((file, i) => {
         const kind = file.kind || mediaKindForUpload(supported[i]);
-        nodes.push({
+        const node = {
             id:uid('img'),
             type:'image',
             x:base.x + i * 36,
@@ -2571,13 +2678,23 @@ async function uploadMediaFiles(files, point, onlyImages=false){
             url:file.url,
             name:file.name,
             mediaKind:kind
-        });
+        };
+        nodes.push(node);
+        created.push(node);
     });
+    if(opts.group && created.length > 1){
+        layoutUploadedMediaNodes(created, base);
+        created.group = createGroupForUploadedNodes(created, base);
+    }
     render();
     scheduleSave();
+    return created;
 }
 async function uploadImages(files, point){
     return uploadMediaFiles(files, point, false);
+}
+async function uploadImageGroup(files, point){
+    return uploadMediaFiles(files, point, false, {group:true});
 }
 function imageUrlFromDataTransfer(dataTransfer){
     if(!dataTransfer) return '';
@@ -2601,10 +2718,39 @@ function createImageCardFromUrl(url, point, name='image'){
     render();
     scheduleSave();
 }
-async function fillImageNode(nodeId, files){
+async function fillImageNode(nodeId, files, opts={}){
     if(!ensureCanvas()) return;
     const imgs = [...files].filter(file => ['image','video','audio'].includes(mediaKindForUpload(file)));
     if(!imgs.length) return;
+    if(opts.group && imgs.length > 1){
+        const source = nodes.find(n => n.id === nodeId);
+        pushUndo();
+        const point = source ? {x:Number(source.x || 0), y:Number(source.y || 0)} : defaultPoint(0, 0);
+        const outgoing = connections.filter(c => c.from === source?.id).map(c => c.to);
+        const incoming = connections.filter(c => c.to === source?.id).map(c => c.from);
+        const created = await uploadImageGroup(imgs, point);
+        const group = created?.group;
+        if(source && created?.length > 1){
+            nodes = nodes.filter(n => n.id !== source.id);
+            connections = connections.filter(c => c.from !== source.id && c.to !== source.id);
+            if(group){
+                outgoing.forEach(toId => {
+                    if(canConnect(group.id, toId) && !connections.some(c => c.from === group.id && c.to === toId)){
+                        connections.push({id:uid('c'), from:group.id, to:toId});
+                    }
+                });
+                incoming.forEach(fromId => {
+                    if(canConnect(fromId, group.id) && !connections.some(c => c.from === fromId && c.to === group.id)){
+                        connections.push({id:uid('c'), from:fromId, to:group.id});
+                    }
+                });
+            }
+            selected.delete(source.id);
+            render();
+            scheduleSave();
+        }
+        return;
+    }
     const form = new FormData();
     form.append('files', imgs[0]);
     const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
@@ -2620,7 +2766,7 @@ async function fillImageNode(nodeId, files){
 }
 function setImageNodeFromOutput(nodeId, url){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'image' || !url || isVideoUrl(url)) return;
+    if(!node || node.type !== 'image' || !url || isVideoUrl(url) || isAudioUrl(url)) return;
     pushUndo();
     node.url = url;
     node.name = outputImageName(url);
@@ -2644,11 +2790,7 @@ function clearImageNode(nodeId, event=null){
     scheduleSave();
 }
 function pickImageForNode(nodeId){
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*,video/*,audio/*';
-    input.onchange = () => fillImageNode(nodeId, input.files);
-    input.click();
+    pickMediaForNode(nodeId);
 }
 function cropBounds(){
     const img = document.getElementById('cropImage');
@@ -3787,6 +3929,7 @@ function isNodeDragSurface(target){
 }
 function renderNode(node){
     normalizeApiNodeLayout(node);
+    if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
@@ -3810,10 +3953,10 @@ function renderNode(node){
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','msgen','comfy','llm'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','llm','rh'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -3876,7 +4019,7 @@ function renderNode(node){
                     e.stopPropagation();
                     previewWrap.classList.remove('drag-over');
                     dropOverlay.classList.remove('active');
-                    fillImageNode(node.id, e.dataTransfer.files);
+                    uploadFilesFromDataTransfer(e.dataTransfer).then(files => fillImageNode(node.id, files, {group:files.length > 1}));
                 } else {
                     const droppedUrl = imageUrlFromDataTransfer(e.dataTransfer);
                     if(droppedUrl){
@@ -3927,7 +4070,7 @@ function renderNode(node){
                     e.stopPropagation();
                     blank.classList.remove('drag-over');
                     dropOverlay.classList.remove('active');
-                    fillImageNode(node.id, e.dataTransfer.files);
+                    uploadFilesFromDataTransfer(e.dataTransfer).then(files => fillImageNode(node.id, files, {group:files.length > 1}));
                 } else {
                     const droppedUrl = imageUrlFromDataTransfer(e.dataTransfer);
                     if(droppedUrl){
@@ -3976,6 +4119,7 @@ function renderNode(node){
     if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
+    if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'comfy') body.appendChild(renderComfyBody(node));
     if(node.type === 'output') {
         const pendingHtml = (node._pending || []).map(p =>
@@ -3996,8 +4140,8 @@ function renderNode(node){
         if(e.button !== 0 || !isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','comfy','output','llm','msgen','video'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','llm','msgen','video'].includes(node.type);
+    const canInput = ['generator','comfy','output','llm','msgen','video','rh'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','llm','msgen','video','rh'].includes(node.type);
     if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -4013,6 +4157,7 @@ function renderNode(node){
 function bindOutputWrap(wrap, node){
     const img = wrap.querySelector('img');
     const video = wrap.querySelector('video');
+    const audio = wrap.querySelector('audio');
     const del = wrap.querySelector('.output-del');
     if(img){
         img.draggable = true;
@@ -4045,7 +4190,7 @@ function bindOutputWrap(wrap, node){
             if(pid){
                 node._pending = (node._pending || []).filter(p => p.id !== pid);
             } else {
-                const url = img?.dataset.url || video?.dataset.url || wrap.dataset.outputUrl || wrap.dataset.missingUrl || '';
+                const url = img?.dataset.url || video?.dataset.url || audio?.dataset.url || wrap.dataset.outputUrl || wrap.dataset.missingUrl || '';
                 node.images = (node.images || []).filter(item => outputUrlValue(item) !== url);
                 if(node.imageComparisons) delete node.imageComparisons[url];
                 scheduleSave();
@@ -4082,7 +4227,7 @@ function refreshOutputNodeContent(node){
     ];
     const wanted = new Set(items.map(item => item.key));
     [...grid.children].forEach(child => {
-        const key = child.dataset.pendingId ? outputDomKeyForPending({id:child.dataset.pendingId}) : `url:${child.dataset.outputUrl || child.dataset.missingUrl || child.querySelector('img,video')?.dataset.url || ''}`;
+        const key = child.dataset.pendingId ? outputDomKeyForPending({id:child.dataset.pendingId}) : `url:${child.dataset.outputUrl || child.dataset.missingUrl || child.querySelector('img,video,audio')?.dataset.url || ''}`;
         if(!wanted.has(key)) child.remove();
         else child.dataset.outputKey = key;
     });
@@ -4107,6 +4252,7 @@ function defaultNodeSize(type){
     if(type === 'generator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:400, h:0};
+    if(type === 'rh') return {w:430, h:0};
     if(type === 'comfy') return {w:420, h:460};
     if(type === 'output') return {w:460, h:0};
     return {w:260, h:0};
@@ -5282,6 +5428,26 @@ async function ensureComfyWorkflow(name){
     comfyWorkflowCache[name] = data;
     return data;
 }
+function validRunningHubWorkflowId(workflowId){
+    return String(workflowId || '').trim();
+}
+function currentRunningHubWorkflow(node){
+    const workflowId = validRunningHubWorkflowId(node.workflowId || '');
+    return runningHubWorkflowCache[workflowId] || null;
+}
+async function ensureRunningHubWorkflow(workflowId){
+    workflowId = validRunningHubWorkflowId(workflowId);
+    if(!workflowId) return null;
+    if(runningHubWorkflowCache[workflowId]) return runningHubWorkflowCache[workflowId];
+    const res = await fetch(`/api/runninghub/workflows/${encodeURIComponent(workflowId)}`);
+    if(!res.ok){
+        delete runningHubWorkflowCache[workflowId];
+        return null;
+    }
+    const data = await res.json();
+    runningHubWorkflowCache[workflowId] = data.workflow || null;
+    return runningHubWorkflowCache[workflowId];
+}
 function comfyFieldKind(f){
     if(['image','video','audio'].includes(f?.type)) return f.type;
     const key = `${f.input || ''} ${f.name || ''}`.toLowerCase();
@@ -5427,6 +5593,811 @@ function renderComfyImages(list, node, imageInputs){
         };
         list.appendChild(item);
     });
+}
+const RH_KNOWN_FIELD_OPTIONS = {
+    aspectRatio:['1:1','16:9','9:16','4:3','3:4','4:5','5:4','3:2','2:3','21:9','9:21'],
+    aspect_ratio:['1:1','16:9','9:16','4:3','3:4','4:5','5:4','3:2','2:3','21:9','9:21'],
+    ratio:['1:1','16:9','9:16','4:3','3:4','4:5','5:4','3:2','2:3'],
+    resolution:['1k','2k','4k','8k'],
+    size:['512','768','1024','1280','1536','2048'],
+    mode:['text2img','img2img'],
+    quality:['low','medium','high','best'],
+    instanceType:['default','plus','pro'],
+    instance_type:['default','plus','pro'],
+    precision:['fp16','fp32','bf16'],
+    scheduler:['normal','karras','exponential','sgm_uniform','simple','ddim_uniform'],
+    sampler:['euler','euler_ancestral','heun','dpm_2','dpm_2_ancestral','lms','dpmpp_2m','dpmpp_sde','ddim','uni_pc']
+};
+function rhParamKey(nodeId, fieldName){
+    return `${nodeId ?? ''}::${fieldName ?? ''}`;
+}
+function rhFieldKind(field){
+    const type = String(field?.fieldType || '').trim().toUpperCase();
+    if(type === 'IMAGE') return 'image';
+    if(type === 'VIDEO') return 'video';
+    if(type === 'AUDIO') return 'audio';
+    if(['NUMBER','FLOAT','INTEGER','INT'].includes(type)) return 'number';
+    if(['BOOLEAN','BOOL'].includes(type)) return 'boolean';
+    const key = `${field?.fieldName || ''} ${field?.fieldValue || ''}`.toLowerCase();
+    if(/\b(image|img|mask|photo|picture)\b/.test(key) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(key)) return 'image';
+    if(/\b(video|movie|mp4)\b/.test(key) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(key)) return 'video';
+    if(/\b(audio|sound|music|voice)\b/.test(key) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(key)) return 'audio';
+    return 'text';
+}
+function rhFieldRole(field){
+    const kind = rhFieldKind(field);
+    if(['image','video','audio','number','boolean'].includes(kind)) return kind;
+    const text = `${field?.fieldName || ''} ${field?.label || ''} ${field?.group || ''}`.toLowerCase();
+    if(/prompt|positive|negative|text|caption|description|关键词|提示词|正向|负向/.test(text)) return 'prompt';
+    return 'text';
+}
+function rhExtractFieldOptions(field){
+    const candidates = [field?.fieldData, field?.options, field?.list, field?.values, field?.enum, field?.choices, field?.items, field?.selectOptions, field?.dropdown];
+    for(const candidate of candidates){
+        if(!Array.isArray(candidate) || !candidate.length) continue;
+        if(candidate.every(x => ['string','number'].includes(typeof x))) return candidate.map(String);
+        if(candidate.every(x => x && typeof x === 'object' && ('value' in x || 'label' in x || 'name' in x))){
+            return candidate.map(x => x.value ?? x.label ?? x.name).filter(v => v !== undefined && v !== null).map(String);
+        }
+    }
+    const fieldType = String(field?.fieldType || '').toUpperCase();
+    if(['LIST','SELECT','DROPDOWN','COMBO','ENUM'].includes(fieldType) && Array.isArray(field?.fieldValue)){
+        return field.fieldValue.filter(x => ['string','number'].includes(typeof x)).map(String);
+    }
+    const name = String(field?.fieldName || '').trim();
+    if(name){
+        if(RH_KNOWN_FIELD_OPTIONS[name]) return RH_KNOWN_FIELD_OPTIONS[name].map(String);
+        const hit = Object.keys(RH_KNOWN_FIELD_OPTIONS).find(k => k.toLowerCase() === name.toLowerCase());
+        if(hit) return RH_KNOWN_FIELD_OPTIONS[hit].map(String);
+    }
+    return null;
+}
+function rhDefaultValue(field){
+    let value = field?.fieldValue;
+    if(Array.isArray(value)) value = value[0];
+    if(value === undefined || value === null || typeof value === 'object') return '';
+    return String(value);
+}
+function rhRandomEnabled(field){
+    return rhFieldKind(field) === 'number' && field?.random_enabled === true;
+}
+function rhRandomActive(node, key){
+    node.rhRandomActive = node.rhRandomActive || {};
+    return node.rhRandomActive[key] !== false;
+}
+function toggleRhRandom(nodeId, key){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) return;
+    const field = rhActiveFields(node).find(f => rhParamKey(f.nodeId, f.fieldName) === key);
+    if(!rhRandomEnabled(field)) return;
+    node.rhRandomActive = node.rhRandomActive || {};
+    node.rhRandomActive[key] = !rhRandomActive(node, key);
+    refreshNodes([node.id]);
+    scheduleSave();
+}
+function rhWorkflowNodeInfoList(data){
+    const list = [];
+    if(!data || typeof data !== 'object' || Array.isArray(data)) return list;
+    Object.entries(data).forEach(([nodeId, nodeContent]) => {
+        const inputs = nodeContent?.inputs || {};
+        if(!inputs || typeof inputs !== 'object') return;
+        Object.entries(inputs).forEach(([fieldName, rawValue]) => {
+            if(rhIsWorkflowLinkValue(rawValue)) return;
+            let fieldValue = rawValue;
+            if(fieldValue !== null && typeof fieldValue === 'object') fieldValue = JSON.stringify(fieldValue);
+            else if(fieldValue === undefined || fieldValue === null) fieldValue = '';
+            else fieldValue = String(fieldValue);
+            list.push({
+                nodeId:String(nodeId),
+                fieldName:String(fieldName),
+                fieldValue,
+                fieldType:rhInferWorkflowFieldType(fieldName, fieldValue),
+                source:'workflow'
+            });
+        });
+    });
+    return list;
+}
+function rhInferWorkflowFieldType(fieldName, fieldValue){
+    const key = `${fieldName || ''} ${fieldValue || ''}`.toLowerCase();
+    if(/\b(image|img|mask|photo|picture)\b/.test(key) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(key)) return 'IMAGE';
+    if(/\b(video|movie|mp4)\b/.test(key) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(key)) return 'VIDEO';
+    if(/\b(audio|sound|music|voice)\b/.test(key) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(key)) return 'AUDIO';
+    if(/^(true|false)$/i.test(String(fieldValue || ''))) return 'BOOLEAN';
+    if(String(fieldValue || '').trim() !== '' && !Number.isNaN(Number(fieldValue))) return 'NUMBER';
+    return 'TEXT';
+}
+function rhIsWorkflowLinkValue(value){
+    return Array.isArray(value) && value.length === 2 && typeof value[0] === 'string' && Number.isInteger(value[1]);
+}
+function runningHubProvider(){
+    const provider = (apiProviders || []).find(p => p.id === 'runninghub');
+    return provider || null;
+}
+function runningHubEntries(kind){
+    const provider = runningHubProvider();
+    const key = kind === 'workflow' ? 'rh_workflows' : 'rh_apps';
+    return Array.isArray(provider?.[key]) ? provider[key].filter(item => item?.enabled !== false) : [];
+}
+function runningHubEntryId(entry, kind){
+    return String(kind === 'workflow' ? (entry?.workflowId || entry?.id || '') : (entry?.appId || entry?.id || '')).trim();
+}
+function runningHubEntryLabel(entry, kind){
+    const id = runningHubEntryId(entry, kind);
+    return entry?.title || entry?.name || (kind === 'workflow' ? `工作流 ${id.slice(-6)}` : `AI 应用 ${id.slice(-6)}`);
+}
+function runningHubEntryKey(kind, id){
+    return `${kind}:${String(id || '').trim()}`;
+}
+function parseRunningHubEntryKey(value){
+    const text = String(value || '').trim();
+    const match = text.match(/^(app|workflow):(.+)$/);
+    if(match) return {kind:match[1], id:match[2]};
+    return null;
+}
+function runningHubAllEntries(){
+    return [
+        ...runningHubEntries('app').map(entry => ({kind:'app', id:runningHubEntryId(entry, 'app'), entry})),
+        ...runningHubEntries('workflow').map(entry => ({kind:'workflow', id:runningHubEntryId(entry, 'workflow'), entry}))
+    ].filter(item => item.id);
+}
+function rhSelectedEntryRef(node){
+    const parsed = parseRunningHubEntryKey(node?.rhConfigKey || '');
+    const all = runningHubAllEntries();
+    if(parsed){
+        const hit = all.find(item => item.kind === parsed.kind && item.id === parsed.id);
+        if(hit) return hit;
+    }
+    const workflowId = validRunningHubWorkflowId(node?.workflowId || '');
+    if(workflowId){
+        const hit = all.find(item => item.kind === 'workflow' && item.id === workflowId);
+        if(hit) return hit;
+    }
+    const webappId = String(node?.webappId || '').trim();
+    if(webappId){
+        const hit = all.find(item => item.kind === 'app' && item.id === webappId);
+        if(hit) return hit;
+    }
+    return null;
+}
+function applyRhEntrySelection(node, ref){
+    if(!node || !ref) return;
+    node.rhConfigKey = runningHubEntryKey(ref.kind, ref.id);
+    node.rhMode = ref.kind;
+    if(ref.kind === 'workflow') node.workflowId = ref.id;
+    else node.webappId = ref.id;
+}
+function currentRunningHubAppConfig(node){
+    const webappId = String(node?.webappId || '').trim();
+    if(!webappId) return null;
+    return runningHubEntries('app').find(app => runningHubEntryId(app, 'app') === webappId) || null;
+}
+function currentRunningHubWorkflowEntry(node){
+    const workflowId = validRunningHubWorkflowId(node?.workflowId || '');
+    if(!workflowId) return null;
+    return runningHubEntries('workflow').find(workflow => runningHubEntryId(workflow, 'workflow') === workflowId) || null;
+}
+function rhEntryFields(entry){
+    return Array.isArray(entry?.fields) ? entry.fields : [];
+}
+function rhCurrentEntry(node){
+    return rhSelectedEntryRef(node)?.entry || null;
+}
+function rhCurrentKind(node){
+    return rhSelectedEntryRef(node)?.kind || (node?.rhMode === 'workflow' ? 'workflow' : 'app');
+}
+function ensureRhNodeSelection(node){
+    if(!node || node.type !== 'rh') return null;
+    node.rhPayment = node.rhPayment || 'free';
+    const all = runningHubAllEntries();
+    let ref = rhSelectedEntryRef(node);
+    if(!ref && all.length) ref = all[0];
+    if(ref){
+        applyRhEntrySelection(node, ref);
+        return ref.entry;
+    }
+    return null;
+}
+function rhEntryOptions(selected){
+    const apps = runningHubEntries('app');
+    const workflows = runningHubEntries('workflow');
+    if(!apps.length && !workflows.length) return `<option value="">请先在 API 设置里添加 RH 配置</option>`;
+    const group = (kind, entries, label) => entries.length ? `
+        <optgroup label="${label}">
+            ${entries.map(entry => {
+                const id = runningHubEntryId(entry, kind);
+                const key = runningHubEntryKey(kind, id);
+                return `<option value="${escapeAttr(key)}" ${String(selected || '') === key ? 'selected' : ''}>${escapeHtml(runningHubEntryLabel(entry, kind))}</option>`;
+            }).join('')}
+        </optgroup>
+    ` : '';
+    return `${group('app', apps, 'AI 应用')}${group('workflow', workflows, '工作流')}`;
+}
+function rhPaymentOptions(node){
+    const provider = runningHubProvider();
+    const selected = node.rhPayment === 'wallet' ? 'wallet' : 'free';
+    return `
+        <option value="free" ${selected === 'free' ? 'selected' : ''}>免费积分 Key${provider?.has_key ? '' : '（未配置）'}</option>
+        <option value="wallet" ${selected === 'wallet' ? 'selected' : ''}>账户余额 Key${provider?.has_wallet_key ? '' : '（未配置）'}</option>
+    `;
+}
+function rhUseWallet(node){
+    return node?.rhPayment === 'wallet';
+}
+function rhActiveFields(node){
+    const sortFields = fields => [...(fields || [])].sort((a, b) => {
+        const ak = rhFieldKind(a), bk = rhFieldKind(b);
+        if(ak === 'image' && bk === 'image'){
+            const ao = Number(a.imageOrder) || 9999;
+            const bo = Number(b.imageOrder) || 9999;
+            if(ao !== bo) return ao - bo;
+        }
+        if(ak === 'image' && bk !== 'image') return -1;
+        if(ak !== 'image' && bk === 'image') return 1;
+        return String(a.nodeId || '').localeCompare(String(b.nodeId || ''), undefined, {numeric:true}) || String(a.fieldName || '').localeCompare(String(b.fieldName || ''));
+    });
+    if(rhCurrentKind(node) === 'workflow') {
+        const workflowId = validRunningHubWorkflowId(node.workflowId || '');
+        const savedEntry = currentRunningHubWorkflowEntry(node);
+        if(Array.isArray(savedEntry?.fields) && savedEntry.fields.length) return sortFields(savedEntry.fields.filter(f => f.enabled === true));
+        const saved = workflowId ? runningHubWorkflowCache[workflowId] : null;
+        if(Array.isArray(saved?.fields)) return sortFields(saved.fields.filter(f => f.enabled === true));
+        return sortFields(node.rhWorkflowInfo?.nodeInfoList || []);
+    }
+    const savedApp = currentRunningHubAppConfig(node);
+    if(Array.isArray(savedApp?.fields) && savedApp.fields.length) return sortFields(savedApp.fields.filter(f => f.enabled === true));
+    return sortFields(node.rhAppInfo?.nodeInfoList || []);
+}
+function currentRunningHubWorkflowConfig(node){
+    if(rhCurrentKind(node) !== 'workflow') return null;
+    const workflowId = validRunningHubWorkflowId(node.workflowId || '');
+    const entry = currentRunningHubWorkflowEntry(node);
+    if(entry){
+        const cached = workflowId ? runningHubWorkflowCache[workflowId] : null;
+        return {
+            ...entry,
+            ...(cached || {}),
+            workflowId:runningHubEntryId(entry, 'workflow') || workflowId,
+            title:entry.title || cached?.title || workflowId,
+            fields:rhEntryFields(entry).length ? rhEntryFields(entry) : (cached?.fields || []),
+            optionalImageMode:entry.optionalImageMode || cached?.optionalImageMode || 'prune-workflow',
+            workflowJson:cached?.workflowJson || entry.raw?.workflowJson || entry.raw?.prompt || {}
+        };
+    }
+    return workflowId ? runningHubWorkflowCache[workflowId] : null;
+}
+async function ensureRunningHubWorkflowConfigForNode(node){
+    if(rhCurrentKind(node) !== 'workflow') return null;
+    const workflowId = validRunningHubWorkflowId(node.workflowId || '');
+    if(!workflowId) return null;
+    if(!runningHubWorkflowCache[workflowId]){
+        try { await ensureRunningHubWorkflow(workflowId); } catch(_) {}
+    }
+    return currentRunningHubWorkflowConfig(node);
+}
+function rhMediaSources(node){
+    const sources = orderedSources(node, generatorSources(node));
+    const refs = sources.flatMap(src => src.refs || []).filter(ref => ref?.url);
+    return {
+        sources,
+        refs,
+        image:imageRefsOnly(refs),
+        video:videoRefsOnly(refs),
+        audio:audioRefsOnly(refs),
+        prompt:sources.map(src => src.prompt).filter(Boolean).join('\n\n')
+    };
+}
+function rhFieldIndexes(fields){
+    const counters = {image:0, video:0, audio:0};
+    const map = {};
+    const ordered = [...(fields || [])].sort((a, b) => {
+        const ak = rhFieldKind(a), bk = rhFieldKind(b);
+        if(ak === 'image' && bk === 'image'){
+            return (Number(a.imageOrder) || 9999) - (Number(b.imageOrder) || 9999);
+        }
+        return 0;
+    });
+    ordered.forEach(field => {
+        const kind = rhFieldKind(field);
+        if(['image','video','audio'].includes(kind)){
+            map[rhParamKey(field.nodeId, field.fieldName)] = counters[kind]++;
+        }
+    });
+    return map;
+}
+function rhFieldValue(node, field, media=null){
+    node.rhParams = node.rhParams || {};
+    const key = rhParamKey(field.nodeId, field.fieldName);
+    const kind = rhFieldKind(field);
+    const param = node.rhParams[key];
+    if(['image','video','audio'].includes(kind)){
+        const idx = rhFieldIndexes(rhActiveFields(node))[key] || 0;
+        const up = (media || rhMediaSources(node))[kind]?.[idx]?.url || '';
+        if(rhCurrentKind(node) === 'workflow' && kind === 'image' && field.required !== true && !up && param?.sourceFromUpstream !== false) return '';
+        if(param?.sourceFromUpstream === false) return param.value ?? rhDefaultValue(field);
+        return up || param?.value || rhDefaultValue(field);
+    }
+    if(rhRandomEnabled(field) && rhRandomActive(node, key)){
+        node.rhRandomValues = node.rhRandomValues || {};
+        if(node.rhRandomValues[key] === undefined){
+            node.rhRandomValues[key] = comfyRandomValue({
+                input:field.fieldName,
+                name:field.label || field.fieldName,
+                min:field.min,
+                max:field.max,
+                step:field.step,
+                type:'number'
+            });
+        }
+        return node.rhRandomValues[key];
+    }
+    if(rhFieldRole(field) === 'prompt'){
+        const upstreamPrompt = (media || rhMediaSources(node)).prompt || '';
+        return param?.value ?? (upstreamPrompt || rhDefaultValue(field));
+    }
+    return param?.value ?? rhDefaultValue(field);
+}
+function rhRequiredLabel(field){
+    return field?.label || field?.fieldName || `#${field?.nodeId || ''}`;
+}
+function rhPruneWorkflowForMissingFields(workflowJson, missingFields){
+    if(!workflowJson || typeof workflowJson !== 'object' || !missingFields?.length) return null;
+    const workflow = JSON.parse(JSON.stringify(workflowJson));
+    const removeIds = new Set();
+    missingFields.forEach(field => {
+        const node = workflow[String(field.nodeId)];
+        if(node?.inputs && Object.prototype.hasOwnProperty.call(node.inputs, field.fieldName)){
+            delete node.inputs[field.fieldName];
+        }
+        if(node && rhWorkflowNodeInfoList({[field.nodeId]: node}).length <= 0){
+            removeIds.add(String(field.nodeId));
+        }
+    });
+    removeIds.forEach(id => delete workflow[id]);
+    Object.values(workflow).forEach(node => {
+        if(!node?.inputs || typeof node.inputs !== 'object') return;
+        Object.entries(node.inputs).forEach(([name, value]) => {
+            if(rhIsWorkflowLinkValue(value) && removeIds.has(String(value[0]))) delete node.inputs[name];
+        });
+    });
+    return workflow;
+}
+async function rhBuildWorkflowRequestExtras(node, media, nodeInfoList){
+    const config = await ensureRunningHubWorkflowConfigForNode(node);
+    if(!config || (config.optionalImageMode || 'prune-workflow') !== 'prune-workflow') return {};
+    const fields = rhActiveFields(node);
+    const indexes = rhFieldIndexes(fields);
+    const missingOptional = [];
+    for(const field of fields){
+        if(rhFieldKind(field) !== 'image') continue;
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        const idx = indexes[key] || 0;
+        const hasInput = Boolean(media.image?.[idx]?.url);
+        if(field.required === true && !hasInput){
+            throw new Error(`RunningHub 工作流缺少必选图片：${rhRequiredLabel(field)}`);
+        }
+        if(field.required !== true && !hasInput){
+            missingOptional.push(field);
+        }
+    }
+    if(!missingOptional.length) return {};
+    missingOptional.forEach(field => {
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        const idx = nodeInfoList.findIndex(item => rhParamKey(item.nodeId, item.fieldName) === key);
+        if(idx >= 0) nodeInfoList.splice(idx, 1);
+    });
+    const workflow = rhPruneWorkflowForMissingFields(config.workflowJson || {}, missingOptional);
+    return workflow ? {workflow} : {};
+}
+function rhMediaPreviewHtml(ref, kind){
+    const safe = escapeAttr(ref?.url || '');
+    if(kind === 'video') return `<video src="${safe}" muted preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>`;
+    if(kind === 'audio') return `<i data-lucide="file-audio" class="w-6 h-6 text-slate-400"></i>`;
+    return safe && !isMissingAssetUrl(safe) ? `<img src="${safe}">` : `<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>`;
+}
+function renderRhBody(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'rh-body';
+    node.rhParams = node.rhParams || {};
+    const entry = ensureRhNodeSelection(node);
+    const selectedRef = rhSelectedEntryRef(node);
+    const media = rhMediaSources(node);
+    const fields = rhActiveFields(node);
+    const mode = selectedRef?.kind || rhCurrentKind(node);
+    const selectedId = selectedRef?.id || (mode === 'workflow' ? (node.workflowId || '') : (node.webappId || ''));
+    const selectedKey = selectedRef ? runningHubEntryKey(selectedRef.kind, selectedRef.id) : '';
+    const entryNote = entry?.note || entry?.description || '';
+    wrap.innerHTML = `
+        <div class="rh-top">
+            <label class="field rh-webapp-field">
+                <div class="setting-title">RunningHub 配置</div>
+                <select class="select-lite rh-entry-select">${rhEntryOptions(selectedKey)}</select>
+            </label>
+            <label class="field rh-payment-field">
+                <div class="setting-title">Key</div>
+                <select class="select-lite rh-payment-select">${rhPaymentOptions(node)}</select>
+            </label>
+            <label class="field rh-machine-field">
+                <div class="setting-title">显存</div>
+                <select class="select-lite rh-machine-select">
+                    <option value="" ${!node.instanceType ? 'selected' : ''}>24G</option>
+                    <option value="plus" ${node.instanceType === 'plus' ? 'selected' : ''}>48G</option>
+                </select>
+            </label>
+        </div>
+        <div class="rh-prompt-list"></div>
+        <div class="rh-media-section">
+            <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">${tr('canvas.rhInputs')}</div>
+            <div class="input-list rh-input-list"></div>
+        </div>
+        <div class="rh-param-head">
+            <span>${mode === 'workflow' ? tr('canvas.rhWorkflowParams') : tr('canvas.rhParams')}</span>
+            <span>${fields.length}</span>
+        </div>
+        <div class="rh-param-list"></div>
+        <div class="gen-run-row">
+            <button class="gen-btn rh-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="workflow" class="w-4 h-4"></i>${node.running ? tr('canvas.rhRunning') : tr('canvas.rhRun')}</button>
+            ${cascadeBtnHtml(node)}
+        </div>
+        ${retryBarHtml(node)}
+    `;
+    const entrySelect = wrap.querySelector('.rh-entry-select');
+    if(entrySelect) entrySelect.onchange = e => {
+        const parsed = parseRunningHubEntryKey(e.target.value);
+        const ref = parsed ? runningHubAllEntries().find(item => item.kind === parsed.kind && item.id === parsed.id) : null;
+        if(ref) applyRhEntrySelection(node, ref);
+        node.rhParams = {};
+        node.rhRandomValues = {};
+        render();
+        scheduleSave();
+    };
+    const paymentSelect = wrap.querySelector('.rh-payment-select');
+    if(paymentSelect) paymentSelect.onchange = e => {
+        node.rhPayment = e.target.value === 'wallet' ? 'wallet' : 'free';
+        scheduleSave();
+    };
+    const machineSelect = wrap.querySelector('.rh-machine-select');
+    if(machineSelect) machineSelect.onchange = e => {
+        node.instanceType = e.target.value === 'plus' ? 'plus' : '';
+        scheduleSave();
+    };
+    renderRhPromptFields(wrap.querySelector('.rh-prompt-list'), node, fields);
+    renderRhInputs(wrap.querySelector('.rh-input-list'), node, media);
+    renderRhParams(wrap.querySelector('.rh-param-list'), node, fields, media);
+    wrap.querySelector('.rh-run').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
+    bindCascadeButtons(wrap, node.id);
+    refreshIcons();
+    return wrap;
+}
+function renderRhInputs(list, node, media){
+    if(!list) return;
+    const refs = media.refs || [];
+    if(!refs.length){
+        list.innerHTML = `<div class="text-[11px] text-gray-300 py-2">${tr('canvas.groupEmpty')}</div>`;
+        return;
+    }
+    list.innerHTML = '';
+    refs.forEach((ref, i) => {
+        const kind = mediaKindForRef(ref);
+        const item = document.createElement('div');
+        item.className = 'input-item rh-input-item';
+        item.innerHTML = `<span class="input-index">${i + 1}</span>${rhMediaPreviewHtml(ref, kind)}<span class="input-label">${escapeHtml(nodeTitleForMedia({mediaKind:kind}))}</span>`;
+        list.appendChild(item);
+    });
+}
+function renderRhPromptFields(container, node, fields){
+    if(!container) return;
+    const prompts = (fields || []).filter(field => rhFieldRole(field) === 'prompt');
+    if(!prompts.length){
+        container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = prompts.map(field => {
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        const label = field.label || field.fieldName || 'Prompt';
+        const value = rhFieldValue(node, field, rhMediaSources(node));
+        return `<label class="field rh-prompt-field">
+            <div class="setting-title">${escapeHtml(label)}</div>
+            <textarea class="setting-input rh-param-input" data-rh-param="${escapeAttr(key)}" data-rh-role="prompt">${escapeHtml(value)}</textarea>
+        </label>`;
+    }).join('');
+    bindRhParamControls(container, node);
+}
+function renderRhParams(container, node, fields, media){
+    if(!container) return;
+    const params = (fields || []).filter(field => {
+        const role = rhFieldRole(field);
+        return !['image','video','audio','prompt'].includes(role);
+    });
+    if(!params.length){
+        container.innerHTML = `<div class="rh-empty">${tr('canvas.rhNoParams')}</div>`;
+        return;
+    }
+    container.innerHTML = params.map((field, i) => {
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        const kind = rhFieldRole(field);
+        const options = rhExtractFieldOptions(field);
+        const value = rhFieldValue(node, field, media);
+        const label = field.label || field.fieldName || `Field ${i + 1}`;
+        const valueText = String(value ?? '');
+        const wide = kind === 'text' && (String(label).length > 18 || valueText.length > 28);
+        return renderRhSettingField(node, field, key, kind, label, value, options, wide);
+    }).join('');
+    bindRhParamControls(container, node);
+}
+function renderRhSettingField(node, field, key, kind, label, value, options, wide=false){
+    const safeLabel = escapeHtml(label);
+    if(kind === 'boolean'){
+        const active = String(value).toLowerCase() === 'true';
+        return `<div class="gen-settings-row rh-param-row ${wide ? 'wide' : ''}">
+            <button type="button" class="setting-check ${active ? 'active' : ''}" data-rh-param="${escapeAttr(key)}" data-rh-type="boolean"><span class="check-dot"></span>${safeLabel}</button>
+        </div>`;
+    }
+    if(options?.length){
+        return `<div class="gen-settings-row rh-param-row ${wide ? 'wide' : ''}">
+            <label class="field"><div class="setting-title">${safeLabel}</div><select class="select-lite rh-param-input" data-rh-param="${escapeAttr(key)}" data-rh-type="select" style="width:100%">${options.map(opt => `<option value="${escapeAttr(opt)}" ${String(value) === String(opt) ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('')}</select></label>
+        </div>`;
+    }
+    if(rhRandomEnabled(field)){
+        const active = rhRandomActive(node, key);
+        return `<div class="gen-settings-row rh-param-row ${wide ? 'wide' : ''}">
+            <div class="comfy-random-field">
+                <label class="field"><div class="setting-title">${safeLabel}</div><input class="setting-input rh-param-input" type="number" data-rh-param="${escapeAttr(key)}" data-rh-type="number" value="${escapeAttr(value)}" ${active ? 'disabled' : ''}></label>
+                <button class="tool-btn comfy-random-btn ${active ? 'active' : ''}" type="button" data-rh-random="${escapeAttr(key)}" title="${active ? '随机已开启，点击关闭' : '随机已关闭，点击开启'}"><i data-lucide="dice-5" class="w-4 h-4"></i></button>
+            </div>
+        </div>`;
+    }
+    const inputType = kind === 'number' ? 'number' : 'text';
+    return `<div class="gen-settings-row rh-param-row ${wide ? 'wide' : ''}">
+        <label class="field"><div class="setting-title">${safeLabel}</div><input class="setting-input rh-param-input" type="${inputType}" data-rh-param="${escapeAttr(key)}" data-rh-type="${escapeAttr(kind)}" value="${escapeAttr(value)}"></label>
+    </div>`;
+}
+function bindRhParamControls(container, node){
+    container.querySelectorAll('button[data-rh-param]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            const key = btn.dataset.rhParam;
+            node.rhParams = node.rhParams || {};
+            const field = rhActiveFields(node).find(f => rhParamKey(f.nodeId, f.fieldName) === key);
+            const cur = node.rhParams[key] || {};
+            const on = String(rhFieldValue(node, field)).toLowerCase() === 'true';
+            node.rhParams[key] = {...cur, value:String(!on)};
+            render();
+            scheduleSave();
+        };
+    });
+    container.querySelectorAll('input[data-rh-param], select[data-rh-param], textarea[data-rh-param]').forEach(control => {
+        control.onmousedown = e => e.stopPropagation();
+        control.onclick = e => e.stopPropagation();
+        control.oninput = control.onchange = e => {
+            const key = control.dataset.rhParam;
+            node.rhParams = node.rhParams || {};
+            const cur = node.rhParams[key] || {};
+            node.rhParams[key] = {...cur, value:e.target.value};
+            scheduleSave();
+        };
+    });
+    container.querySelectorAll('[data-rh-random]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            toggleRhRandom(node.id, btn.dataset.rhRandom);
+        };
+    });
+}
+async function rhFetchAppInfo(nodeId, showAlert=true){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) return;
+    if(!String(node.webappId || '').trim()){
+        if(showAlert) alert(tr('canvas.rhNeedWebappId'));
+        return false;
+    }
+    node.rhFetching = true;
+    refreshNodes([node.id]);
+    try {
+        const res = await fetch(`/api/runninghub/app-info?webappId=${encodeURIComponent(node.webappId.trim())}`);
+        const data = await res.json();
+        if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
+        node.rhAppInfo = data.data || {};
+        node.rhParams = node.rhParams || {};
+        (node.rhAppInfo.nodeInfoList || []).forEach(field => {
+            const key = rhParamKey(field.nodeId, field.fieldName);
+            if(!node.rhParams[key]) node.rhParams[key] = {value:rhDefaultValue(field)};
+        });
+        node.runStatus = '';
+        node.runError = '';
+        scheduleSave();
+        return true;
+    } catch(err) {
+        if(showAlert) alert(err.message || tr('canvas.rhFailed'));
+        return false;
+    } finally {
+        node.rhFetching = false;
+        refreshNodes([node.id]);
+    }
+}
+async function rhFetchWorkflowInfo(nodeId, showAlert=true){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) return false;
+    if(!String(node.workflowId || '').trim()){
+        if(showAlert) alert(tr('canvas.rhNeedWorkflowId'));
+        return false;
+    }
+    node.rhFetching = true;
+    refreshNodes([node.id]);
+    try {
+        const saved = await ensureRunningHubWorkflow(node.workflowId.trim());
+        const res = await fetch(`/api/runninghub/workflow-info?workflowId=${encodeURIComponent(node.workflowId.trim())}`);
+        const data = await res.json();
+        if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
+        const info = data.data || {};
+        const savedFields = Array.isArray(saved?.fields) ? saved.fields : [];
+        const mergedFields = savedFields.length
+            ? savedFields
+            : Array.isArray(info.nodeInfoList) ? info.nodeInfoList : [];
+        node.rhWorkflowInfo = {
+            workflowId:node.workflowId.trim(),
+            nodeInfoList:mergedFields,
+            raw:info.raw || null
+        };
+        node.rhParams = node.rhParams || {};
+        (node.rhWorkflowInfo.nodeInfoList || []).forEach(field => {
+            const key = rhParamKey(field.nodeId, field.fieldName);
+            if(!node.rhParams[key]) node.rhParams[key] = {value:rhDefaultValue(field)};
+        });
+        node.runStatus = '';
+        node.runError = '';
+        scheduleSave();
+        return true;
+    } catch(err) {
+        if(showAlert) alert(err.message || tr('canvas.rhFailed'));
+        return false;
+    } finally {
+        node.rhFetching = false;
+        refreshNodes([node.id]);
+    }
+}
+async function rhImportWorkflowJson(nodeId, file){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || !file) return;
+    try {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        const nodeInfoList = rhWorkflowNodeInfoList(json);
+        if(!nodeInfoList.length) throw new Error(tr('canvas.rhWorkflowJsonInvalid'));
+        node.rhMode = 'workflow';
+        node.rhWorkflowInfo = {fileName:file.name || 'api.json', nodeInfoList};
+        node.rhParams = node.rhParams || {};
+        nodeInfoList.forEach(field => {
+            const key = rhParamKey(field.nodeId, field.fieldName);
+            if(!node.rhParams[key]) node.rhParams[key] = {value:rhDefaultValue(field)};
+        });
+        node.runStatus = '';
+        node.runError = '';
+        render();
+        scheduleSave();
+    } catch(err) {
+        alert(err.message || tr('canvas.rhWorkflowJsonInvalid'));
+    }
+}
+async function rhUploadValueIfNeeded(value, node=null){
+    const text = String(value || '').trim();
+    if(!text) return '';
+    if(!/^https?:\/\//i.test(text) && !text.startsWith('/output/') && !text.startsWith('/assets/')) return text;
+    const res = await fetch('/api/runninghub/upload-asset', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({url:text, useWallet:rhUseWallet(node)})
+    });
+    const data = await res.json();
+    if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhUploadFailed'));
+    return data.data?.fileName || text;
+}
+async function rhBuildNodeInfoList(node, media){
+    const fields = rhActiveFields(node);
+    const result = [];
+    const indexes = rhFieldIndexes(fields);
+    for(const field of fields){
+        const kind = rhFieldKind(field);
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        if(rhCurrentKind(node) === 'workflow' && field.sourceFromUpstream === false && !['image','video','audio'].includes(kind)) continue;
+        if(rhCurrentKind(node) === 'workflow' && kind === 'image'){
+            const idx = indexes[key] || 0;
+            const hasInput = Boolean(media.image?.[idx]?.url);
+            if(field.required !== true && !hasInput) continue;
+        }
+        let value = rhFieldValue(node, field, media);
+        if(['image','video','audio'].includes(kind)) value = await rhUploadValueIfNeeded(value, node);
+        if(typeof value === 'string' && /[\r\n]/.test(value)) value = value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0] || '';
+        result.push({nodeId:field.nodeId, fieldName:field.fieldName, fieldValue:value});
+    }
+    return result;
+}
+async function runRhNode(nodeId, opts={}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || (node.running && !opts.cascade)) return;
+    ensureRhNodeSelection(node);
+    const mode = rhCurrentKind(node);
+    node.rhRandomValues = {};
+    if(mode === 'workflow' && !String(node.workflowId || '').trim()){ alert(tr('canvas.rhNeedWorkflowId')); return; }
+    if(mode === 'app' && !String(node.webappId || '').trim()){ alert(tr('canvas.rhNeedWebappId')); return; }
+    const selectedEntry = rhCurrentEntry(node);
+    if(!selectedEntry){
+        alert(mode === 'workflow' ? '请先在 API 设置里添加 RH 工作流' : '请先在 API 设置里添加 RH 应用');
+        return;
+    }
+    if(mode === 'workflow') await ensureRunningHubWorkflowConfigForNode(node);
+    if(!rhActiveFields(node).length){
+        alert(mode === 'workflow' ? '请先在 API 设置里编辑并保存这个 RH 工作流参数' : '请先在 API 设置里编辑并保存这个 RH 应用参数');
+        return;
+    }
+    const media = rhMediaSources(node);
+    let out = outputForNode(node, 500);
+    const pendingId = uid('p');
+    const run = runSnapshot(node, media.prompt || 'RunningHub', media.refs);
+    run.taskLabel = 'RunningHub';
+    if(out) out._pending = [...(out._pending || []), makePending(pendingId, run)];
+    if(!opts.cascade) node.running = true;
+    refreshRunNodes(node, out);
+    try {
+        const nodeInfoList = await rhBuildNodeInfoList(node, media);
+        const workflowExtras = mode === 'workflow' ? await rhBuildWorkflowRequestExtras(node, media, nodeInfoList) : {};
+        const endpoint = mode === 'workflow' ? '/api/runninghub/workflow-submit' : '/api/runninghub/submit';
+        const body = mode === 'workflow'
+            ? {workflowId:node.workflowId.trim(), nodeInfoList, useWallet:rhUseWallet(node), ...workflowExtras}
+            : {webappId:node.webappId.trim(), nodeInfoList, instanceType:node.instanceType || '', useWallet:rhUseWallet(node)};
+        const submit = await fetch(endpoint, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(body)
+        }).then(async r => {
+            const data = await r.json();
+            if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
+            return data.data || data;
+        });
+        const taskId = submit.taskId;
+        if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
+        run.request = {task_id:taskId, webappId:node.webappId, workflowId:node.workflowId, backend:'runninghub', mode};
+        let result = null;
+        for(let i = 0; i < 720; i++){
+            await sleep(2500);
+            const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
+                const json = await r.json();
+                if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('canvas.rhFailed'));
+                return json.data || json;
+            });
+            if(data.status === 'SUCCESS'){
+                result = data;
+                break;
+            }
+            if(data.status === 'FAILED') throw new Error(data.failReason || tr('canvas.rhFailed'));
+        }
+        if(!result) throw new Error(tr('canvas.rhTimeout'));
+        const outputs = result.urls || [];
+        if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
+        const meta = collectRunMeta(out, pendingId);
+        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        appendOutputImages(out, outputs, media.refs[0], [meta]);
+        mergeGeneratedOutputs(node, outputs, Boolean(opts.cascade));
+        addGenerationLog({run, outputs, runMs:meta.runMs || 0});
+        node.runStatus = 'done';
+        node.runError = '';
+        refreshRunNodes(node, out);
+        scheduleSave();
+    } catch(err) {
+        const meta = collectRunMeta(out, pendingId);
+        addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
+        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        node.runStatus = 'failed';
+        node.runError = err.message || String(err);
+        refreshRunNodes(node, out);
+        if(opts.cascade) throw err;
+        alert(err.message || tr('canvas.rhFailed'));
+    } finally {
+        node.running = false;
+        refreshRunNodes(node, out);
+    }
 }
 function renderComfySettings(container, node){
     const mode = node.mode || 'text';
@@ -5589,8 +6560,8 @@ function updateComfyField(node, input, event){
     scheduleSave();
 }
 
-const CANVAS_GENERATOR_TYPES = ['generator','msgen','comfy','video'];
-const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','msgen','comfy'];
+const CANVAS_GENERATOR_TYPES = ['generator','msgen','comfy','video','rh'];
+const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','msgen','comfy','rh'];
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -5634,8 +6605,11 @@ function generatedImageRefs(node){
     return (node?.generatedOutputs || [])
         .map(outputUrlValue)
         .filter(Boolean)
-        .filter(url => !isVideoUrl(url) && !isAudioUrl(url))
-        .map((url, i) => ({url, name:`${node.type || 'generated'}-${i + 1}.png`, kind:'image'}));
+        .filter(url => node?.type === 'rh' || (!isVideoUrl(url) && !isAudioUrl(url)))
+        .map((url, i) => {
+            const kind = isVideoUrl(url) ? 'video' : isAudioUrl(url) ? 'audio' : 'image';
+            return {url, name:outputImageName(url) || `${node.type || 'generated'}-${i + 1}`, kind};
+        });
 }
 function mediaRefsFromNode(node){
     if(!node) return [];
@@ -5755,10 +6729,10 @@ function reorderInput(gen, movedId, targetId){
     scheduleSave();
 }
 function syncGeneratorInputs(){
-    nodes.filter(n => ['generator','comfy','msgen','video'].includes(n.type)).forEach(gen => orderedSources(gen, generatorSources(gen)));
+    nodes.filter(n => CANVAS_GENERATOR_TYPES.includes(n.type)).forEach(gen => orderedSources(gen, generatorSources(gen)));
 }
 function refreshGeneratorInputViews(){
-    nodes.filter(n => ['generator','comfy','msgen','video'].includes(n.type)).forEach(gen => {
+    nodes.filter(n => CANVAS_GENERATOR_TYPES.includes(n.type)).forEach(gen => {
         const el = nodesEl.querySelector(`.node[data-id="${gen.id}"]`);
         if(!el) return;
         const sources = orderedSources(gen, generatorSources(gen));
@@ -5770,6 +6744,12 @@ function refreshGeneratorInputViews(){
         if(gen.type === 'msgen') renderImageInputList(el.querySelector('.ms-img-list'), gen, imageInputs);
         if(gen.type === 'comfy') renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         if(gen.type === 'video') renderVideoImageInputs(el.querySelector('.video-img-list'), gen, imageInputs);
+        if(gen.type === 'rh'){
+            const media = rhMediaSources(gen);
+            renderRhPromptFields(el.querySelector('.rh-prompt-list'), gen, rhActiveFields(gen));
+            renderRhInputs(el.querySelector('.rh-input-list'), gen, media);
+            renderRhParams(el.querySelector('.rh-param-list'), gen, rhActiveFields(gen), media);
+        }
     });
 }
 async function runGenerator(genId, opts={}){
@@ -6283,6 +7263,7 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'comfy') return runComfyNode(node.id, runOpts);
     if(node.type === 'llm') return runLLMNode(node.id, runOpts);
     if(node.type === 'video') return runVideoNode(node.id, runOpts);
+    if(node.type === 'rh') return runRhNode(node.id, runOpts);
     return Promise.resolve();
 }
 function runCascadeNodeWithLoopContext(node, ctx, opts={}){
@@ -6308,7 +7289,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','msgen','comfy','llm','video'];
+    return ['generator','msgen','comfy','llm','video','rh'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -6583,6 +7564,7 @@ async function runOneCascadePass(order, options={}){
             else if(node.type === 'comfy') await runComfyNode(id, {cascade:true});
             else if(node.type === 'llm') await runLLMNode(id, {cascade:true});
             else if(node.type === 'video') await runVideoNode(id, {cascade:true});
+            else if(node.type === 'rh') await runRhNode(id, {cascade:true});
             node.runStatus = 'done';
             refreshNodes([id]);
         } catch(err) {
@@ -6882,7 +7864,7 @@ function makePending(id, run, task={}){
 }
 function mergeGeneratedOutputs(node, outputs, append=false){
     if(!node) return;
-    const clean = (outputs || []).filter(url => url && !isVideoUrl(url));
+    const clean = (outputs || []).filter(url => url && (node.type === 'rh' || !isVideoUrl(url)));
     if(!append){
         node.generatedOutputs = clean;
         return;
@@ -7010,6 +7992,9 @@ function renderOutputMedia(item, useGridLayout=false){
     if(isVideoUrl(url)){
         return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}><video src="${safe}" data-url="${safe}" preload="metadata" muted playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>${timePill}<div class="output-video-badge"><i data-lucide="play" class="w-3 h-3"></i>VIDEO</div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
+    if(isAudioUrl(url)){
+        return `<div class="output-img-wrap output-audio-wrap" data-output-url="${safe}"${gridStyle}><div class="output-audio-card"><i data-lucide="file-audio" class="w-7 h-7"></i><span>${escapeHtml(outputImageName(url))}</span><audio src="${safe}" data-url="${safe}" controls preload="metadata"></audio></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+    }
     return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}><img src="${safe}" data-url="${safe}" alt="generated output">${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
 }
 function outputGridLayout(node){
@@ -7091,7 +8076,7 @@ function markOutputViewed(out, url){
 function outputLightboxItems(out=null){
     const normalize = (item, sourceOut=null) => {
         const url = outputUrlValue(item);
-        if(!url || isVideoUrl(url)) return null;
+        if(!url || isVideoUrl(url) || isAudioUrl(url)) return null;
         return {url, outId:sourceOut?.id || ''};
     };
     const sourceOut = out?.id ? nodes.find(n => n.id === out.id) || out : null;
@@ -7119,7 +8104,7 @@ function navigateOutputLightbox(direction){
 }
 function createImageCardFromOutput(url, point){
     if(!ensureCanvas() || !url) return;
-    if(isVideoUrl(url)) return;
+    if(isVideoUrl(url) || isAudioUrl(url)) return;
     const p = point || defaultPoint(0, 0);
     nodes.push({id:uid('img'), type:'image', x:p.x, y:p.y, url, name:outputImageName(url)});
     render();
@@ -8190,7 +9175,7 @@ board.addEventListener('dragover', e => {
 board.addEventListener('dragleave', e => {
     if(e.target === board || !board.contains(e.relatedTarget)) dropOverlay.classList.remove('active');
 });
-board.addEventListener('drop', e => {
+board.addEventListener('drop', async e => {
     e.preventDefault();
     dropOverlay.classList.remove('active');
     if(e.target.closest?.('.image-node')) return;
@@ -8203,7 +9188,10 @@ board.addEventListener('drop', e => {
         return;
     }
     if(hasImageFiles(e.dataTransfer?.items)){
-        uploadImages(e.dataTransfer.files, screenToWorld(e.clientX, e.clientY));
+        const files = await uploadFilesFromDataTransfer(e.dataTransfer);
+        const point = screenToWorld(e.clientX, e.clientY);
+        if(files.length > 1) uploadImageGroup(files, point);
+        else uploadImages(files, point);
         return;
     }
     const droppedUrl = imageUrlFromDataTransfer(e.dataTransfer);
@@ -8219,6 +9207,7 @@ window.addEventListener('paste', e => {
     lastImagePasteAt = Date.now();
     const blank = [...selected].map(id => nodes.find(n => n.id === id)).find(n => n?.type === 'image' && !n.url);
     if(blank) fillImageNode(blank.id, files);
+    else if(files.length > 1) uploadImageGroup(files);
     else uploadImages(files);
 });
 window.addEventListener('keydown', e => {
@@ -8302,7 +9291,12 @@ function deleteSelectedNodes(){
     render();
     scheduleSave();
 }
-function hasImageFiles(items){ return [...(items || [])].some(item => item.kind === 'file' && /^(image|video|audio)\//.test(String(item.type || ''))); }
+function hasImageFiles(items){
+    return [...(items || [])].some(item => {
+        const entry = dataTransferItemEntry(item);
+        return entry?.isDirectory || (item.kind === 'file' && (/^(image|video|audio)\//.test(String(item.type || '')) || isSupportedUploadFile(item.getAsFile?.())));
+    });
+}
 function hasImageDropData(dataTransfer){
     if(!dataTransfer) return false;
     if(hasImageFiles(dataTransfer.items)) return true;

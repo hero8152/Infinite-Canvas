@@ -56,6 +56,7 @@ let selectionJustFinished = false;
 let resizeState = null;
 let thumbDragState = null;
 let uploadTargetId = '';
+let pendingGroupUploadPoint = null;
 let mentionRange = null;
 let panState = null;
 let didPan = false;
@@ -87,6 +88,7 @@ let smartLoopContext = null;
 let runBtnCooldownToken = 0;
 let smartRunStateToken = 0;
 const smartNodeRunTokens = new Map();
+let smartRhRandomValues = {};
 let lastImagePasteAt = 0;
 let lastNodePasteAt = 0;
 let suppressNodeClickUntil = 0;
@@ -95,6 +97,7 @@ const UNDO_LIMIT = 40;
 const undoStack = [];
 let undoSuppressed = false;
 let pendingUndoSnapshot = null;
+let runningHubWorkflowCache = {};
 function capturePendingUndo(){ pendingUndoSnapshot = snapshotForUndo(); }
 function commitPendingUndo(){
     if(pendingUndoSnapshot){
@@ -201,6 +204,11 @@ let settings = {
     comfyMode:'text',
     comfyWorkflow:'',
     comfyParams:{},
+    rhConfigKey:'',
+    rhPayment:'free',
+    rhInstanceType:'',
+    rhParams:{},
+    rhRandomActive:{},
     width:1024,
     height:1024,
     enhanceStrength:0.5,
@@ -247,9 +255,10 @@ const initialSmartSettings = cloneSmartSettings(settings);
 let canvasDefaultSmartSettings = cloneSmartSettings(settings);
 let recentSmartSettingsByMode = {};
 function smartSettingsModeKey(source=settings){
-    const engine = ['api','modelscope','comfy'].includes(source?.engine) ? source.engine : 'api';
+    const engine = ['api','modelscope','comfy','runninghub'].includes(source?.engine) ? source.engine : 'api';
     if(engine === 'api') return `api:${source?.apiKind === 'video' ? 'video' : 'image'}`;
     if(engine === 'comfy') return `comfy:${['text','enhance','edit','custom'].includes(source?.comfyMode) ? source.comfyMode : 'text'}`;
+    if(engine === 'runninghub') return 'runninghub';
     return 'modelscope';
 }
 function loadRecentSmartSettings(){
@@ -456,10 +465,12 @@ function safeScale(value){
 }
 function nodeScale(node){
     const v = Number(node?.scale);
+    if((node?.images || []).length > 1 && v === MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE) return MEDIA_GROUP_DEFAULT_SCALE;
     return Number.isFinite(v) && v > 0 ? v : 1;
 }
 const MEDIA_NODE_DEFAULT_SCALE = 2;
-const MEDIA_GROUP_DEFAULT_SCALE = 1.6;
+const MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE = 1.6;
+const MEDIA_GROUP_DEFAULT_SCALE = 0.8;
 function mediaNodeDefaultScale(node){
     if((node?.images || []).length > 1 && !Number.isFinite(Number(node?.scale))) return MEDIA_GROUP_DEFAULT_SCALE;
     return Number.isFinite(Number(node?.scale)) && Number(node.scale) > 0 ? Number(node.scale) : MEDIA_NODE_DEFAULT_SCALE;
@@ -714,6 +725,72 @@ function toggleZoomPreview(){
 function imageProviders(){
     return (apiProviders || []).filter(p => p.enabled !== false && p.id !== 'modelscope' && p.id !== 'runninghub' && (p.image_models || []).length);
 }
+function runningHubProvider(){
+    return (apiProviders || []).find(p => p.id === 'runninghub' && p.enabled !== false) || null;
+}
+function runningHubEntries(kind){
+    const provider = runningHubProvider();
+    const key = kind === 'workflow' ? 'rh_workflows' : 'rh_apps';
+    return Array.isArray(provider?.[key]) ? provider[key] : [];
+}
+function runningHubEntryId(entry, kind){
+    return String(kind === 'workflow' ? (entry?.workflowId || entry?.id || '') : (entry?.appId || entry?.webappId || entry?.id || '')).trim();
+}
+function runningHubEntryLabel(entry, kind){
+    const id = runningHubEntryId(entry, kind);
+    return entry?.title || entry?.name || (kind === 'workflow' ? `Workflow ${id}` : `AI App ${id}`);
+}
+function runningHubEntryKey(kind, id){
+    return `${kind}:${String(id || '').trim()}`;
+}
+function parseRunningHubEntryKey(value){
+    const text = String(value || '').trim();
+    const match = text.match(/^(app|workflow):(.+)$/);
+    return match ? {kind:match[1], id:match[2].trim()} : null;
+}
+function runningHubAllEntries(){
+    return [
+        ...runningHubEntries('app').map(entry => ({kind:'app', id:runningHubEntryId(entry, 'app'), entry})).filter(x => x.id),
+        ...runningHubEntries('workflow').map(entry => ({kind:'workflow', id:runningHubEntryId(entry, 'workflow'), entry})).filter(x => x.id)
+    ];
+}
+function selectedRunningHubRef(){
+    const all = runningHubAllEntries();
+    const parsed = parseRunningHubEntryKey(settings.rhConfigKey || '');
+    let ref = parsed ? all.find(item => item.kind === parsed.kind && item.id === parsed.id) : null;
+    if(!ref && all.length) ref = all[0];
+    if(ref) settings.rhConfigKey = runningHubEntryKey(ref.kind, ref.id);
+    return ref || null;
+}
+function rhEntryFields(entry){
+    return Array.isArray(entry?.fields) ? entry.fields : [];
+}
+function rhCurrentKind(){
+    return selectedRunningHubRef()?.kind || 'app';
+}
+function rhActiveFields(){
+    const ref = selectedRunningHubRef();
+    let fields = rhEntryFields(ref?.entry);
+    if(ref?.kind === 'workflow'){
+        const cached = runningHubWorkflowCache[ref.id];
+        if(Array.isArray(cached?.fields) && cached.fields.length) fields = cached.fields;
+    }
+    fields = fields.filter(f => f.enabled === true);
+    return sortRunningHubFields(fields);
+}
+function sortRunningHubFields(fields){
+    return [...(fields || [])].sort((a, b) => {
+        const ak = rhFieldKind(a), bk = rhFieldKind(b);
+        if(ak === 'image' && bk === 'image'){
+            const ao = Number(a.imageOrder) || 9999;
+            const bo = Number(b.imageOrder) || 9999;
+            if(ao !== bo) return ao - bo;
+        }
+        if(ak === 'image' && bk !== 'image') return -1;
+        if(ak !== 'image' && bk === 'image') return 1;
+        return String(a.nodeId || '').localeCompare(String(b.nodeId || ''), undefined, {numeric:true}) || String(a.fieldName || '').localeCompare(String(b.fieldName || ''));
+    });
+}
 function chatApiProviders(){
     return (apiProviders || []).filter(p => p.enabled !== false && (p.chat_models || []).length);
 }
@@ -896,7 +973,7 @@ function comfyParamValue(field){
 function updateProviderModels(){ renderDynamicParams(); }
 function renderDynamicParams(){
     if(!dynamicParams) return;
-    settings.engine = ['api','modelscope','comfy'].includes(settings.engine) ? settings.engine : 'api';
+    settings.engine = ['api','modelscope','comfy','runninghub'].includes(settings.engine) ? settings.engine : 'api';
     settings.apiKind = settings.apiKind === 'video' ? 'video' : 'image';
     engineSelect.value = settings.engine;
     syncApiKindToggleVisibility();
@@ -905,6 +982,7 @@ function renderDynamicParams(){
         else renderApiParams();
     }
     else if(settings.engine === 'modelscope') renderMsParams();
+    else if(settings.engine === 'runninghub') renderRunningHubParams();
     else renderComfyParams();
     bindDynamicParams();
     persistActiveSmartSettings();
@@ -946,6 +1024,74 @@ function renderApiVideoParams(){
         ${renderVideoToggleControl('videoWatermark', tr('smart.videoWatermark'))}
         ${renderVideoToggleControl('videoUseFrameRoles', tr('smart.videoUseFrameRoles'))}
     `;
+}
+function renderRunningHubParams(){
+    const ref = selectedRunningHubRef();
+    const fields = rhActiveFields();
+    settings.rhPayment = settings.rhPayment === 'wallet' ? 'wallet' : 'free';
+    settings.rhParams = settings.rhParams || {};
+    settings.rhRandomActive = settings.rhRandomActive || {};
+    if(!ref){
+        dynamicParams.innerHTML = `<div class="muted-note">${escapeHtml(tr('smart.rhNeedConfig'))}</div>`;
+        return;
+    }
+    const mediaFields = fields.filter(f => ['image','video','audio'].includes(rhFieldRole(f))).length;
+    const promptFields = fields.filter(f => rhFieldRole(f) === 'prompt').length;
+    dynamicParams.innerHTML = `
+        ${renderRhConfigControl(ref)}
+        ${renderRhPaymentControl()}
+        ${renderRhMachineControl()}
+        <div class="rh-mini-summary">${escapeHtml(mediaFields)} 素材 · ${escapeHtml(promptFields)} 提示词</div>
+        ${fields.length ? fields.filter(f => !['image','video','audio','prompt'].includes(rhFieldRole(f))).map(renderRhSettingField).join('') : `<div class="muted-note">${escapeHtml(tr('smart.rhNeedFields'))}</div>`}
+    `;
+}
+function renderRhConfigControl(ref){
+    const apps = runningHubEntries('app');
+    const workflows = runningHubEntries('workflow');
+    const selected = ref ? runningHubEntryKey(ref.kind, ref.id) : '';
+    const groupHtml = (kind, entries, label) => entries.length ? `
+        <div class="model-list-label">${escapeHtml(label)}<span class="count">${entries.length}</span></div>
+        ${entries.map(entry => {
+            const id = runningHubEntryId(entry, kind);
+            const key = runningHubEntryKey(kind, id);
+            return `<button type="button" class="direct-option ${key === selected ? 'active' : ''}" data-smart-param="rhConfigKey" data-smart-value="${escapeHtml(key)}"><span>${escapeHtml(runningHubEntryLabel(entry, kind))}</span></button>`;
+        }).join('')}
+    ` : '';
+    return `<div class="smart-control rh-config-control">
+        <button class="smart-pill" type="button"><i data-lucide="workflow"></i><span class="sub">${escapeHtml(ref ? runningHubEntryLabel(ref.entry, ref.kind) : tr('smart.rhConfig'))}</span></button>
+        <div class="smart-popover compact-popover">
+            <div class="smart-popover-title">${escapeHtml(tr('smart.rhConfig'))}</div>
+            <div class="model-list">
+                ${groupHtml('app', apps, 'AI 应用')}${groupHtml('workflow', workflows, '工作流') || ''}
+            </div>
+        </div>
+    </div>`;
+}
+function renderRhPaymentControl(){
+    const value = settings.rhPayment === 'wallet' ? 'wallet' : 'free';
+    const labels = {free:tr('smart.rhFreeKey'), wallet:tr('smart.rhWalletKey')};
+    return `<div class="smart-control rh-payment-control">
+        <button class="smart-pill" type="button"><i data-lucide="key-round"></i><span>${escapeHtml(labels[value])}</span></button>
+        <div class="smart-popover compact-popover">
+            <div class="smart-popover-title">${escapeHtml(tr('smart.rhKey'))}</div>
+            <div class="model-list">
+                ${Object.entries(labels).map(([key, label]) => `<button type="button" class="direct-option ${key === value ? 'active' : ''}" data-smart-param="rhPayment" data-smart-value="${escapeHtml(key)}"><span>${escapeHtml(label)}</span></button>`).join('')}
+            </div>
+        </div>
+    </div>`;
+}
+function renderRhMachineControl(){
+    const value = settings.rhInstanceType === 'plus' ? 'plus' : '';
+    const labels = {'':'24G', plus:'48G'};
+    return `<div class="smart-control rh-machine-control">
+        <button class="smart-pill" type="button"><i data-lucide="cpu"></i><span>${escapeHtml(labels[value])}</span></button>
+        <div class="smart-popover compact-popover">
+            <div class="smart-popover-title">${escapeHtml(tr('smart.rhMachine'))}</div>
+            <div class="model-list">
+                ${Object.entries(labels).map(([key, label]) => `<button type="button" class="direct-option ${key === value ? 'active' : ''}" data-smart-param="rhInstanceType" data-smart-value="${escapeHtml(key)}"><span>${escapeHtml(label)}</span></button>`).join('')}
+            </div>
+        </div>
+    </div>`;
 }
 function renderMsParams(){
     settings.msgenModel = MS_GEN_MODELS[settings.msgenModel] ? settings.msgenModel : 'zimage';
@@ -1311,6 +1457,271 @@ function renderComfySettingField(field){
     }
     return `<div class="num-compact" title="${escapeHtml(label)}"><span class="num-label">${escapeHtml(label)}</span>${inputHtml}</div>`;
 }
+const RH_KNOWN_FIELD_OPTIONS = {
+    aspectRatio:['1:1','16:9','9:16','4:3','3:4','4:5','5:4','3:2','2:3','21:9','9:21'],
+    aspect_ratio:['1:1','16:9','9:16','4:3','3:4','4:5','5:4','3:2','2:3','21:9','9:21'],
+    ratio:['1:1','16:9','9:16','4:3','3:4','4:5','5:4','3:2','2:3'],
+    resolution:['1k','2k','4k','8k'],
+    size:['512','768','1024','1280','1536','2048'],
+    quality:['low','medium','high','best'],
+    scheduler:['normal','karras','exponential','sgm_uniform','simple','ddim_uniform'],
+    sampler:['euler','euler_ancestral','heun','dpm_2','dpm_2_ancestral','lms','dpmpp_2m','dpmpp_sde','ddim','uni_pc']
+};
+function rhParamKey(nodeId, fieldName){
+    return `${nodeId ?? ''}::${fieldName ?? ''}`;
+}
+function rhFieldKind(field){
+    const type = String(field?.fieldType || '').trim().toUpperCase();
+    if(type === 'IMAGE') return 'image';
+    if(type === 'VIDEO') return 'video';
+    if(type === 'AUDIO') return 'audio';
+    if(['NUMBER','FLOAT','INTEGER','INT'].includes(type)) return 'number';
+    if(['BOOLEAN','BOOL'].includes(type)) return 'boolean';
+    const key = `${field?.fieldName || ''} ${field?.fieldValue || ''}`.toLowerCase();
+    if(/\b(image|img|mask|photo|picture)\b/.test(key) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(key)) return 'image';
+    if(/\b(video|movie|mp4)\b/.test(key) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(key)) return 'video';
+    if(/\b(audio|sound|music|voice)\b/.test(key) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(key)) return 'audio';
+    return 'text';
+}
+function rhFieldRole(field){
+    const kind = rhFieldKind(field);
+    if(['image','video','audio','number','boolean'].includes(kind)) return kind;
+    const text = `${field?.fieldName || ''} ${field?.label || ''} ${field?.group || ''}`.toLowerCase();
+    if(/prompt|positive|negative|text|caption|description|关键词|提示词|正向|负向/.test(text)) return 'prompt';
+    return 'text';
+}
+function rhExtractFieldOptions(field){
+    const candidates = [field?.fieldData, field?.options, field?.list, field?.values, field?.enum, field?.choices, field?.items, field?.selectOptions, field?.dropdown];
+    for(const candidate of candidates){
+        if(!Array.isArray(candidate) || !candidate.length) continue;
+        if(candidate.every(x => ['string','number'].includes(typeof x))) return candidate.map(String);
+        if(candidate.every(x => x && typeof x === 'object' && ('value' in x || 'label' in x || 'name' in x))){
+            return candidate.map(x => x.value ?? x.label ?? x.name).filter(v => v !== undefined && v !== null).map(String);
+        }
+    }
+    const name = String(field?.fieldName || '').trim();
+    if(name){
+        if(RH_KNOWN_FIELD_OPTIONS[name]) return RH_KNOWN_FIELD_OPTIONS[name].map(String);
+        const hit = Object.keys(RH_KNOWN_FIELD_OPTIONS).find(k => k.toLowerCase() === name.toLowerCase());
+        if(hit) return RH_KNOWN_FIELD_OPTIONS[hit].map(String);
+    }
+    return null;
+}
+function rhDefaultValue(field){
+    let value = field?.fieldValue;
+    if(Array.isArray(value)) value = value[0];
+    if(value === undefined || value === null || typeof value === 'object') return '';
+    return String(value);
+}
+function rhIsWorkflowLinkValue(value){
+    return Array.isArray(value) && value.length === 2 && typeof value[0] === 'string' && Number.isInteger(value[1]);
+}
+function rhRandomEnabled(field){
+    return rhFieldKind(field) === 'number' && field?.random_enabled === true;
+}
+function smartRhRandomActive(key){
+    settings.rhRandomActive = settings.rhRandomActive || {};
+    return settings.rhRandomActive[key] !== false;
+}
+function toggleSmartRhRandom(key){
+    const field = rhActiveFields().find(f => rhParamKey(f.nodeId, f.fieldName) === key);
+    if(!rhRandomEnabled(field)) return;
+    settings.rhRandomActive = settings.rhRandomActive || {};
+    settings.rhRandomActive[key] = !smartRhRandomActive(key);
+    persistActiveSmartSettings();
+    renderDynamicParams();
+    scheduleSave();
+}
+function smartRhRandomValue(field){
+    return smartComfyRandomValue({
+        input:field.fieldName,
+        name:field.label || field.fieldName,
+        min:field.min,
+        max:field.max,
+        step:field.step,
+        type:'number'
+    });
+}
+function rhParamValue(field, media=null){
+    settings.rhParams = settings.rhParams || {};
+    const key = rhParamKey(field.nodeId, field.fieldName);
+    const param = settings.rhParams[key];
+    const kind = rhFieldKind(field);
+    if(['image','video','audio'].includes(kind)){
+        const idx = rhFieldIndexes(rhActiveFields())[key] || 0;
+        const up = media?.[kind]?.[idx]?.url || '';
+        if(rhCurrentKind() === 'workflow' && kind === 'image' && field.required !== true && !up) return '';
+        return up || param?.value || rhDefaultValue(field);
+    }
+    if(rhRandomEnabled(field) && smartRhRandomActive(key)){
+        if(smartRhRandomValues[key] === undefined) smartRhRandomValues[key] = smartRhRandomValue(field);
+        return smartRhRandomValues[key];
+    }
+    if(rhFieldRole(field) === 'prompt') return param?.value ?? (media?.prompt || rhDefaultValue(field));
+    return param?.value ?? rhDefaultValue(field);
+}
+function rhFieldIndexes(fields){
+    const counters = {image:0, video:0, audio:0};
+    const map = {};
+    sortRunningHubFields(fields).forEach(field => {
+        const kind = rhFieldKind(field);
+        if(['image','video','audio'].includes(kind)){
+            map[rhParamKey(field.nodeId, field.fieldName)] = counters[kind]++;
+        }
+    });
+    return map;
+}
+async function ensureRunningHubWorkflow(workflowId){
+    workflowId = String(workflowId || '').trim();
+    if(!workflowId) return null;
+    if(runningHubWorkflowCache[workflowId]) return runningHubWorkflowCache[workflowId];
+    const res = await fetch(`/api/runninghub/workflows/${encodeURIComponent(workflowId)}`);
+    if(!res.ok){
+        delete runningHubWorkflowCache[workflowId];
+        return null;
+    }
+    const data = await res.json();
+    runningHubWorkflowCache[workflowId] = data.workflow || null;
+    return runningHubWorkflowCache[workflowId];
+}
+async function currentRunningHubWorkflowConfig(){
+    const ref = selectedRunningHubRef();
+    if(ref?.kind !== 'workflow') return null;
+    const cached = await ensureRunningHubWorkflow(ref.id).catch(() => null);
+    return {
+        ...(ref.entry || {}),
+        ...(cached || {}),
+        workflowId:ref.id,
+        fields:Array.isArray(cached?.fields) && cached.fields.length ? cached.fields : rhEntryFields(ref.entry),
+        optionalImageMode:ref.entry?.optionalImageMode || cached?.optionalImageMode || 'prune-workflow',
+        workflowJson:cached?.workflowJson || ref.entry?.raw?.workflowJson || ref.entry?.raw?.prompt || {}
+    };
+}
+function rhMediaForRun(prompt, refs){
+    const cleanRefs = (refs || []).filter(ref => ref?.url);
+    return {
+        refs:cleanRefs,
+        image:imageRefsOnly(cleanRefs),
+        video:videoRefsOnly(cleanRefs),
+        audio:audioRefsOnly(cleanRefs),
+        prompt:String(prompt || '').trim()
+    };
+}
+function rhRequiredLabel(field){
+    return field?.label || field?.fieldName || `#${field?.nodeId || ''}`;
+}
+function rhPruneWorkflowForMissingFields(workflowJson, missingFields){
+    if(!workflowJson || typeof workflowJson !== 'object' || !missingFields?.length) return null;
+    const workflow = JSON.parse(JSON.stringify(workflowJson));
+    const removeIds = new Set();
+    missingFields.forEach(field => {
+        const node = workflow[String(field.nodeId)];
+        if(node?.inputs && Object.prototype.hasOwnProperty.call(node.inputs, field.fieldName)){
+            delete node.inputs[field.fieldName];
+        }
+        if(node && (!node.inputs || !Object.keys(node.inputs).length)){
+            removeIds.add(String(field.nodeId));
+        }
+    });
+    removeIds.forEach(id => delete workflow[id]);
+    Object.values(workflow).forEach(node => {
+        if(!node?.inputs || typeof node.inputs !== 'object') return;
+        Object.entries(node.inputs).forEach(([name, value]) => {
+            if(rhIsWorkflowLinkValue(value) && removeIds.has(String(value[0]))) delete node.inputs[name];
+        });
+    });
+    return workflow;
+}
+async function rhBuildWorkflowRequestExtras(media, nodeInfoList){
+    const config = await currentRunningHubWorkflowConfig();
+    if(!config || (config.optionalImageMode || 'prune-workflow') !== 'prune-workflow') return {};
+    const fields = rhActiveFields();
+    const indexes = rhFieldIndexes(fields);
+    const missingOptional = [];
+    for(const field of fields){
+        if(rhFieldKind(field) !== 'image') continue;
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        const idx = indexes[key] || 0;
+        const hasInput = Boolean(media.image?.[idx]?.url);
+        if(field.required === true && !hasInput) throw new Error(`RunningHub 工作流缺少必选图片：${rhRequiredLabel(field)}`);
+        if(field.required !== true && !hasInput) missingOptional.push(field);
+    }
+    if(!missingOptional.length) return {};
+    missingOptional.forEach(field => {
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        const idx = nodeInfoList.findIndex(item => rhParamKey(item.nodeId, item.fieldName) === key);
+        if(idx >= 0) nodeInfoList.splice(idx, 1);
+    });
+    const workflow = rhPruneWorkflowForMissingFields(config.workflowJson || {}, missingOptional);
+    return workflow ? {workflow} : {};
+}
+async function rhUploadValueIfNeeded(value){
+    const text = String(value || '').trim();
+    if(!text) return '';
+    if(!/^https?:\/\//i.test(text) && !text.startsWith('/output/') && !text.startsWith('/assets/')) return text;
+    const res = await fetch('/api/runninghub/upload-asset', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({url:text, useWallet:settings.rhPayment === 'wallet'})
+    });
+    const data = await res.json();
+    if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('smart.rhUploadFailed'));
+    return data.data?.fileName || text;
+}
+async function rhBuildNodeInfoList(media){
+    const fields = rhActiveFields();
+    const result = [];
+    const indexes = rhFieldIndexes(fields);
+    const mode = rhCurrentKind();
+    for(const field of fields){
+        const kind = rhFieldKind(field);
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        if(mode === 'workflow' && field.sourceFromUpstream === false && !['image','video','audio'].includes(kind)) continue;
+        if(mode === 'workflow' && kind === 'image'){
+            const idx = indexes[key] || 0;
+            if(field.required !== true && !media.image?.[idx]?.url) continue;
+        }
+        let value = rhParamValue(field, media);
+        if(['image','video','audio'].includes(kind)) value = await rhUploadValueIfNeeded(value);
+        if(typeof value === 'string' && /[\r\n]/.test(value)) value = value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0] || '';
+        result.push({nodeId:field.nodeId, fieldName:field.fieldName, fieldValue:value});
+    }
+    return result;
+}
+function renderRhSettingField(field){
+    const key = rhParamKey(field.nodeId, field.fieldName);
+    const kind = rhFieldRole(field);
+    const label = field.label || field.fieldName || 'Field';
+    const value = rhParamValue(field, null);
+    const options = rhExtractFieldOptions(field);
+    if(kind === 'boolean'){
+        const active = String(value).toLowerCase() === 'true';
+        return `<button type="button" class="setting-check ${active ? 'active' : ''}" data-rh-bool="${escapeHtml(key)}"><span class="check-box"></span><span>${escapeHtml(label)}</span></button>`;
+    }
+    if(options?.length){
+        const curLabel = String(value || options[0] || label);
+        return `<div class="smart-control rh-dropdown-control" title="${escapeHtml(label)}">
+            <button class="smart-pill" type="button"><span class="sub">${escapeHtml(curLabel)}</span></button>
+            <div class="smart-popover compact-popover">
+                <div class="smart-popover-title">${escapeHtml(label)}</div>
+                <div class="model-list">
+                    ${options.map(o => `<button type="button" class="direct-option ${String(o) === String(value) ? 'active' : ''}" data-rh-pick="${escapeHtml(key)}" data-rh-value="${escapeHtml(o)}"><span>${escapeHtml(o)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noOption'))}</div>`}
+                </div>
+            </div>
+        </div>`;
+    }
+    const type = kind === 'number' ? 'number' : 'text';
+    const inputHtml = `<input type="${type}" data-rh-param="${escapeHtml(key)}" value="${escapeHtml(value)}">`;
+    if(kind === 'number' && rhRandomEnabled(field)){
+        const active = smartRhRandomActive(key);
+        return `<div class="num-with-dice" title="${escapeHtml(label)}">
+            <span class="num-label">${escapeHtml(label)}</span>
+            ${inputHtml}
+            <button type="button" class="dice-btn ${active ? 'active' : ''}" data-rh-random="${escapeHtml(key)}" title="${escapeHtml(active ? tr('smart.diceOn') : tr('smart.diceOff'))}"><i data-lucide="dice-5"></i></button>
+        </div>`;
+    }
+    return `<div class="num-compact ${type === 'text' ? 'rh-text-param' : ''}" title="${escapeHtml(label)}"><span class="num-label">${escapeHtml(label)}</span>${inputHtml}</div>`;
+}
 function comfyRandomEnabledField(field){ return field?.type === 'number' && field.random_enabled === true; }
 function smartComfyRandomActive(fieldId){
     settings.comfyRandomActive = settings.comfyRandomActive || {};
@@ -1340,7 +1751,7 @@ function smartComfyRandomValue(field){
 }
 function setDynamicSetting(key, value){
     const numericKeys = new Set(['count','width','height','videoDuration','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
-    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes']);
+    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
     if(key === 'provider_id') settings.model = '';
     if(key === 'videoProvider') settings.videoModel = '';
@@ -1369,6 +1780,10 @@ function setDynamicSetting(key, value){
     if(key === 'comfyWorkflow') {
         settings.comfyParams = {};
         ensureComfyWorkflow(settings.comfyWorkflow).then(renderDynamicParams);
+    }
+    if(key === 'rhConfigKey'){
+        settings.rhParams = {};
+        settings.rhRandomActive = {};
     }
     persistActiveSmartSettings();
     rememberRecentSmartSettings(settings, activeSettingsSubject());
@@ -1467,6 +1882,63 @@ function bindDynamicParams(){
             toggleSmartComfyRandom(btn.dataset.comfyRandom);
         };
     });
+    dynamicParams.querySelectorAll('[data-rh-bool]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            settings.rhParams = settings.rhParams || {};
+            const key = btn.dataset.rhBool;
+            const field = rhActiveFields().find(f => rhParamKey(f.nodeId, f.fieldName) === key);
+            const cur = settings.rhParams[key] || {};
+            const on = String(rhParamValue(field, null)).toLowerCase() === 'true';
+            settings.rhParams[key] = {...cur, value:String(!on)};
+            persistActiveSmartSettings();
+            renderDynamicParams();
+            scheduleSave();
+        };
+    });
+    dynamicParams.querySelectorAll('[data-rh-param]').forEach(input => {
+        input.onclick = event => event.stopPropagation();
+        input.oninput = input.onchange = event => {
+            event?.stopPropagation?.();
+            const key = input.dataset.rhParam;
+            settings.rhParams = settings.rhParams || {};
+            const cur = settings.rhParams[key] || {};
+            settings.rhParams[key] = {...cur, value:input.value};
+            persistActiveSmartSettings();
+            scheduleSave();
+        };
+    });
+    dynamicParams.querySelectorAll('[data-rh-pick]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const key = btn.dataset.rhPick;
+            const value = btn.dataset.rhValue;
+            settings.rhParams = settings.rhParams || {};
+            const cur = settings.rhParams[key] || {};
+            settings.rhParams[key] = {...cur, value};
+            const popover = btn.closest('.smart-popover');
+            const control = btn.closest('.smart-control');
+            const pillSub = control?.querySelector('.smart-pill .sub');
+            if(pillSub) pillSub.textContent = value;
+            if(popover){
+                popover.querySelectorAll('[data-rh-pick]').forEach(b => {
+                    if(b.dataset.rhPick === key) b.classList.toggle('active', b.dataset.rhValue === value);
+                });
+            }
+            closeAllSmartPopovers();
+            persistActiveSmartSettings();
+            scheduleSave();
+        };
+    });
+    dynamicParams.querySelectorAll('[data-rh-random]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleSmartRhRandom(btn.dataset.rhRandom);
+        };
+    });
 }
 async function loadConfig(){
     try {
@@ -1474,6 +1946,12 @@ async function loadConfig(){
         apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
         const wf = await fetch('/api/workflows').then(r => r.json()).catch(() => ({workflows:[]}));
         comfyWorkflows = Array.isArray(wf.workflows) ? wf.workflows : [];
+        runningHubWorkflowCache = {};
+        const rhProvider = apiProviders.find(p => p.id === 'runninghub');
+        const rhWorkflowIds = (rhProvider?.rh_workflows || []).map(item => String(item.workflowId || item.id || '').trim()).filter(Boolean);
+        await Promise.all(rhWorkflowIds.map(async workflowId => {
+            try { await ensureRunningHubWorkflow(workflowId); } catch(_) {}
+        }));
         lastConfigRefreshAt = Date.now();
         updateProviderModels();
     } catch(e) {
@@ -3048,6 +3526,22 @@ function handlePortDrop(drag, e){
     render();
     scheduleSave();
 }
+function pickMediaForSmartNode(nodeId){
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,video/*,audio/*';
+    input.multiple = true;
+    input.onchange = () => {
+        if(input.files?.length) handleFiles(input.files, nodeId);
+        input.remove();
+    };
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    input.style.top = '-9999px';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.click();
+}
 function bindNodeEvents(){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
@@ -3065,12 +3559,23 @@ function bindNodeEvents(){
             render();
         };
         el.ondblclick = e => e.stopPropagation();
-        el.querySelector('.node-drop')?.addEventListener('click', e => {
+        const nodeDrop = el.querySelector('.node-drop');
+        nodeDrop?.addEventListener('mousedown', e => {
+            if(e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+        }, true);
+        nodeDrop?.addEventListener('click', e => {
             e.preventDefault(); e.stopPropagation();
             hideRunTimerForNode(nodes.find(n => n.id === id));
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:'', index:-1};
+            pendingGroupUploadPoint = null;
             uploadTargetId = id;
-            render();
-            fileInput.click();
+            syncSelectionUi();
+            updateComposer();
+            pickMediaForSmartNode(id);
         });
         el.querySelectorAll('.node-delete').forEach(btn => {
             btn.addEventListener('click', e => {
@@ -3209,7 +3714,11 @@ function bindNodeEvents(){
         });
         el.onmousedown = beginNodeDrag;
         el.ondragover = e => { e.preventDefault(); };
-        el.ondrop = e => { e.preventDefault(); e.stopPropagation(); handleFiles(e.dataTransfer.files, id); };
+        el.ondrop = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadFilesFromDataTransfer(e.dataTransfer).then(files => handleFiles(files, id));
+        };
     });
 }
 function rectOverlapNode(draggedId, x, y, w, h, excludeIds=[]){
@@ -4493,6 +5002,33 @@ function isSupportedUploadFile(file){
     return type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/')
         || /\.(png|jpe?g|webp|gif|mp4|webm|mov|m4v|mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name);
 }
+function dataTransferItemEntry(item){
+    try { return item?.webkitGetAsEntry?.() || null; } catch { return null; }
+}
+async function filesFromEntry(entry){
+    if(!entry) return [];
+    if(entry.isFile){
+        return new Promise(resolve => entry.file(file => resolve(file ? [file] : []), () => resolve([])));
+    }
+    if(!entry.isDirectory) return [];
+    const reader = entry.createReader();
+    const children = [];
+    while(true){
+        const batch = await new Promise(resolve => reader.readEntries(resolve, () => resolve([])));
+        if(!batch.length) break;
+        children.push(...batch);
+    }
+    const nested = await Promise.all(children.map(filesFromEntry));
+    return nested.flat();
+}
+async function uploadFilesFromDataTransfer(dataTransfer){
+    const items = [...(dataTransfer?.items || [])];
+    const entries = items.map(dataTransferItemEntry).filter(Boolean);
+    const raw = entries.length
+        ? (await Promise.all(entries.map(filesFromEntry))).flat()
+        : [...(dataTransfer?.files || [])];
+    return raw.filter(isSupportedUploadFile);
+}
 function uploadTitleForItems(items, fallback='Upload'){
     const list = [...(items || [])];
     if(!list.length) return fallback;
@@ -4526,13 +5062,21 @@ async function handleFiles(files, targetId='', opts={}){
         let node = nodes.find(n => n.id === targetId) || selectedNode();
         if(node && node.type !== 'smart-image') node = null;
         if(!node){
-            const center = viewportCenter();
+            const center = opts.point || viewportCenter();
             undoSuppressed = true;
             node = createImageNodeAt(center, []);
             undoSuppressed = false;
         }
+        const previousCount = (node.images || []).length;
         node.images = [...(node.images || []), ...uploaded.map((file, index) => ({...file, kind:file.kind || mediaKindForFile(fileList[index])}))];
-        if(node.images.length > 1){ node.title = uploadTitleForItems(node.images, 'Group'); delete node.w; delete node.h; }
+        if(node.images.length > 1){
+            node.title = uploadTitleForItems(node.images, 'Group');
+            if(previousCount <= 1 && (!Number.isFinite(Number(node.scale)) || Number(node.scale) === MEDIA_NODE_DEFAULT_SCALE || Number(node.scale) === MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE)){
+                node.scale = MEDIA_GROUP_DEFAULT_SCALE;
+            }
+            delete node.w;
+            delete node.h;
+        }
         if(node.images.length === 1){ node.title = uploadTitleForItems(node.images, node.title || 'Image'); delete node.w; delete node.h; }
         selectedId = node.id;
         render();
@@ -4551,6 +5095,7 @@ function expectedOutputSize(){
         }
         return {w:1024, h:1024};
     }
+    if(settings.engine === 'runninghub') return {w:1024, h:1024};
     const sizeStr = settings.engine === 'modelscope'
         ? apiImageSize(settings.msRatio || 'square', settings.msResolution || '1k', settings.msCustomRatio || '', settings.msCustomSize || '')
         : sizeForRun();
@@ -5565,9 +6110,11 @@ async function generateUrlsForCurrentSettings(node, prompt, refs){
     if(settings.engine === 'api' && settings.apiKind === 'video'){
         return {urls:await runApiVideoGeneration(prompt, refs), kind:'video'};
     }
-    const urls = settings.engine === 'modelscope'
-        ? await runModelscopeGeneration(prompt, refs)
-        : await runApiGeneration(prompt, refs);
+    const urls = settings.engine === 'runninghub'
+        ? await runRunningHubGeneration(prompt, refs)
+        : settings.engine === 'modelscope'
+            ? await runModelscopeGeneration(prompt, refs)
+            : await runApiGeneration(prompt, refs);
     return {urls, kind:'image'};
 }
 async function runCascadeStepIntoNode(sourceNode, targetNode, inputRefs, ctx=smartLoopContext){
@@ -5752,10 +6299,12 @@ async function runGeneration(){
     const runLog = smartRunSnapshot(node, prompt, refs, logKind);
     rememberRecentSmartSettings(settings, node);
     const runLogStart = nowMs();
-    const expectedCount = settings.engine === 'comfy'
+    const expectedCount = settings.engine === 'runninghub'
+        ? 1
+        : settings.engine === 'comfy'
         ? (settings.comfyMode === 'text' || settings.comfyMode === 'enhance' || settings.comfyMode === 'edit' || settings.comfyMode === 'custom' ? 1 : 1)
         : Math.max(1, Math.min(8, Number(settings.count || 1)));
-    const apiConcurrentRun = settings.engine === 'api';
+    const apiConcurrentRun = settings.engine === 'api' || settings.engine === 'runninghub';
     const nodeHasImages = (node.images || []).some(img => img?.url);
     const sourceVisualState = nodeHasImages ? {
         images:(node.images || []).map(img => ({...img})),
@@ -5811,9 +6360,11 @@ async function runGeneration(){
             scheduleSave();
             return;
         }
-        const outImages = settings.engine === 'modelscope'
-            ? await runModelscopeGeneration(prompt, refs)
-            : await runApiGeneration(prompt, refs);
+        const outImages = settings.engine === 'runninghub'
+            ? await runRunningHubGeneration(prompt, refs)
+            : settings.engine === 'modelscope'
+                ? await runModelscopeGeneration(prompt, refs)
+                : await runApiGeneration(prompt, refs);
         if(!outImages.length) throw new Error(tr('smart.errNoOutImages'));
         if(outpaintSize) delete node.outpaintSize;
         finalizePendingNode(pendingNode, outImages, meta);
@@ -5906,6 +6457,47 @@ async function runApiGeneration(prompt, refs){
     const result = await pollTask(task.task_id);
     return (result?.images || []).filter(Boolean);
 }
+async function runRunningHubGeneration(prompt, refs){
+    const ref = selectedRunningHubRef();
+    if(!ref) throw new Error(tr('smart.rhNeedConfig'));
+    const fields = rhActiveFields();
+    if(!fields.length) throw new Error(tr('smart.rhNeedFields'));
+    smartRhRandomValues = {};
+    const mode = ref.kind;
+    const media = rhMediaForRun(prompt, refs);
+    const nodeInfoList = await rhBuildNodeInfoList(media);
+    const workflowExtras = mode === 'workflow' ? await rhBuildWorkflowRequestExtras(media, nodeInfoList) : {};
+    const endpoint = mode === 'workflow' ? '/api/runninghub/workflow-submit' : '/api/runninghub/submit';
+    const body = mode === 'workflow'
+        ? {workflowId:ref.id, nodeInfoList, useWallet:settings.rhPayment === 'wallet', ...workflowExtras}
+        : {webappId:ref.id, nodeInfoList, instanceType:settings.rhInstanceType || '', useWallet:settings.rhPayment === 'wallet'};
+    const submit = await fetch(endpoint, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body)
+    }).then(async r => {
+        const data = await r.json();
+        if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('smart.rhFailed'));
+        return data.data || data;
+    });
+    const taskId = submit.taskId;
+    if(!taskId) throw new Error(tr('smart.rhNoTaskId'));
+    for(let i = 0; i < 720; i++){
+        await sleep(2500);
+        const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
+            const json = await r.json();
+            if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('smart.rhFailed'));
+            return json.data || json;
+        });
+        if(data.status === 'SUCCESS'){
+            const urls = data.urls || [];
+            if(!urls.length) throw new Error(tr('smart.rhOutputsEmpty'));
+            return urls;
+        }
+        if(data.status === 'FAILED') throw new Error(data.failReason || tr('smart.rhFailed'));
+    }
+    throw new Error(tr('smart.rhTimeout'));
+}
 async function runApiVideoGeneration(prompt, refs){
     if(!settings.videoModel) throw new Error(tr('smart.errNoVideoModel'));
     const refImages = imageRefsOnly(refs).map((ref, i) => {
@@ -5980,6 +6572,7 @@ async function urlToBase64(url){
         reader.readAsDataURL(blob);
     });
 }
+function sleep(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
 async function runComfyGeneration(node, prompt, refs, pendingNode, meta){
     const allRefs = refs || [];
     refs = imageRefsOnly(allRefs);
@@ -6206,7 +6799,7 @@ function openCreateMenu(event){
     if(!createMenu) return;
     createMenuPoint = screenToWorld(event);
     const w = 420;
-    const h = 150;
+    const h = 286;
     const left = Math.max(14, Math.min(window.innerWidth - w - 14, event.clientX + 8));
     const top = Math.max(14, Math.min(window.innerHeight - h - 14, event.clientY + 8));
     createMenu.style.left = `${left}px`;
@@ -6571,7 +7164,7 @@ shell.addEventListener('wheel', e => {
     scheduleSave();
 }, {passive:false});
 shell.ondragover = e => e.preventDefault();
-shell.ondrop = e => {
+shell.ondrop = async e => {
     e.preventDefault();
     if(e.target.closest('.image-node')) return;
     const p = screenToWorld(e);
@@ -6583,8 +7176,8 @@ shell.ondrop = e => {
             return;
         } catch {}
     }
-    const node = createImageNodeAt(p);
-    handleFiles(e.dataTransfer.files, node.id, {skipUndo:true});
+    const files = await uploadFilesFromDataTransfer(e.dataTransfer);
+    handleFiles(files, '', {point:p});
 };
 window.addEventListener('paste', e => {
     const files = [...(e.clipboardData?.files || [])].filter(isSupportedUploadFile);
@@ -6702,7 +7295,15 @@ if(promptResize){
 runBtn.onclick = runGeneration;
 cascadeRunBtn.onclick = runSmartCascade;
 fileInput.onchange = () => {
-    handleFiles(fileInput.files, uploadTargetId || selectedId);
+    const groupPoint = pendingGroupUploadPoint;
+    if(!fileInput.files?.length){
+        pendingGroupUploadPoint = null;
+        uploadTargetId = '';
+        return;
+    }
+    const targetId = groupPoint ? '' : (uploadTargetId || selectedId);
+    handleFiles(fileInput.files, targetId, groupPoint ? {point:groupPoint} : {});
+    pendingGroupUploadPoint = null;
     uploadTargetId = '';
     fileInput.value = '';
 };

@@ -445,6 +445,10 @@ video.node-img { object-fit:cover; background:#0f172a; }
 .dynamic-params .muted-note { height:var(--ctrl-height); display:flex; align-items:center; padding:0 var(--ctrl-xpad); border-radius:999px; background:transparent; color:var(--faint); border:1px solid transparent; font-size:var(--ctrl-font); line-height:1; font-weight:400; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .smart-control { position:relative; flex:0 0 auto; min-width:0; }
 .model-control .smart-pill { max-width:110px; }
+.rh-config-control .smart-pill { max-width:150px; }
+.rh-dropdown-control .smart-pill { max-width:118px; }
+.rh-mini-summary { height:var(--ctrl-height); padding:0 9px; border-radius:999px; border:1px solid transparent; display:inline-flex; align-items:center; color:var(--faint); font-size:9.5px; font-weight:600; white-space:nowrap; }
+.num-compact.rh-text-param input { width:84px !important; text-align:left; }
 .resolution-control .smart-pill,.ratio-control .smart-pill,.aspect-control .smart-pill { max-width:none; }
 .resolution-control .smart-popover { min-width:240px; }
 .aspect-control .smart-popover { min-width:250px; }
