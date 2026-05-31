@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment & config
+API/.env
+.env
+
+# Runtime data
+data/
+output/
+assets/
+history.json
+logs/
+
+# Embedded Python
+python/
+python_embeded/
+
+# Workflow custom uploads
+workflows/custom/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+.sisyphus/
+问题截图/
+赞赏.png
