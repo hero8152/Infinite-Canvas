@@ -69,7 +69,7 @@ const RH_DEFAULT_BASE_URL = 'https://www.runninghub.cn';
 const EXAMPLE_BASE_URL = 'https://api.example.com/v1';
 const RH_DEFAULT_IMAGE_MODELS = ['/openapi/v2/text2image'];
 const JIMENG_DEFAULT_IMAGE_MODELS = ['jimeng-image-2k', 'jimeng-image-4k'];
-const JIMENG_DEFAULT_VIDEO_MODELS = ['jimeng-video-720p', 'jimeng-video-1080p', 'seedance2.0fast_vip', 'seedance2.0_vip'];
+const JIMENG_DEFAULT_VIDEO_MODELS = ['seedance2.0fast_vip', 'seedance2.0_vip', 'seedance2.0fast', 'seedance2.0'];
 const ONBOARDING_GUIDES = {
     modelscope:{
         titleKey:'api.msOnboardingTitle',

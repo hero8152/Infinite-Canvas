@@ -480,9 +480,23 @@ function providerVideoModels(providerId){
     const provider = apiProviders.find(p => p.id === providerId);
     return uniqueModels(provider?.video_models || []);
 }
+function normalizeVideoModel(model){
+    if(model === 'jimeng-video-720p' || model === 'jimeng-video-1080p') return 'seedance2.0';
+    return model || '';
+}
+function videoModelLabel(model){
+    const labels = {
+        'seedance2.0fast_vip':'Seedance 2.0 Fast VIP',
+        'seedance2.0_vip':'Seedance 2.0 VIP',
+        'seedance2.0fast':'Seedance 2.0 Fast',
+        'seedance2.0':'Seedance 2.0'
+    };
+    return labels[model] || model;
+}
 function sanitizeVideoNodeProviderModel(node){
     if(!node || node.type !== 'video') return;
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
+    node.model = normalizeVideoModel(node.model);
     const models = providerVideoModels(node.apiProvider);
     if(!models.length) node.model = '';
     else if(!models.includes(node.model)) node.model = models[0] || '';
@@ -492,8 +506,8 @@ function videoModelOptions(selectedModel, providerId){
     if(!models.length){
         return `<option value="" disabled selected>${tr('canvas.noModelsHint') || '暂无模型，请到 API 设置添加'}</option>`;
     }
-    const selected = selectedModel || models[0];
-    return uniqueModels([selected, ...models]).filter(Boolean).map(model => `<option value="${escapeHtml(model)}" ${model === selected ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
+    const selected = normalizeVideoModel(selectedModel) || models[0];
+    return uniqueModels([selected, ...models]).filter(Boolean).map(model => `<option value="${escapeHtml(model)}" ${model === selected ? 'selected' : ''}>${escapeHtml(videoModelLabel(model))}</option>`).join('');
 }
 function allImageModels(providerId){
     const providerModels = providerImageModels(providerId || managedProviderId);

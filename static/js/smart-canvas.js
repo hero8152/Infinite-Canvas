@@ -1164,6 +1164,19 @@ function providerVideoModels(providerId){
     const models = provider?.video_models || DEFAULT_VIDEO_MODELS;
     return [...new Set(models)];
 }
+function normalizeVideoModel(model){
+    if(model === 'jimeng-video-720p' || model === 'jimeng-video-1080p') return 'seedance2.0';
+    return model || '';
+}
+function videoModelLabel(model){
+    const labels = {
+        'seedance2.0fast_vip':'Seedance 2.0 Fast VIP',
+        'seedance2.0_vip':'Seedance 2.0 VIP',
+        'seedance2.0fast':'Seedance 2.0 Fast',
+        'seedance2.0':'Seedance 2.0'
+    };
+    return labels[model] || model;
+}
 function volcengineVideoModels(){
     const provider = (apiProviders || []).find(p => p.id === 'volcengine');
     return [...new Set(provider?.video_models || DEFAULT_VIDEO_MODELS)];
@@ -1182,11 +1195,11 @@ function renderVideoProviderControl(providers){
 }
 function renderVideoModelControl(models){
     return `<div class="smart-control model-control">
-        <button class="smart-pill" type="button"><i data-lucide="film"></i><span class="sub">${escapeHtml(settings.videoModel || tr('smart.model'))}</span></button>
+        <button class="smart-pill" type="button"><i data-lucide="film"></i><span class="sub">${escapeHtml(videoModelLabel(settings.videoModel) || tr('smart.model'))}</span></button>
         <div class="smart-popover compact-popover">
             <div class="smart-popover-title">${escapeHtml(tr('smart.videoModel'))}</div>
             <div class="model-list">
-                ${models.map(m => `<button type="button" class="direct-option ${m === settings.videoModel ? 'active' : ''}" data-smart-param="videoModel" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(m)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noVideoModel'))}</div>`}
+                ${models.map(m => `<button type="button" class="direct-option ${m === settings.videoModel ? 'active' : ''}" data-smart-param="videoModel" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(videoModelLabel(m))}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noVideoModel'))}</div>`}
             </div>
         </div>
     </div>`;
@@ -1347,6 +1360,7 @@ function renderApiVideoParams(){
     const providers = videoApiProviders();
     if(!settings.videoProvider || !providers.some(p => p.id === settings.videoProvider)) settings.videoProvider = providers[0]?.id || 'comfly';
     const models = providerVideoModels(settings.videoProvider);
+    settings.videoModel = normalizeVideoModel(settings.videoModel);
     if(!settings.videoModel || !models.includes(settings.videoModel)) settings.videoModel = models[0] || 'veo3-fast';
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}

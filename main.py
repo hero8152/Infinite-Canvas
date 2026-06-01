@@ -229,10 +229,10 @@ JIMENG_DEFAULT_IMAGE_MODELS = [
     "jimeng-image-4k",
 ]
 JIMENG_DEFAULT_VIDEO_MODELS = [
-    "jimeng-video-720p",
-    "jimeng-video-1080p",
     "seedance2.0fast_vip",
     "seedance2.0_vip",
+    "seedance2.0fast",
+    "seedance2.0",
 ]
 try:
     JIMENG_DEFAULT_POLL_SECONDS = max(1, min(3600, int(os.getenv("JIMENG_POLL_SECONDS", "900"))))
@@ -2970,6 +2970,8 @@ def jimeng_video_model_version(model):
     value = str(model or "").strip()
     low = value.lower()
     aliases = {
+        "jimeng-video-720p": "seedance2.0",
+        "jimeng-video-1080p": "seedance2.0",
         "seedance2.0fast_vip": "seedance2.0fast_vip",
         "seedance2.0_vip": "seedance2.0_vip",
         "seedance2.0fast": "seedance2.0fast",
@@ -3174,7 +3176,11 @@ async def generate_jimeng_video(payload: CanvasVideoRequest, provider):
     duration = jimeng_video_duration(payload.duration)
     temp_paths = []
     try:
-        if payload.multimodal or video_refs:
+        first_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "first_frame"), None)
+        last_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "last_frame"), None)
+        use_frames_mode = bool(first_frame and last_frame)
+        use_multimodal_mode = bool(payload.multimodal or video_refs or (len(image_refs) >= 2 and not use_frames_mode))
+        if use_multimodal_mode:
             image_paths = []
             video_paths = []
             for ref in image_refs:
@@ -3199,37 +3205,20 @@ async def generate_jimeng_video(payload: CanvasVideoRequest, provider):
                 args.append(f"--image={jimeng_cli_path_arg(image_path)}")
             for video_path in video_paths:
                 args.append(f"--video={jimeng_cli_path_arg(video_path)}")
-        elif len(image_refs) >= 2:
-            first_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "first_frame"), None)
-            last_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "last_frame"), None)
-            if first_frame and last_frame:
-                first_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(first_frame), "image")
-                temp_paths.extend(created)
-                last_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(last_frame), "image")
-                temp_paths.extend(created)
-                args = [
-                    "frames2video",
-                    f"--first={jimeng_cli_path_arg(first_path)}",
-                    f"--last={jimeng_cli_path_arg(last_path)}",
-                    f"--prompt={payload.prompt}",
-                    f"--duration={duration}",
-                    f"--poll={jimeng_poll_seconds()}",
-                ]
-                jimeng_append_model_resolution_args(args, payload, include_model=True)
-            else:
-                image_paths = []
-                for ref in image_refs:
-                    image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(ref), "image")
-                    temp_paths.extend(created)
-                    image_paths.append(image_path)
-                args = [
-                    "multiframe2video",
-                    f"--images={','.join(jimeng_cli_path_arg(path) for path in image_paths)}",
-                    f"--prompt={payload.prompt}",
-                    f"--duration={duration}",
-                    f"--poll={jimeng_poll_seconds()}",
-                ]
-                jimeng_append_model_resolution_args(args, payload, include_model=True)
+        elif use_frames_mode:
+            first_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(first_frame), "image")
+            temp_paths.extend(created)
+            last_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(last_frame), "image")
+            temp_paths.extend(created)
+            args = [
+                "frames2video",
+                f"--first={jimeng_cli_path_arg(first_path)}",
+                f"--last={jimeng_cli_path_arg(last_path)}",
+                f"--prompt={payload.prompt}",
+                f"--duration={duration}",
+                f"--poll={jimeng_poll_seconds()}",
+            ]
+            jimeng_append_model_resolution_args(args, payload, include_model=True)
         elif image_refs:
             image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(image_refs[0]), "image")
             temp_paths.extend(created)
@@ -3259,7 +3248,7 @@ async def generate_jimeng_video(payload: CanvasVideoRequest, provider):
                 f"--prompt={payload.prompt}",
                 f"--duration={duration}",
                 f"--ratio={payload.aspect_ratio or '16:9'}",
-                f"--video_resolution={jimeng_video_resolution(payload.model, payload.resolution)}",
+                f"--video_resolution={jimeng_video_resolution_arg(payload.model, payload.resolution)}",
                 f"--poll={jimeng_poll_seconds()}",
             ]
             model_version = jimeng_video_model_version(payload.model)
