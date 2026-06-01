@@ -6248,7 +6248,18 @@ def video_submit_url_candidates(provider, base_url):
         return [f"{base_url}/videos/generations" if base_url.endswith("/v1") else f"{base_url}/v1/videos/generations"]
     if is_volcengine_provider(provider):
         return [f"{base_url}/api/v3/contents/generations/tasks"]
-    return [f"{base_url}/v1/videos/generations", f"{base_url}/v2/videos/generations"]
+    return [
+        f"{base_url}/v1/videos/generations",
+        f"{base_url}/v1/video/generations",
+        f"{base_url}/v1/videos",
+        f"{base_url}/v2/videos/generations",
+    ]
+
+def video_submit_route_missing(response):
+    if response.status_code != 404:
+        return False
+    text = str(response.text or "").lower()
+    return "invalid url" in text or "not found" in text or looks_like_html_response(text)
 
 def video_task_url_candidates(provider, base_url, task_id, submit_url=""):
     if is_apimart_provider(provider):
@@ -6257,11 +6268,17 @@ def video_task_url_candidates(provider, base_url, task_id, submit_url=""):
     if is_volcengine_provider(provider):
         return [f"{base_url}/api/v3/contents/generations/tasks/{task_id}"]
     v1_task = f"{base_url}/v1/videos/generations/{task_id}"
+    v1_official_task = f"{base_url}/v1/videos/{task_id}"
+    v1_compat_task = f"{base_url}/v1/video/generations/{task_id}"
     v1_generic_task = f"{base_url}/v1/tasks/{task_id}"
     v2_task = f"{base_url}/v2/videos/generations/{task_id}"
     if "/v2/videos/generations" in str(submit_url or ""):
-        return [v2_task, v1_task, v1_generic_task]
-    return [v1_task, v1_generic_task, v2_task]
+        return [v2_task, v1_official_task, v1_task, v1_compat_task, v1_generic_task]
+    if "/v1/video/generations" in str(submit_url or ""):
+        return [v1_compat_task, v1_official_task, v1_task, v1_generic_task, v2_task]
+    if str(submit_url or "").endswith("/v1/videos"):
+        return [v1_official_task, v1_task, v1_compat_task, v1_generic_task, v2_task]
+    return [v1_official_task, v1_task, v1_compat_task, v1_generic_task, v2_task]
 
 VIDEO_TASK_SUCCESS_STATUSES = {
     "SUCCESS", "SUCCEED", "SUCCEEDED", "COMPLETED", "COMPLETE",
@@ -6550,6 +6567,8 @@ async def canvas_video(payload: CanvasVideoRequest):
                 submit_url = candidate_url
                 response = await client.post(submit_url, headers=api_headers(provider=provider), json=body)
                 last_response = response
+                if video_submit_route_missing(response):
+                    continue
                 response.raise_for_status()
                 try:
                     raw = response.json()
