@@ -214,8 +214,13 @@ let canvasPromptTemplates = [];
 let canvasPromptTemplatesLoaded = false;
 let canvasPromptLibraries = [];
 let activePromptLibraryId = 'system';
+const GPT_IMAGE_PROMPT_LIBRARY_ID = 'gpt-image-2';
+let gptImagePromptSyncing = false;
+let gptImagePromptSyncStatus = '';
+let canvasPromptGithubInstalling = false;
 const CANVAS_PROMPT_TEMPLATE_GROUPS_KEY = 'canvas_prompt_template_groups_v1';
 const CANVAS_PROMPT_TEMPLATE_OVERRIDES_KEY = 'canvas_prompt_template_overrides';
+const CANVAS_PROMPT_TEMPLATE_VIEW_KEY = 'canvas_prompt_template_view_modes_v1';
 let promptTemplateGroups = [];
 let promptTemplateGroupEditMode = false;
 let canvasPromptTemplateOverrides = {hiddenBuiltinIds:[], editedBuiltins:{}};
@@ -6020,18 +6025,7 @@ function activeCanvasPromptLibraryItems(){
             libraryId:'system',
             libraryName:'系统提示词库',
         }));
-    const remotes = canvasPromptLibraries
-        .filter(item => item.id !== 'system')
-        .flatMap(item => (item.items || [])
-            .filter(t => t?.id && t?.positive)
-            .map(t => ({
-                ...t,
-                sourceId:t.id,
-                remote:true,
-                builtin:false,
-                libraryId:item.id,
-                libraryName:item.name || '提示词库',
-            })));
+    const remotes = [];
     return [...builtins, ...remotes];
 }
 function refreshCanvasPromptTemplatesFromLibraries(){
@@ -6043,6 +6037,174 @@ function renderCanvasPromptLibrarySelect(){
     if(!promptTemplateLibrarySelect) return;
     promptTemplateLibrarySelect.innerHTML = canvasPromptLibraries.map(lib => `<option value="${escapeAttr(lib.id)}" ${lib.id === activePromptLibraryId ? 'selected' : ''}>${escapeHtml(lib.name || '提示词库')}</option>`).join('');
 }
+function isGptImagePromptLibrary(lib=activeCanvasPromptLibrary()){
+    return lib?.id === GPT_IMAGE_PROMPT_LIBRARY_ID;
+}
+function isRemoteCanvasPromptLibrary(lib=activeCanvasPromptLibrary()){
+    return isGptImagePromptLibrary(lib) || Boolean(lib?.remote || lib?.sync_url || lib?.source_url);
+}
+function canvasPromptTemplateViewModes(){
+    try {
+        const data = JSON.parse(localStorage.getItem(CANVAS_PROMPT_TEMPLATE_VIEW_KEY) || '{}');
+        return data && typeof data === 'object' ? data : {};
+    } catch(_) {
+        return {};
+    }
+}
+function canvasPromptTemplatePreferredView(lib=activeCanvasPromptLibrary(), items=[]){
+    const modes = canvasPromptTemplateViewModes();
+    if(modes[lib?.id]) return modes[lib.id] === 'list' ? 'list' : 'card';
+    return visualCanvasPromptTemplateActive(items) ? 'card' : 'list';
+}
+function setCanvasPromptTemplatePreferredView(mode){
+    const lib = activeCanvasPromptLibrary();
+    const modes = canvasPromptTemplateViewModes();
+    modes[lib.id || 'system'] = mode === 'card' ? 'card' : 'list';
+    localStorage.setItem(CANVAS_PROMPT_TEMPLATE_VIEW_KEY, JSON.stringify(modes));
+}
+function canvasPromptTemplateFavoriteCount(items=[]){
+    return (items || []).filter(item => item.favorite).length;
+}
+function canvasPromptTemplateLibraryCategories(){
+    const map = new Map();
+    const add = (id, name) => {
+        const key = String(id || '').trim();
+        if(!key || map.has(key)) return;
+        map.set(key, {id:key, name:String(name || key)});
+    };
+    const activeLibrary = activeCanvasPromptLibrary();
+    if(activeLibrary.id !== 'system'){
+        (activeLibrary.categories || []).forEach(cat => add(cat.id, cat.name));
+        canvasPromptTemplates.forEach(item => add(item.category || 'mine', item.category_name || item.category || 'mine'));
+        return [...map.values()];
+    }
+    promptTemplateGroups.forEach(group => add(group.id, canvasPromptTemplateCategoryLabel(group.id)));
+    canvasPromptLibraries.forEach(lib => (lib.categories || []).forEach(cat => add(cat.id, cat.name)));
+    canvasPromptTemplates.forEach(item => add(item.category || 'mine', item.category_name || item.category || 'mine'));
+    return [...map.values()];
+}
+function isVisualCanvasPromptTemplate(item){
+    return Boolean(item?.image_url || item?.thumbnail_url);
+}
+function visualCanvasPromptTemplateActive(items=[]){
+    return isGptImagePromptLibrary() || (items || []).some(isVisualCanvasPromptTemplate);
+}
+function canvasPromptTemplateDifficultyLabel(level){
+    const text = String(level || '').toLowerCase();
+    if(text === 'advanced') return 'ADVANCED';
+    if(text === 'intermediate') return 'INTERMEDIATE';
+    return 'BEGINNER';
+}
+function canvasPromptTemplateMotionLabel(value){
+    return String(value || 'static').toUpperCase();
+}
+function canvasPromptTemplateVisualSummary(item){
+    return String(canvasPromptTemplateScene(item) || item?.positive || '').replace(/\s+/g, ' ').trim();
+}
+function renderCanvasPromptTemplateSyncTool(activeLibrary){
+    if(!isRemoteCanvasPromptLibrary(activeLibrary)) return '';
+    const count = Number(activeLibrary?.items?.length || 0);
+    const status = gptImagePromptSyncStatus || (count ? `已缓存 ${count} 条` : '点击同步 GitHub');
+    return `<button type="button" class="prompt-template-sync-btn" data-gpt-image-sync ${gptImagePromptSyncing ? 'disabled' : ''}>
+        <i data-lucide="${gptImagePromptSyncing ? 'loader-2' : 'refresh-cw'}"></i>
+        <span>${escapeHtml(gptImagePromptSyncing ? '同步中' : '同步 GitHub')}</span>
+        <small>${escapeHtml(status)}</small>
+    </button>`;
+}
+function renderCanvasPromptTemplateViewSwitch(mode){
+    return `<div class="prompt-template-view-switch" role="group" aria-label="提示词视图">
+        <button type="button" class="${mode === 'list' ? 'active' : ''}" data-template-view="list"><i data-lucide="list"></i><span>列表</span></button>
+        <button type="button" class="${mode === 'card' ? 'active' : ''}" data-template-view="card"><i data-lucide="layout-grid"></i><span>卡片</span></button>
+    </div>`;
+}
+function renderCanvasPromptTemplateLibraryTools(mode){
+    return `<div class="prompt-template-library-tools">
+        <button type="button" class="prompt-template-github-btn" data-template-github-install ${canvasPromptGithubInstalling ? 'disabled' : ''}><i data-lucide="${canvasPromptGithubInstalling ? 'loader-2' : 'github'}"></i><span>${canvasPromptGithubInstalling ? '安装中' : '添加 GitHub 库'}</span></button>
+        ${renderCanvasPromptTemplateViewSwitch(mode)}
+    </div>`;
+}
+function renderVisualCanvasPromptTemplateCard(item, selected){
+    const image = item.thumbnail_url || item.image_url || '';
+    const tags = Array.isArray(item.tags) ? item.tags.slice(0, 3) : [];
+    const source = item.author || item.source_name || 'GPT Image 2';
+    const summary = canvasPromptTemplateVisualSummary(item);
+    return `<article class="prompt-template-visual-card ${item.id === selected?.id ? 'active' : ''}" data-template-id="${escapeAttr(item.id)}">
+        <div class="prompt-template-visual-thumb">
+            ${image ? `<img src="${escapeAttr(image)}" alt="${escapeAttr(canvasPromptTemplateName(item) || 'prompt preview')}" loading="lazy">` : `<div class="prompt-template-visual-placeholder"><i data-lucide="image"></i></div>`}
+            <span class="prompt-template-kind-badge">IMAGE</span>
+            ${source ? `<span class="prompt-template-author-badge">${escapeHtml(source)}</span>` : ''}
+        </div>
+        <div class="prompt-template-visual-main">
+            <div class="prompt-template-visual-badges">
+                <span>${escapeHtml(canvasPromptTemplateMotionLabel(item.motion))}</span>
+                <span class="difficulty-${escapeAttr(String(item.difficulty || 'beginner').toLowerCase())}">${escapeHtml(canvasPromptTemplateDifficultyLabel(item.difficulty))}</span>
+                <span>${escapeHtml(canvasPromptTemplateCategoryLabel(item.category || ''))}</span>
+            </div>
+            <h3>${escapeHtml(canvasPromptTemplateName(item) || 'Untitled Prompt')}</h3>
+            <p>${escapeHtml(summary)}</p>
+            <div class="prompt-template-visual-footer">
+                <div class="prompt-template-visual-tags">${tags.map(tag => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
+                <div class="prompt-template-visual-actions">
+                    <button type="button" class="${item.favorite ? 'active favorite' : 'favorite'}" data-template-favorite="${escapeAttr(item.id)}"><i data-lucide="heart"></i><span>收藏</span></button>
+                    <button type="button" data-template-copy="${escapeAttr(item.id)}"><i data-lucide="copy"></i><span>复制</span></button>
+                    <button type="button" class="primary" data-template-apply="positive" data-template-id="${escapeAttr(item.id)}"><i data-lucide="corner-down-left"></i><span>使用</span></button>
+                </div>
+            </div>
+        </div>
+    </article>`;
+}
+function renderCanvasPromptTemplateDetail(selected, editMode=false, canCreateCurrentLibrary=false){
+    if(!selected) return `<div class="prompt-template-empty">${escapeHtml(tr('smart.tplPickOrCreate'))}</div>`;
+    return `
+        <div class="prompt-template-detail-head">
+            <div>
+                <strong>${escapeHtml(canvasPromptTemplateName(selected) || '')}</strong>
+                <span>${escapeHtml(canvasPromptTemplateCategoryLabel(selected.category || ''))} · ${escapeHtml(selected.author || selected.source_name || selected.libraryName || (selected.builtin ? tr('smart.tplBuiltinTemplate') : tr('smart.tplMineTemplate')))}</span>
+            </div>
+            ${editMode ? '' : `
+                <div class="prompt-template-icon-actions">
+                    <button type="button" class="${selected.favorite ? 'active favorite' : 'favorite'}" data-template-favorite="${escapeAttr(selected.id)}" title="收藏"><i data-lucide="heart"></i><span>收藏</span></button>
+                    <button type="button" ${selected?.builtin || !canCreateCurrentLibrary ? 'disabled' : ''} data-template-edit title="${escapeAttr(tr('smart.tplEditTemplate'))}"><i data-lucide="pencil"></i><span>${escapeHtml(tr('common.edit'))}</span></button>
+                    <button type="button" ${selected?.builtin || !canCreateCurrentLibrary ? 'disabled' : ''} class="danger" data-template-delete title="${escapeAttr(tr('smart.tplDeleteTemplate'))}"><i data-lucide="trash-2"></i><span>${escapeHtml(tr('common.delete'))}</span></button>
+                </div>
+            `}
+        </div>
+        ${editMode ? `
+            <div class="prompt-template-edit-fields">
+                <label>${escapeHtml(tr('smart.tplName'))}</label>
+                <input data-template-edit-name value="${escapeAttr(canvasPromptTemplateName(selected) || '')}" placeholder="${escapeAttr(tr('smart.tplName'))}">
+                <label>${escapeHtml(tr('smart.tplGroup'))}</label>
+                <select data-template-edit-category>
+                    ${promptTemplateGroups.map(group => `<option value="${escapeAttr(group.id)}" ${group.id === (selected.category || 'mine') ? 'selected' : ''}>${escapeHtml(canvasPromptTemplateCategoryLabel(group.id))}</option>`).join('')}
+                </select>
+                <label>${escapeHtml(tr('smart.tplContent'))}</label>
+                <textarea data-template-edit-text placeholder="${escapeAttr(tr('smart.tplContent'))}">${escapeHtml(selected.positive || '')}</textarea>
+            </div>
+        ` : `
+            <div class="prompt-template-preview-content">
+                ${selected.image_url || selected.thumbnail_url ? `<div class="prompt-template-detail-media"><img src="${escapeAttr(selected.thumbnail_url || selected.image_url)}" alt="${escapeAttr(canvasPromptTemplateName(selected) || '')}" loading="lazy"></div>` : ''}
+                ${selected.source_url || selected.github_url ? `<div class="prompt-template-section"><label>来源</label><p>${escapeHtml(selected.source_url || selected.github_url)}</p></div>` : ''}
+                <div class="prompt-template-section">
+                    <label>${escapeHtml(tr('smart.tplPositive'))}</label>
+                    <p>${escapeHtml(selected.positive || '')}</p>
+                </div>
+                ${selected.negative ? `<div class="prompt-template-section"><label>${escapeHtml(tr('smart.tplNegative'))}</label><p>${escapeHtml(selected.negative)}</p></div>` : ''}
+                ${Object.keys(selected.params || {}).length ? `<div class="prompt-template-section"><label>${escapeHtml(tr('smart.tplParams'))}</label><p>${escapeHtml(Object.entries(selected.params).map(([k,v]) => `${k}: ${v}`).join('\n'))}</p></div>` : ''}
+            </div>
+        `}
+        <div class="prompt-template-actions">
+            ${editMode ? `
+                <button type="button" data-template-edit-cancel><i data-lucide="x"></i><span>${escapeHtml(tr('common.cancel'))}</span></button>
+                <button type="button" class="danger" data-template-delete><i data-lucide="trash-2"></i><span>${escapeHtml(tr('common.delete'))}</span></button>
+                <button type="button" class="primary" data-template-edit-save><i data-lucide="save"></i><span>${escapeHtml(tr('common.save'))}</span></button>
+            ` : `
+                <button type="button" data-template-copy="${escapeAttr(selected.id)}"><i data-lucide="copy"></i><span>复制</span></button>
+                <button type="button" data-template-apply="positive" data-template-id="${escapeAttr(selected.id)}"><i data-lucide="corner-down-left"></i><span>${escapeHtml(tr('smart.tplApplyPositive'))}</span></button>
+                <button type="button" class="primary" data-template-apply="full" data-template-id="${escapeAttr(selected.id)}"><i data-lucide="wand-sparkles"></i><span>${escapeHtml(tr('smart.tplApplyFull'))}</span></button>
+            `}
+        </div>
+    `;
+}
 function canvasPromptTemplateCategoryLabel(category){
     if(category === 'all') return tr('smart.tplAll');
     const builtin = {
@@ -6053,7 +6215,12 @@ function canvasPromptTemplateCategoryLabel(category){
         lighting:tr('smart.tplCatLighting'),
         mine:tr('smart.tplCatMine')
     };
-    return builtin[category] || promptTemplateGroups.find(g => g.id === category)?.name || category || '';
+    if(builtin[category]) return builtin[category];
+    for(const lib of canvasPromptLibraries){
+        const found = (lib.categories || []).find(cat => cat.id === category);
+        if(found?.name) return found.name;
+    }
+    return promptTemplateGroups.find(g => g.id === category)?.name || category || '';
 }
 function canvasPromptTemplateName(template){
     if(langIsEn() && template?.name_en) return template.name_en;
@@ -6086,7 +6253,8 @@ function canvasPromptTemplateSearchText(template){
 function canvasPromptTemplateVisibleItems(){
     const query = String(promptTemplateSearch?.value || promptTemplateQuery || '').trim().toLowerCase();
     return canvasPromptTemplates.filter(item => {
-        if(promptTemplateCategory !== 'all' && item.category !== promptTemplateCategory) return false;
+        if(promptTemplateCategory === 'favorite' && !item.favorite) return false;
+        if(promptTemplateCategory !== 'all' && promptTemplateCategory !== 'favorite' && item.category !== promptTemplateCategory) return false;
         if(!query) return true;
         return canvasPromptTemplateSearchText(item).includes(query);
     });
@@ -6112,6 +6280,90 @@ function canvasPromptTemplateDefaultName(text){
 }
 function selectedCanvasPromptTemplate(){
     return canvasPromptTemplates.find(item => item.id === promptTemplateSelectedId) || canvasPromptTemplates[0] || null;
+}
+async function copyCanvasPromptTemplateById(id){
+    const template = canvasPromptTemplates.find(item => item.id === id) || selectedCanvasPromptTemplate();
+    const text = canvasPromptTemplateText(template, 'positive');
+    if(!text) return;
+    const ok = await copyTextToClipboard(text);
+    setStatus(ok ? '已复制提示词' : '复制失败');
+}
+async function syncGptImagePromptLibrary(){
+    if(gptImagePromptSyncing) return;
+    const library = activeCanvasPromptLibrary();
+    gptImagePromptSyncing = true;
+    gptImagePromptSyncStatus = '正在同步 GitHub';
+    renderPromptTemplateModal();
+    try {
+        const endpoint = library.id === GPT_IMAGE_PROMPT_LIBRARY_ID
+            ? '/api/gpt-image-prompts/sync'
+            : `/api/prompt-libraries/${encodeURIComponent(library.id)}/sync`;
+        const res = await fetch(endpoint, {method:'POST'});
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || '同步失败');
+        canvasPromptTemplatesLoaded = false;
+        await loadCanvasPromptTemplates();
+        activePromptLibraryId = data.prompt_library?.id || library.id || GPT_IMAGE_PROMPT_LIBRARY_ID;
+        canvasPromptTemplates = activeCanvasPromptLibraryItems();
+        promptTemplateSelectedId = data.prompt_library?.items?.[0]?.id || data.library?.items?.[0]?.id || '';
+        const count = data.prompt_library?.items?.length || data.count || 0;
+        gptImagePromptSyncStatus = `已同步 ${count} 条`;
+        setStatus(gptImagePromptSyncStatus);
+    } catch(err) {
+        gptImagePromptSyncStatus = err.message || '同步失败';
+        setStatus(gptImagePromptSyncStatus);
+    } finally {
+        gptImagePromptSyncing = false;
+        renderPromptTemplateModal();
+    }
+}
+async function toggleCanvasPromptTemplateFavorite(itemId){
+    const library = activeCanvasPromptLibrary();
+    const item = canvasPromptTemplates.find(template => template.id === itemId) || selectedCanvasPromptTemplate();
+    if(!item) return;
+    try {
+        const res = await fetch('/api/prompt-libraries/favorites', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({library_id:item.libraryId || library.id, item_id:item.id, favorite:!item.favorite})
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || '收藏失败');
+        canvasPromptLibraries = Array.isArray(data.library?.libraries) ? data.library.libraries : canvasPromptLibraries;
+        canvasPromptTemplates = activeCanvasPromptLibraryItems();
+        promptTemplateSelectedId = item.id;
+        setStatus(!item.favorite ? '已收藏' : '已取消收藏');
+        renderPromptTemplateModal();
+    } catch(err) {
+        setStatus(err.message || '收藏失败');
+    }
+}
+async function installCanvasGithubPromptLibrary(){
+    if(canvasPromptGithubInstalling) return;
+    const url = window.prompt('输入 GitHub 提示词库地址', 'https://github.com/EvoLinkAI/awesome-gpt-image-2-API-and-Prompts');
+    if(!String(url || '').trim()) return;
+    canvasPromptGithubInstalling = true;
+    renderPromptTemplateModal();
+    try {
+        const res = await fetch('/api/prompt-libraries/github/install', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({url:String(url).trim()})
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || '安装失败');
+        canvasPromptLibraries = Array.isArray(data.library?.libraries) ? data.library.libraries : canvasPromptLibraries;
+        activePromptLibraryId = data.prompt_library?.id || activePromptLibraryId;
+        canvasPromptTemplates = activeCanvasPromptLibraryItems();
+        promptTemplateCategory = 'all';
+        promptTemplateSelectedId = data.prompt_library?.items?.[0]?.id || '';
+        setStatus(`已安装 ${data.prompt_library?.items?.length || 0} 条提示词`);
+    } catch(err) {
+        setStatus(err.message || '安装 GitHub 库失败');
+    } finally {
+        canvasPromptGithubInstalling = false;
+        renderPromptTemplateModal();
+    }
 }
 function syncCanvasPromptTemplateMutation(data, fallbackSelectedId=''){
     canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
@@ -6299,13 +6551,16 @@ function renderPromptTemplateModal(){
     canvasPromptTemplates = activeCanvasPromptLibraryItems();
     renderCanvasPromptLibrarySelect();
     const scrollSnapshot = promptTemplateScrollSnapshot();
-    const categories = [{id:'all', name:tr('smart.tplAll')}, ...promptTemplateGroups.map(group => ({...group, name:canvasPromptTemplateCategoryLabel(group.id)}))];
+    const activeLibrary = activeCanvasPromptLibrary();
+    const viewMode = canvasPromptTemplatePreferredView(activeLibrary, canvasPromptTemplates);
+    const categories = [{id:'all', name:tr('smart.tplAll')}, {id:'favorite', name:'收藏'}, ...canvasPromptTemplateLibraryCategories()];
     const counts = canvasPromptTemplates.reduce((map, item) => {
         const category = item.category || 'mine';
         map[category] = (map[category] || 0) + 1;
+        if(item.favorite) map.favorite += 1;
         map.all += 1;
         return map;
-    }, {all:0});
+    }, {all:0, favorite:canvasPromptTemplateFavoriteCount(canvasPromptTemplates)});
     promptTemplateCats.innerHTML = promptTemplateGroupEditMode ? `
         <div class="prompt-template-group-panel">
             <div class="prompt-template-group-title">
@@ -6342,6 +6597,7 @@ function renderPromptTemplateModal(){
                 `).join('')}
             </div>
             <button type="button" class="prompt-template-manage-groups" data-template-group-edit><i data-lucide="settings-2"></i><span>${escapeHtml(tr('smart.tplManageGroups'))}</span></button>
+            ${renderCanvasPromptTemplateLibraryTools(viewMode)}
         </div>
     `;
     const items = canvasPromptTemplateVisibleItems();
@@ -6349,6 +6605,27 @@ function renderPromptTemplateModal(){
     const selected = items.find(item => item.id === promptTemplateSelectedId) || items[0] || null;
     const canCreateCurrentLibrary = currentCanvasPromptTemplateLibraryEditable();
     const editMode = Boolean(promptTemplateEditing && selected);
+    const cardMode = viewMode === 'card' && !editMode;
+    promptTemplatePanel.classList.toggle('visual-library', cardMode);
+    promptTemplateBody.classList.toggle('visual-library', cardMode);
+    if(cardMode){
+        promptTemplateBody.innerHTML = `
+            <div class="prompt-template-visual-layout">
+                <div class="prompt-template-visual-shell">
+                    <div class="prompt-template-list-tools prompt-template-visual-tools">
+                        ${renderCanvasPromptTemplateSyncTool(activeLibrary)}
+                        <button type="button" ${canCreateCurrentLibrary ? '' : 'disabled'} data-template-save-current><i data-lucide="bookmark-plus"></i><span>${escapeHtml(tr('smart.tplSaveCurrent'))}</span></button>
+                        <button type="button" ${canCreateCurrentLibrary ? '' : 'disabled'} data-template-new><i data-lucide="file-plus-2"></i><span>${escapeHtml(tr('smart.tplNewTemplate'))}</span></button>
+                    </div>
+                    ${items.length ? `<div class="prompt-template-visual-grid">${items.map(item => renderVisualCanvasPromptTemplateCard(item, selected)).join('')}</div>` : `<div class="prompt-template-list-empty">${escapeHtml(tr('smart.tplNoMatches'))}</div>`}
+                </div>
+                <div class="prompt-template-detail prompt-template-visual-side-detail">${renderCanvasPromptTemplateDetail(selected, false, canCreateCurrentLibrary)}</div>
+            </div>
+        `;
+        refreshIcons();
+        restorePromptTemplateScroll(scrollSnapshot);
+        return;
+    }
     promptTemplateBody.innerHTML = `
         <div class="prompt-template-list">
             <div class="prompt-template-list-tools">
@@ -6364,53 +6641,7 @@ function renderPromptTemplateModal(){
                 <span class="prompt-template-tag">${escapeHtml(canvasPromptTemplateCategoryLabel(item.category || 'mine'))}</span>
             </button>`).join('') : `<div class="prompt-template-list-empty">${escapeHtml(tr('smart.tplNoMatches'))}</div>`}
         </div>
-        <div class="prompt-template-detail">
-            ${selected ? `
-                <div class="prompt-template-detail-head">
-                    <div>
-                        <strong>${escapeHtml(canvasPromptTemplateName(selected) || '')}</strong>
-                        <span>${escapeHtml(canvasPromptTemplateCategoryLabel(selected.category || ''))} · ${escapeHtml(selected.builtin ? tr('smart.tplBuiltinTemplate') : tr('smart.tplMineTemplate'))}</span>
-                    </div>
-                    ${editMode ? '' : `
-                        <div class="prompt-template-icon-actions">
-                            <button type="button" data-template-edit title="${escapeAttr(tr('smart.tplEditTemplate'))}"><i data-lucide="pencil"></i><span>${escapeHtml(tr('common.edit'))}</span></button>
-                            <button type="button" class="danger" data-template-delete title="${escapeAttr(tr('smart.tplDeleteTemplate'))}"><i data-lucide="trash-2"></i><span>${escapeHtml(tr('common.delete'))}</span></button>
-                        </div>
-                    `}
-                </div>
-            ${editMode ? `
-                <div class="prompt-template-edit-fields">
-                    <label>${escapeHtml(tr('smart.tplName'))}</label>
-                    <input data-template-edit-name value="${escapeAttr(canvasPromptTemplateName(selected) || '')}" placeholder="${escapeAttr(tr('smart.tplName'))}">
-                    <label>${escapeHtml(tr('smart.tplGroup'))}</label>
-                    <select data-template-edit-category>
-                        ${promptTemplateGroups.map(group => `<option value="${escapeAttr(group.id)}" ${group.id === (selected.category || 'mine') ? 'selected' : ''}>${escapeHtml(canvasPromptTemplateCategoryLabel(group.id))}</option>`).join('')}
-                    </select>
-                    <label>${escapeHtml(tr('smart.tplContent'))}</label>
-                    <textarea data-template-edit-text placeholder="${escapeAttr(tr('smart.tplContent'))}">${escapeHtml(selected.positive || '')}</textarea>
-                </div>
-            ` : `
-                <div class="prompt-template-preview-content">
-                    <div class="prompt-template-section">
-                        <label>${escapeHtml(tr('smart.tplPositive'))}</label>
-                        <p>${escapeHtml(selected.positive || '')}</p>
-                    </div>
-                    ${selected.negative ? `<div class="prompt-template-section"><label>${escapeHtml(tr('smart.tplNegative'))}</label><p>${escapeHtml(selected.negative)}</p></div>` : ''}
-                    ${Object.keys(selected.params || {}).length ? `<div class="prompt-template-section"><label>${escapeHtml(tr('smart.tplParams'))}</label><p>${escapeHtml(Object.entries(selected.params).map(([k,v]) => `${k}: ${v}`).join('\n'))}</p></div>` : ''}
-                </div>
-            `}
-            <div class="prompt-template-actions">
-                ${editMode ? `
-                    <button type="button" data-template-edit-cancel><i data-lucide="x"></i><span>${escapeHtml(tr('common.cancel'))}</span></button>
-                    <button type="button" class="danger" data-template-delete><i data-lucide="trash-2"></i><span>${escapeHtml(tr('common.delete'))}</span></button>
-                    <button type="button" class="primary" data-template-edit-save><i data-lucide="save"></i><span>${escapeHtml(tr('common.save'))}</span></button>
-                ` : `
-                    <button type="button" data-template-apply="positive"><i data-lucide="corner-down-left"></i><span>${escapeHtml(tr('smart.tplApplyPositive'))}</span></button>
-                    <button type="button" class="primary" data-template-apply="full"><i data-lucide="wand-sparkles"></i><span>${escapeHtml(tr('smart.tplApplyFull'))}</span></button>
-                `}
-            </div>
-            ` : `<div class="prompt-template-empty">${escapeHtml(tr('smart.tplPickOrCreate'))}</div>`}
-        </div>
+        <div class="prompt-template-detail">${renderCanvasPromptTemplateDetail(selected, editMode, canCreateCurrentLibrary)}</div>
     `;
     refreshIcons();
     restorePromptTemplateScroll(scrollSnapshot);
@@ -11078,8 +11309,35 @@ promptTemplatePanel?.addEventListener('mousedown', e => e.stopPropagation());
 promptTemplatePanel?.addEventListener('wheel', e => e.stopPropagation(), {passive:false});
 promptTemplatePanel?.addEventListener('click', event => {
     event.stopPropagation();
+    if(event.target.closest('[data-gpt-image-sync]')){ syncGptImagePromptLibrary(); return; }
+    if(event.target.closest('[data-template-github-install]')){ installCanvasGithubPromptLibrary(); return; }
+    const view = event.target.closest('[data-template-view]');
+    if(view){
+        setCanvasPromptTemplatePreferredView(view.dataset.templateView || 'list');
+        renderPromptTemplateModal();
+        return;
+    }
+    const favorite = event.target.closest('[data-template-favorite]');
+    if(favorite){
+        toggleCanvasPromptTemplateFavorite(favorite.dataset.templateFavorite || promptTemplateSelectedId);
+        return;
+    }
+    const detail = event.target.closest('[data-template-detail]');
+    if(detail){
+        promptTemplateSelectedId = detail.dataset.templateDetail || promptTemplateSelectedId;
+        renderPromptTemplateModal();
+        return;
+    }
+    const copy = event.target.closest('[data-template-copy]');
+    if(copy){
+        promptTemplateSelectedId = copy.dataset.templateCopy || promptTemplateSelectedId;
+        copyCanvasPromptTemplateById(promptTemplateSelectedId);
+        renderPromptTemplateModal();
+        return;
+    }
     const apply = event.target.closest('[data-template-apply],[data-prompt-template-apply]');
     if(apply){
+        promptTemplateSelectedId = apply.dataset.templateId || promptTemplateSelectedId;
         applyPromptTemplateToPromptNode(apply.dataset.templateApply || apply.dataset.promptTemplateApply || 'positive');
         return;
     }
