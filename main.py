@@ -205,6 +205,7 @@ CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
 CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
 ASSET_LIBRARY_PATH = os.path.join(DATA_DIR, "asset_library.json")
 PROMPT_LIBRARY_PATH = os.path.join(DATA_DIR, "prompt_libraries.json")
+GPT_IMAGE_PROMPTS_PATH = os.path.join(DATA_DIR, "gpt_image_prompts.json")
 API_PROVIDERS_FILE = os.path.join(DATA_DIR, "api_providers.json")
 RUNNINGHUB_WORKFLOW_STORE_FILE = os.path.join(DATA_DIR, "runninghub_workflows.json")
 GLOBAL_CONFIG_FILE = os.path.join(BASE_DIR, "global_config.json")
@@ -229,6 +230,7 @@ JIMENG_LOGIN_SESSION = {
     "stderr": "",
     "started_at": 0.0,
 }
+GPT_IMAGE_PROMPT_SYNC_LOCK = Lock()
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
 SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng"}
@@ -1281,6 +1283,19 @@ def static_html_response(filename: str):
 
 STATIC_PROMPT_TEMPLATE_MD = os.path.join(STATIC_DIR, "system-prompts", "infinite-canvas-prompt-templates.md")
 PROMPT_TEMPLATE_PATHS = [STATIC_PROMPT_TEMPLATE_MD]
+GPT_IMAGE_PROMPT_REPO_URL = "https://github.com/EvoLinkAI/awesome-gpt-image-2-API-and-Prompts"
+GPT_IMAGE_PROMPT_RAW_ROOT = "https://raw.githubusercontent.com/EvoLinkAI/awesome-gpt-image-2-API-and-Prompts/main"
+GPT_IMAGE_PROMPT_LIBRARY_ID = "gpt-image-2"
+GPT_IMAGE_PROMPT_CASE_SLUGS = ("ecommerce", "ad-creative", "portrait", "poster", "character", "ui", "comparison")
+GPT_IMAGE_PROMPT_CATEGORY_META = {
+    "ecommerce": {"id": "gpt_image_ecommerce", "name": "电商案例", "tags": ["e-commerce", "product"]},
+    "ad-creative": {"id": "gpt_image_ad_creative", "name": "广告创意", "tags": ["ad creative", "marketing"]},
+    "portrait": {"id": "gpt_image_portrait", "name": "人像摄影", "tags": ["portrait", "photography"]},
+    "poster": {"id": "gpt_image_poster", "name": "海报与插画", "tags": ["poster", "illustration"]},
+    "character": {"id": "gpt_image_character", "name": "角色设计", "tags": ["character design", "concept art"]},
+    "ui": {"id": "gpt_image_ui", "name": "UI 与社媒", "tags": ["ui", "social media"]},
+    "comparison": {"id": "gpt_image_comparison", "name": "对比案例", "tags": ["comparison", "community"]},
+}
 PROMPT_TEMPLATE_EN = {
     "多机位九宫格": {
         "name": "9-Angle Multi-Camera Grid",
@@ -1385,6 +1400,390 @@ def parse_prompt_template_markdown(text: str):
             "builtin": True,
         })
     return templates
+
+def gpt_image_prompt_case_slug(source_path: str) -> str:
+    name = os.path.basename(str(source_path or "")).strip()
+    name = re.sub(r"\.md$", "", name, flags=re.I)
+    name = re.sub(r"_(?:zh-CN|zh-TW|ja|ko|de|es|fr|pt|ru|tr)$", "", name, flags=re.I)
+    return name or "case"
+
+def gpt_image_prompt_category(source_path: str) -> Dict[str, Any]:
+    slug = gpt_image_prompt_case_slug(source_path)
+    meta = GPT_IMAGE_PROMPT_CATEGORY_META.get(slug)
+    if meta:
+        return meta
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", slug).strip("_") or "case"
+    return {"id": f"gpt_image_{safe}", "name": slug, "tags": [slug]}
+
+def gpt_image_prompt_categories() -> List[Dict[str, str]]:
+    return [{"id": meta["id"], "name": meta["name"]} for meta in GPT_IMAGE_PROMPT_CATEGORY_META.values()]
+
+def gpt_image_prompt_difficulty(prompt: str) -> str:
+    length = len(str(prompt or "").strip())
+    if length < 260:
+        return "beginner"
+    if length < 900:
+        return "intermediate"
+    return "advanced"
+
+def gpt_image_prompt_tags(title: str, prompt: str, category_meta: Dict[str, Any]) -> List[str]:
+    tags = []
+    for tag in category_meta.get("tags") or []:
+        if tag and tag not in tags:
+            tags.append(tag)
+    text = f"{title} {prompt}".lower()
+    for phrase in ("travel poster", "character sheet", "ad creative", "portrait", "ui", "poster", "e-commerce", "social media"):
+        if phrase in text and phrase not in tags:
+            tags.append(phrase)
+    return tags[:6]
+
+def gpt_image_prompt_summary(prompt: str, limit: int = 220) -> str:
+    text = re.sub(r"\s+", " ", str(prompt or "")).strip()
+    return text[:limit].rstrip() + ("..." if len(text) > limit else "")
+
+def parse_gpt_image_prompt_cases(markdown: str, source_path: str) -> List[Dict[str, Any]]:
+    category_meta = gpt_image_prompt_category(source_path)
+    category_slug = gpt_image_prompt_case_slug(source_path)
+    id_slug = re.sub(r"[^A-Za-z0-9]+", "_", category_slug).strip("_") or "case"
+    headers = list(re.finditer(
+        r"^###\s*Case\s+(\d+):\s*\[(?P<title>[^\]]+)\]\((?P<source>[^)]+)\)\s*(?:\(by\s+\[(?P<author>[^\]]+)\]\((?P<author_url>[^)]+)\)\))?",
+        str(markdown or ""),
+        re.M,
+    ))
+    items = []
+    for index, match in enumerate(headers):
+        start = match.end()
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(markdown)
+        block = markdown[start:end]
+        image_match = re.search(r"<img[^>]+src=[\"'](?P<src>[^\"']+)[\"']", block, re.I)
+        prompt_match = re.search(r"\*\*(?:提示词|Prompt)\s*[：:]?\*\*\s*```(?:\w+)?\s*\n(?P<prompt>.*?)\n```", block, re.S | re.I)
+        if not prompt_match:
+            continue
+        prompt = prompt_match.group("prompt").strip()
+        if not prompt:
+            continue
+        number = match.group(1).strip()
+        title = match.group("title").strip()
+        item_id = f"gpt_image_{id_slug}_case_{number}".lower()
+        item = {
+            "id": item_id,
+            "name": title,
+            "category": category_meta["id"],
+            "category_name": category_meta["name"],
+            "scene": gpt_image_prompt_summary(prompt),
+            "positive": prompt,
+            "negative": "",
+            "params": {"Model": "GPT Image 2", "Mode": "Image", "Motion": "Static"},
+            "image_url": image_match.group("src").strip() if image_match else "",
+            "source_url": match.group("source").strip(),
+            "author": (match.group("author") or "").strip(),
+            "author_url": (match.group("author_url") or "").strip(),
+            "difficulty": gpt_image_prompt_difficulty(prompt),
+            "motion": "static",
+            "tags": gpt_image_prompt_tags(title, prompt, category_meta),
+            "source_name": "awesome-gpt-image-2-API-and-Prompts",
+            "source_file": source_path,
+            "github_url": f"{GPT_IMAGE_PROMPT_REPO_URL}/blob/main/cases/{source_path}",
+            "case_number": number,
+            "builtin": True,
+            "readonly": True,
+        }
+        items.append(item)
+    return items
+
+def default_gpt_image_prompt_cache() -> Dict[str, Any]:
+    return {
+        "version": 1,
+        "synced_at": 0,
+        "source_repo": GPT_IMAGE_PROMPT_REPO_URL,
+        "count": 0,
+        "library": gpt_image_prompt_library([]),
+    }
+
+def gpt_image_prompt_library(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    normalized = [normalize_prompt_library_item(item) for item in (items or []) if isinstance(item, dict)]
+    return {
+        "id": GPT_IMAGE_PROMPT_LIBRARY_ID,
+        "name": "GPT Image 2 案例库",
+        "type": "prompt",
+        "readonly": True,
+        "source_url": GPT_IMAGE_PROMPT_REPO_URL,
+        "categories": gpt_image_prompt_categories(),
+        "items": normalized,
+    }
+
+def load_gpt_image_prompt_cache() -> Dict[str, Any]:
+    if not os.path.exists(GPT_IMAGE_PROMPTS_PATH):
+        return default_gpt_image_prompt_cache()
+    try:
+        with open(GPT_IMAGE_PROMPTS_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if not isinstance(raw, dict):
+            return default_gpt_image_prompt_cache()
+        library = raw.get("library") if isinstance(raw.get("library"), dict) else {}
+        items = library.get("items") if isinstance(library.get("items"), list) else []
+        return {
+            "version": int(raw.get("version") or 1),
+            "synced_at": int(raw.get("synced_at") or 0),
+            "source_repo": str(raw.get("source_repo") or GPT_IMAGE_PROMPT_REPO_URL),
+            "count": len(items),
+            "library": gpt_image_prompt_library(items),
+        }
+    except Exception as e:
+        print(f"读取 GPT Image 2 提示词缓存失败: {e}")
+        return default_gpt_image_prompt_cache()
+
+def save_gpt_image_prompt_cache(cache: Dict[str, Any]) -> Dict[str, Any]:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    library = gpt_image_prompt_library((cache.get("library") or {}).get("items") or [])
+    data = {
+        "version": int(cache.get("version") or 1),
+        "synced_at": int(cache.get("synced_at") or now_ms()),
+        "source_repo": str(cache.get("source_repo") or GPT_IMAGE_PROMPT_REPO_URL),
+        "count": len(library.get("items") or []),
+        "library": library,
+    }
+    with open(GPT_IMAGE_PROMPTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return data
+
+def fetch_text_url(url: str, timeout: float = 30.0) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "Infinite-Canvas/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+def fetch_gpt_image_prompt_case_texts(language: str = "zh-CN") -> Dict[str, str]:
+    result = {}
+    suffix = f"_{language}" if language else ""
+    for slug in GPT_IMAGE_PROMPT_CASE_SLUGS:
+        names = [f"{slug}{suffix}.md"] if suffix else [f"{slug}.md"]
+        if suffix:
+            names.append(f"{slug}.md")
+        for name in names:
+            url = f"{GPT_IMAGE_PROMPT_RAW_ROOT}/cases/{urllib.parse.quote(name)}"
+            try:
+                result[name] = fetch_text_url(url)
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code != 404 or name == names[-1]:
+                    raise
+            except Exception:
+                if name == names[-1]:
+                    raise
+    return result
+
+def sync_gpt_image_prompts(language: str = "zh-CN") -> Dict[str, Any]:
+    case_texts = fetch_gpt_image_prompt_case_texts(language)
+    items = []
+    seen = set()
+    for source_path, text in case_texts.items():
+        for item in parse_gpt_image_prompt_cases(text, source_path):
+            item_id = item.get("id")
+            if item_id in seen:
+                continue
+            seen.add(item_id)
+            items.append(item)
+    order = {meta["id"]: idx for idx, meta in enumerate(gpt_image_prompt_categories())}
+    items.sort(key=lambda item: (order.get(item.get("category"), 999), int(item.get("case_number") or 0), item.get("name") or ""))
+    cache = {
+        "version": 1,
+        "synced_at": now_ms(),
+        "source_repo": GPT_IMAGE_PROMPT_REPO_URL,
+        "library": gpt_image_prompt_library(items),
+    }
+    return save_gpt_image_prompt_cache(cache)
+
+def canonical_github_repo_url(url: str) -> str:
+    text = str(url or "").strip()
+    match = re.search(r"github\.com[:/](?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)", text)
+    if not match:
+        raise ValueError("请输入有效的 GitHub 仓库地址")
+    owner = match.group("owner").strip(".")
+    repo = re.sub(r"\.git$", "", match.group("repo").strip("."), flags=re.I)
+    if not owner or not repo:
+        raise ValueError("请输入有效的 GitHub 仓库地址")
+    return f"https://github.com/{owner}/{repo}"
+
+def github_repo_parts(repo_url: str) -> Tuple[str, str]:
+    canonical = canonical_github_repo_url(repo_url)
+    parsed = urllib.parse.urlparse(canonical)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        raise ValueError("请输入有效的 GitHub 仓库地址")
+    return parts[0], parts[1]
+
+def github_prompt_library_id(repo_url: str) -> str:
+    owner, repo = github_repo_parts(repo_url)
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", f"github_{owner}_{repo}")[:60]
+
+def github_raw_file_url(repo_url: str, path: str) -> str:
+    owner, repo = github_repo_parts(repo_url)
+    safe_path = "/".join(urllib.parse.quote(part) for part in str(path or "").split("/") if part)
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/main/{safe_path}"
+
+def github_api_json(url: str) -> Any:
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Infinite-Canvas/1.0",
+    })
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+def fetch_github_prompt_library_markdowns(repo_url: str, max_files: int = 60) -> Dict[str, str]:
+    owner, repo = github_repo_parts(repo_url)
+    api_root = f"https://api.github.com/repos/{owner}/{repo}/contents"
+    markdowns: Dict[str, str] = {}
+    queue = [""]
+    while queue and len(markdowns) < max_files:
+        path = queue.pop(0)
+        url = api_root + (f"/{urllib.parse.quote(path)}" if path else "")
+        listing = github_api_json(url)
+        entries = listing if isinstance(listing, list) else [listing]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_type = entry.get("type")
+            entry_path = str(entry.get("path") or "")
+            if entry_type == "dir":
+                name = os.path.basename(entry_path).lower()
+                if name not in {".git", "node_modules", "dist", "build", "vendor"}:
+                    queue.append(entry_path)
+            elif entry_type == "file" and entry_path.lower().endswith(".md") and len(markdowns) < max_files:
+                download_url = entry.get("download_url") or github_raw_file_url(repo_url, entry_path)
+                markdowns[entry_path] = fetch_text_url(download_url)
+    return markdowns
+
+def absolute_prompt_resource_url(url: str, repo_url: str, source_path: str) -> str:
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    if re.match(r"^https?://", text, re.I) or text.startswith("data:"):
+        return text
+    owner, repo = github_repo_parts(repo_url)
+    if text.startswith("/"):
+        rel = text.lstrip("/")
+    else:
+        rel = "/".join(part for part in [os.path.dirname(source_path), text] if part)
+    safe_path = "/".join(urllib.parse.quote(part) for part in rel.split("/") if part and part != ".")
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/main/{safe_path}"
+
+def first_prompt_image_from_block(block: str, repo_url: str, source_path: str) -> str:
+    html = re.search(r"<img[^>]+src=[\"'](?P<src>[^\"']+)[\"']", block, re.I)
+    if html:
+        return absolute_prompt_resource_url(html.group("src"), repo_url, source_path)
+    md = re.search(r"!\[[^\]]*\]\((?P<src>[^)]+)\)", block)
+    if md:
+        return absolute_prompt_resource_url(md.group("src").split()[0], repo_url, source_path)
+    return ""
+
+def parse_generic_github_prompt_markdown(markdown: str, source_path: str, repo_url: str, library_id: str) -> List[Dict[str, Any]]:
+    text = str(markdown or "")
+    headings = list(re.finditer(r"^(#{1,3})\s+(?P<title>.+?)\s*$", text, re.M))
+    items = []
+    stem = re.sub(r"[^A-Za-z0-9]+", "_", os.path.splitext(os.path.basename(source_path or "readme"))[0]).strip("_") or "readme"
+    for index, match in enumerate(headings):
+        start = match.end()
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
+        block = text[start:end]
+        code = re.search(r"```(?:\w+)?\s*\n(?P<prompt>.*?)\n```", block, re.S)
+        if not code:
+            continue
+        prompt = code.group("prompt").strip()
+        if len(prompt) < 12:
+            continue
+        title = re.sub(r"\s+", " ", match.group("title")).strip(" #")
+        if not title:
+            title = f"Prompt {len(items) + 1}"
+        item_id = re.sub(r"[^A-Za-z0-9_-]+", "_", f"{library_id}_{stem}_{len(items) + 1}")[:60]
+        items.append({
+            "id": item_id,
+            "name": title[:120],
+            "category": "github_prompts",
+            "category_name": "GitHub 提示词",
+            "scene": gpt_image_prompt_summary(prompt),
+            "positive": prompt,
+            "negative": "",
+            "params": {"Source": "GitHub"},
+            "image_url": first_prompt_image_from_block(block, repo_url, source_path),
+            "source_url": repo_url,
+            "source_name": os.path.basename(repo_url.rstrip("/")),
+            "source_file": source_path,
+            "github_url": f"{repo_url}/blob/main/{source_path}",
+            "difficulty": gpt_image_prompt_difficulty(prompt),
+            "motion": "static",
+            "tags": ["github", "prompt"],
+            "readonly": True,
+            "builtin": True,
+        })
+    return items
+
+def parse_github_prompt_library_markdowns(markdowns: Dict[str, str], repo_url: str, library_id: str) -> List[Dict[str, Any]]:
+    items = []
+    seen = set()
+    for source_path, markdown in sorted((markdowns or {}).items()):
+        parsed = parse_gpt_image_prompt_cases(markdown, source_path) if re.search(r"^###\s*Case\s+\d+:", str(markdown or ""), re.M) else []
+        if not parsed:
+            parsed = parse_generic_github_prompt_markdown(markdown, source_path, repo_url, library_id)
+        for item in parsed:
+            item = normalize_prompt_library_item({
+                **item,
+                "id": re.sub(r"[^A-Za-z0-9_-]+", "_", f"{library_id}_{item.get('id')}")[:60] if not str(item.get("id") or "").startswith(library_id) else item.get("id"),
+                "source_url": item.get("source_url") or repo_url,
+                "github_url": item.get("github_url") or f"{repo_url}/blob/main/{source_path}",
+                "source_file": source_path,
+                "readonly": True,
+                "builtin": True,
+            })
+            if item["id"] in seen or not item.get("positive"):
+                continue
+            seen.add(item["id"])
+            items.append(item)
+    return items
+
+def remote_prompt_library_from_github(repo_url: str, markdowns: Dict[str, str], library_id: str = "") -> Dict[str, Any]:
+    canonical = canonical_github_repo_url(repo_url)
+    library_id = library_id or github_prompt_library_id(canonical)
+    items = parse_github_prompt_library_markdowns(markdowns, canonical, library_id)
+    if not items:
+        raise ValueError("这个 GitHub 仓库里没有找到可识别的提示词 Markdown")
+    owner, repo = github_repo_parts(canonical)
+    categories = normalize_prompt_template_categories(
+        [{"id": item.get("category") or "github_prompts", "name": item.get("category_name") or "GitHub 提示词"} for item in items]
+    )
+    return {
+        "id": library_id,
+        "name": repo,
+        "type": "prompt",
+        "readonly": True,
+        "remote": True,
+        "parser": "github-markdown",
+        "source_name": f"{owner}/{repo}",
+        "source_url": canonical,
+        "sync_url": canonical,
+        "github_url": canonical,
+        "categories": categories,
+        "items": items,
+        "synced_at": now_ms(),
+    }
+
+def upsert_github_prompt_library(repo_url: str, library_id: str = "") -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    canonical = canonical_github_repo_url(repo_url)
+    markdowns = fetch_github_prompt_library_markdowns(canonical)
+    library = remote_prompt_library_from_github(canonical, markdowns, library_id or github_prompt_library_id(canonical))
+    data = load_prompt_libraries()
+    libraries = data.setdefault("libraries", [])
+    replaced = False
+    for index, existing in enumerate(libraries):
+        if existing.get("id") == library["id"] or existing.get("source_url") == canonical:
+            libraries[index] = library
+            replaced = True
+            break
+    if not replaced:
+        libraries.append(library)
+    data["active_library_id"] = library["id"]
+    saved = save_prompt_libraries(data)
+    public_library = find_prompt_library(public_prompt_libraries(saved), library["id"]) or library
+    return saved, public_library
 
 @app.get("/api/app-info")
 def app_info():
@@ -2098,6 +2497,14 @@ class PromptLibraryItemRequest(BaseModel):
 
 class PromptLibraryBatchDeleteRequest(BaseModel):
     ids: List[str] = []
+
+class PromptLibraryFavoriteRequest(BaseModel):
+    library_id: str = ""
+    item_id: str = ""
+    favorite: bool = True
+
+class GithubPromptLibraryRequest(BaseModel):
+    url: str = ""
 
 # --- 负载均衡 ---
 
@@ -3867,7 +4274,7 @@ def normalize_prompt_library_item(item):
         item = {}
     name = sanitize_asset_name(item.get("name") or "提示词", "提示词")
     positive = str(item.get("positive") or item.get("text") or "").strip()
-    return {
+    normalized = {
         "id": re.sub(r"[^A-Za-z0-9_-]+", "_", str(item.get("id") or item.get("item_id") or f"tpl_{uuid.uuid4().hex[:12]}"))[:60],
         "name": name,
         "category": normalize_prompt_category_id(item.get("category") or "custom"),
@@ -3878,6 +4285,30 @@ def normalize_prompt_library_item(item):
         "created_at": int(item.get("created_at") or now_ms()),
         "updated_at": int(item.get("updated_at") or item.get("created_at") or now_ms()),
     }
+    for key in (
+        "image_url",
+        "thumbnail_url",
+        "source_url",
+        "author",
+        "author_url",
+        "difficulty",
+        "motion",
+        "category_name",
+        "source_name",
+        "source_file",
+        "github_url",
+        "case_number",
+    ):
+        value = item.get(key)
+        if value is not None and value != "":
+            normalized[key] = str(value).strip()
+    if isinstance(item.get("tags"), list):
+        normalized["tags"] = [str(tag).strip() for tag in item.get("tags")[:12] if str(tag).strip()]
+    if item.get("readonly") is not None:
+        normalized["readonly"] = bool(item.get("readonly"))
+    if item.get("builtin") is not None:
+        normalized["builtin"] = bool(item.get("builtin"))
+    return normalized
 
 def seed_system_prompt_library():
     return {
@@ -3892,6 +4323,7 @@ def default_prompt_libraries():
     return {
         "active_library_id": "system",
         "libraries": [seed_system_prompt_library()],
+        "favorites": [],
         "updated_at": now_ms(),
     }
 
@@ -3957,8 +4389,8 @@ def normalize_prompt_libraries(data):
         if not isinstance(library, dict):
             continue
         category_lists.append(library.get("categories") if isinstance(library.get("categories"), list) else [])
-        if library.get("id") != "system":
-            append_items(library.get("items") if isinstance(library.get("items"), list) else [])
+        if library.get("id") == "system":
+            continue
     system_library = {
         "id": "system",
         "name": sanitize_asset_name(source.get("name") or "系统提示词库", "系统提示词库"),
@@ -3967,7 +4399,46 @@ def normalize_prompt_libraries(data):
         "categories": normalize_prompt_template_categories(*category_lists),
         "items": items,
     }
-    return {"active_library_id": "system", "libraries": [system_library], "updated_at": int(data.get("updated_at") or now_ms())}
+    normalized_libraries = [system_library]
+    seen_libraries = {"system"}
+    for raw_library in libraries:
+        if not isinstance(raw_library, dict) or raw_library.get("id") == "system":
+            continue
+        library_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(raw_library.get("id") or f"lib_{uuid.uuid4().hex[:8]}"))[:60] or f"lib_{uuid.uuid4().hex[:8]}"
+        if library_id in seen_libraries:
+            continue
+        seen_libraries.add(library_id)
+        raw_items = raw_library.get("items") if isinstance(raw_library.get("items"), list) else []
+        raw_categories = raw_library.get("categories") if isinstance(raw_library.get("categories"), list) else []
+        library = {
+            "id": library_id,
+            "name": sanitize_asset_name(raw_library.get("name") or "提示词库", "提示词库"),
+            "type": "prompt",
+            "readonly": bool(raw_library.get("readonly")),
+            "categories": normalize_prompt_template_categories(raw_categories),
+            "items": [normalize_prompt_library_item(item) for item in raw_items if isinstance(item, dict) and str(item.get("positive") or item.get("text") or "").strip()],
+        }
+        for key in ("source_url", "sync_url", "github_url", "source_name", "parser", "synced_at", "remote"):
+            value = raw_library.get(key)
+            if value is not None and value != "":
+                library[key] = bool(value) if key == "remote" else value
+        normalized_libraries.append(library)
+    active_library_id = str(data.get("active_library_id") or "system").strip() or "system"
+    if not any(library.get("id") == active_library_id for library in normalized_libraries):
+        active_library_id = "system"
+    favorites = []
+    seen_favorites = set()
+    for value in data.get("favorites") if isinstance(data.get("favorites"), list) else []:
+        key = str(value or "").strip()
+        if key and key not in seen_favorites:
+            seen_favorites.add(key)
+            favorites.append(key)
+    return {
+        "active_library_id": active_library_id,
+        "libraries": normalized_libraries,
+        "favorites": favorites,
+        "updated_at": int(data.get("updated_at") or now_ms()),
+    }
 
 def load_prompt_libraries():
     if not os.path.exists(PROMPT_LIBRARY_PATH):
@@ -3995,10 +4466,22 @@ def save_prompt_libraries(data):
 
 def public_prompt_libraries(data=None):
     data = normalize_prompt_libraries(data or load_prompt_libraries())
+    libraries = data.get("libraries") or []
+    favorites = set(data.get("favorites") or [])
+    gpt_cache = load_gpt_image_prompt_cache()
+    gpt_library = gpt_cache.get("library") if isinstance(gpt_cache.get("library"), dict) else gpt_image_prompt_library([])
+    libraries = [lib for lib in libraries if lib.get("id") != GPT_IMAGE_PROMPT_LIBRARY_ID]
+    libraries.append(gpt_library)
+    for library in libraries:
+        library_id = library.get("id") or ""
+        for item in library.get("items", []) or []:
+            item["favorite"] = f"{library_id}:{item.get('id') or ''}" in favorites
     return {
         "active_library_id": data.get("active_library_id") or (data.get("libraries") or [{}])[0].get("id") or "system",
-        "libraries": data.get("libraries") or [],
+        "libraries": libraries,
+        "favorites": sorted(favorites),
         "updated_at": data.get("updated_at") or now_ms(),
+        "gpt_image_synced_at": gpt_cache.get("synced_at") or 0,
     }
 
 def find_prompt_library(data, library_id=""):
@@ -8060,6 +8543,97 @@ async def get_asset_library():
 @app.get("/api/prompt-libraries")
 async def get_prompt_libraries():
     return {"library": public_prompt_libraries()}
+
+@app.get("/api/gpt-image-prompts")
+async def get_gpt_image_prompts():
+    cache = load_gpt_image_prompt_cache()
+    return {
+        "ok": True,
+        "library": cache.get("library") or gpt_image_prompt_library([]),
+        "count": cache.get("count") or 0,
+        "synced_at": cache.get("synced_at") or 0,
+        "source_repo": cache.get("source_repo") or GPT_IMAGE_PROMPT_REPO_URL,
+    }
+
+@app.post("/api/gpt-image-prompts/sync")
+async def sync_gpt_image_prompts_endpoint():
+    if not GPT_IMAGE_PROMPT_SYNC_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="GPT Image 2 提示词库正在同步中，请稍后再试")
+    try:
+        cache = sync_gpt_image_prompts()
+        return {
+            "ok": True,
+            "library": cache.get("library") or gpt_image_prompt_library([]),
+            "count": cache.get("count") or 0,
+            "synced_at": cache.get("synced_at") or 0,
+            "source_repo": cache.get("source_repo") or GPT_IMAGE_PROMPT_REPO_URL,
+        }
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub 同步失败：HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"无法连接 GitHub：{exc.reason}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"同步 GPT Image 2 提示词库失败：{exc}") from exc
+    finally:
+        GPT_IMAGE_PROMPT_SYNC_LOCK.release()
+
+@app.post("/api/prompt-libraries/favorites")
+async def set_prompt_library_favorite(payload: PromptLibraryFavoriteRequest):
+    library_id = str(payload.library_id or "").strip()
+    item_id = str(payload.item_id or "").strip()
+    if not library_id or not item_id:
+        raise HTTPException(status_code=400, detail="缺少提示词库或提示词 ID")
+    public = public_prompt_libraries()
+    library = find_prompt_library(public, library_id)
+    if not library or not any(item.get("id") == item_id for item in library.get("items", []) or []):
+        raise HTTPException(status_code=404, detail="提示词不存在")
+    data = load_prompt_libraries()
+    favorites = set(data.get("favorites") or [])
+    key = f"{library_id}:{item_id}"
+    if payload.favorite:
+        favorites.add(key)
+    else:
+        favorites.discard(key)
+    data["favorites"] = sorted(favorites)
+    data = save_prompt_libraries(data)
+    return {"library": public_prompt_libraries(data), "favorite": payload.favorite, "item_id": item_id, "library_id": library_id}
+
+@app.post("/api/prompt-libraries/github/install")
+async def install_github_prompt_library(payload: GithubPromptLibraryRequest):
+    try:
+        data, library = upsert_github_prompt_library(payload.url)
+        return {"library": public_prompt_libraries(data), "prompt_library": library}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub 读取失败：HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"无法连接 GitHub：{exc.reason}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"安装 GitHub 提示词库失败：{exc}") from exc
+
+@app.post("/api/prompt-libraries/{library_id}/sync")
+async def sync_prompt_library(library_id: str):
+    if library_id == GPT_IMAGE_PROMPT_LIBRARY_ID:
+        return await sync_gpt_image_prompts_endpoint()
+    data = load_prompt_libraries()
+    library = find_prompt_library(data, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="提示词库不存在")
+    sync_url = library.get("sync_url") or library.get("source_url") or library.get("github_url")
+    if not sync_url:
+        raise HTTPException(status_code=400, detail="这个提示词库没有可同步的 GitHub 地址")
+    try:
+        data, next_library = upsert_github_prompt_library(sync_url, library_id=library_id)
+        return {"library": public_prompt_libraries(data), "prompt_library": next_library}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub 读取失败：HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"无法连接 GitHub：{exc.reason}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"同步提示词库失败：{exc}") from exc
 
 @app.post("/api/prompt-libraries")
 async def create_prompt_library(payload: PromptLibraryRequest):
