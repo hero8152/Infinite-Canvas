@@ -7344,7 +7344,21 @@ def video_submit_url_candidates(provider, base_url):
         return [f"{base_url}/videos/generations" if base_url.endswith("/v1") else f"{base_url}/v1/videos/generations"]
     if is_volcengine_provider(provider):
         return [f"{base_url}/api/v3/contents/generations/tasks"]
-    return [f"{base_url}/v1/videos/generations", f"{base_url}/v2/videos/generations"]
+    return [
+        f"{base_url}/v1/videos/generations",
+        f"{base_url}/v1/video/generations",
+        f"{base_url}/v1/videos",
+        f"{base_url}/v2/videos/generations",
+    ]
+
+def video_submit_route_missing(response):
+    text = str(response.text or "").lower()
+    # Some compatible providers return Invalid URL with a non-404 status.
+    if "invalid url" in text:
+        return True
+    if response.status_code != 404:
+        return False
+    return "not found" in text or looks_like_html_response(text)
 
 def video_task_url_candidates(provider, base_url, task_id, submit_url=""):
     if is_apimart_provider(provider):
@@ -7353,11 +7367,17 @@ def video_task_url_candidates(provider, base_url, task_id, submit_url=""):
     if is_volcengine_provider(provider):
         return [f"{base_url}/api/v3/contents/generations/tasks/{task_id}"]
     v1_task = f"{base_url}/v1/videos/generations/{task_id}"
+    v1_official_task = f"{base_url}/v1/videos/{task_id}"
+    v1_compat_task = f"{base_url}/v1/video/generations/{task_id}"
     v1_generic_task = f"{base_url}/v1/tasks/{task_id}"
     v2_task = f"{base_url}/v2/videos/generations/{task_id}"
     if "/v2/videos/generations" in str(submit_url or ""):
-        return [v2_task, v1_task, v1_generic_task]
-    return [v1_task, v1_generic_task, v2_task]
+        return [v2_task, v1_official_task, v1_task, v1_compat_task, v1_generic_task]
+    if "/v1/video/generations" in str(submit_url or ""):
+        return [v1_compat_task, v1_official_task, v1_task, v1_generic_task, v2_task]
+    if str(submit_url or "").endswith("/v1/videos"):
+        return [v1_official_task, v1_task, v1_compat_task, v1_generic_task, v2_task]
+    return [v1_official_task, v1_task, v1_compat_task, v1_generic_task, v2_task]
 
 VIDEO_TASK_SUCCESS_STATUSES = {
     "SUCCESS", "SUCCEED", "SUCCEEDED", "COMPLETED", "COMPLETE",
@@ -7683,17 +7703,23 @@ async def canvas_video(payload: CanvasVideoRequest):
                 submit_url = candidate_url
                 response = await client.post(submit_url, headers=api_headers(provider=provider), json=body)
                 last_response = response
-                response.raise_for_status()
+                if video_submit_route_missing(response):
+                    continue
+                raw = None
                 try:
                     raw = response.json()
-                    break
                 except Exception as exc:
                     last_json_error = exc
-                    if looks_like_html_response(response.text):
-                        html_response = response
+                if raw is not None:
+                    task_id_check = extract_task_id(raw) or raw.get("task_id") or raw.get("id")
+                    if task_id_check:
+                        break
+                    if response.status_code >= 400:
                         continue
-                    resp_text = response.text[:500]
-                    raise HTTPException(status_code=502, detail=f"上游视频接口返回非 JSON 响应（状态 {response.status_code}）：{resp_text}")
+                    break
+                if looks_like_html_response(response.text):
+                    html_response = response
+                continue
             if raw is None:
                 resp = html_response or last_response
                 status_code = getattr(resp, "status_code", 200)
