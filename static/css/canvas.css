@@ -478,6 +478,9 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .output-del { position:absolute; top:6px; right:6px; width:22px; height:22px; border-radius:50%; background:rgba(255,255,255,.9); border:1px solid #e2e8f0; display:flex; align-items:center; justify-content:center; color:#64748b; opacity:0; transition:opacity .15s var(--ease); cursor:pointer; z-index:4; font-size:15px; line-height:1; }
 .output-img-wrap:hover .output-del { opacity:1; }
 .output-del:hover { color:#dc2626; border-color:#fecaca; background:#fff5f5; }
+.output-download { position:absolute; top:6px; left:6px; width:22px; height:22px; border-radius:50%; background:rgba(255,255,255,.9); border:1px solid #e2e8f0; display:flex; align-items:center; justify-content:center; color:#64748b; opacity:0; transition:opacity .15s var(--ease); cursor:pointer; z-index:4; padding:0; }
+.output-img-wrap:hover .output-download { opacity:1; }
+.output-download:hover { color:#2563eb; border-color:#bfdbfe; background:#eff6ff; }
 .output-grid img { display:block; width:100%; height:100%; object-fit:contain; border-radius:16px; border:1px solid #edf2f7; background:#f8fafc; cursor:zoom-in; transition:border-color .2s var(--ease); }
 .output-grid img:active { cursor:grabbing; }
 .output-grid video { display:block; width:100%; height:100%; object-fit:contain; border-radius:16px; border:1px solid #edf2f7; background:#0f172a; cursor:pointer; }
