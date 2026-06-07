@@ -3028,6 +3028,24 @@ def extract_image(data):
                         "value": value,
                         "mime_type": inline.get("mimeType") or inline.get("mime_type") or "image/png",
                     }
+    output = data.get("output") if isinstance(data, dict) else None
+    choices = output.get("choices") if isinstance(output, dict) else None
+    if isinstance(choices, list):
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message") or {}
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and part.get("image"):
+                    return {"type": "url", "value": part["image"]}
+    results = output.get("results") if isinstance(output, dict) else None
+    if isinstance(results, list):
+        for item in results:
+            if isinstance(item, dict) and item.get("url"):
+                return {"type": "url", "value": item["url"]}
     if isinstance(data.get("data"), dict) and isinstance(data["data"].get("result"), dict):
         data = data["data"]
     if isinstance(data.get("result"), dict):
@@ -5734,6 +5752,16 @@ def is_gpt_image_model(model):
         or compact == "chatgptimagelatest"
     )
 
+def is_qwen_image_model(model):
+    raw = str(model or "").strip().lower()
+    name = raw.rsplit("/", 1)[-1]
+    normalized = re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+    return normalized == "qwen-image" or normalized.startswith("qwen-image-")
+
+def is_dashscope_image_provider(provider):
+    base_url = str((provider or {}).get("base_url") or "").lower()
+    return "dashscope.aliyuncs.com" in base_url or "maas.aliyuncs.com" in base_url
+
 def normalize_gpt_image_2_size(size):
     width, height = parse_size_pair(size)
     if not width or not height:
@@ -6692,6 +6720,83 @@ async def generate_runninghub_provider_image(prompt, size, model, reference_imag
         result = await wait_for_runninghub_image_task(client, provider, task_id)
         return runninghub_extract_image(result), result
 
+DASHSCOPE_IMAGE_GENERATION_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
+
+def dashscope_image_endpoint_url(provider):
+    override = str((provider or {}).get("image_generation_endpoint") or "").strip()
+    base_url = str((provider or {}).get("base_url") or "").strip().rstrip("/")
+    if override:
+        if re.match(r"^https?://", override, re.I):
+            return override.rstrip("/")
+        parsed = urllib.parse.urlsplit(base_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}{override}"
+        return override
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}{DASHSCOPE_IMAGE_GENERATION_PATH}"
+    return f"https://dashscope.aliyuncs.com{DASHSCOPE_IMAGE_GENERATION_PATH}"
+
+def qwen_image_size_param(size):
+    width, height = parse_size_pair(size)
+    if width and height:
+        return f"{width}*{height}"
+    raw = str(size or "").strip().lower().replace(" ", "")
+    if re.fullmatch(r"\d+\*\d+", raw):
+        return raw
+    ratio_sizes = {
+        "1:1": "2048*2048",
+        "16:9": "2688*1536",
+        "9:16": "1536*2688",
+        "4:3": "2368*1728",
+        "3:4": "1728*2368",
+    }
+    if raw in ratio_sizes:
+        return ratio_sizes[raw]
+    if raw == "1k":
+        return "1024*1024"
+    if raw in {"", "auto", "2k", "4k"}:
+        return "2048*2048"
+    return ""
+
+async def generate_dashscope_qwen_image(prompt, size, model, reference_images=None, provider=None):
+    content = []
+    refs = [ref for ref in (reference_images or []) if isinstance(ref, dict) and ref.get("url")]
+    image_refs = [
+        ref for ref in refs
+        if str(ref.get("role") or "").strip().lower() != "mask"
+        and not str(ref.get("name") or "").lower().endswith("_mask.png")
+    ]
+    for ref in image_refs[:4]:
+        value = reference_to_data_url(ref, max_size=2048)
+        if value:
+            content.append({"image": value})
+    text = str(prompt or "").strip()
+    if text:
+        content.append({"text": text})
+    if not content:
+        raise HTTPException(status_code=400, detail="千问图片模型需要提示词或参考图")
+    parameters = {"n": 1, "watermark": False}
+    size_param = qwen_image_size_param(size)
+    if size_param:
+        parameters["size"] = size_param
+    body = {
+        "model": model,
+        "input": {"messages": [{"role": "user", "content": content}]},
+        "parameters": parameters,
+    }
+    endpoint = dashscope_image_endpoint_url(provider)
+    timeout = httpx.Timeout(connect=20.0, read=1800.0, write=180.0, pool=20.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(endpoint, headers=api_headers(provider=provider, model=model), json=body)
+        if response.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"DashScope 千问图片接口错误：{response.text[:500]}")
+        raw = response.json()
+    if isinstance(raw, dict) and raw.get("code") and not raw.get("output"):
+        message = raw.get("message") or raw.get("code")
+        raise HTTPException(status_code=502, detail=f"DashScope 千问图片接口错误：{message}")
+    return extract_image(raw), raw
+
 async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly"):
     provider = get_api_provider(provider_id)
     if provider["id"] == "modelscope":
@@ -6700,6 +6805,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_jimeng_provider_image(prompt, size, model, reference_images, provider)
     if is_runninghub_provider(provider):
         return await generate_runninghub_provider_image(prompt, size, model, reference_images, provider)
+    if is_dashscope_image_provider(provider) and is_qwen_image_model(model):
+        return await generate_dashscope_qwen_image(prompt, size, model, reference_images, provider)
     if effective_protocol(provider, model) == "gemini":
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
