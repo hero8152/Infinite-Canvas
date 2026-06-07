@@ -6750,13 +6750,14 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             edit_failed_status = None
             edit_failed_text = ""
             try:
+                image_field_name = "image[]" if is_gpt2 and len(image_refs) > 1 else "image"
                 for ref in image_refs[:4]:
                     path = output_file_from_url(ref.get("url", ""))
                     if not path:
                         continue
                     fh = open(path, "rb")
                     opened.append(fh)
-                    files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
+                    files.append((image_field_name, (os.path.basename(path), fh, content_type_for_path(path))))
                 if mask_refs:
                     mask_path = output_file_from_url(mask_refs[0].get("url", ""))
                     if mask_path:
