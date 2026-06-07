@@ -176,6 +176,7 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .link { stroke:var(--faint); stroke-width:2.5; fill:none; opacity:.82; pointer-events:none; }
 .link.temp { stroke:var(--strong); stroke-dasharray:6 6; }
 .link.knife-trail { stroke:#ef4444; stroke-width:2.4; stroke-dasharray:7 6; opacity:.88; filter:drop-shadow(0 0 6px rgba(239,68,68,.35)); }
+.link-hover { stroke:#3b82f6; stroke-width:3.5; opacity:1; filter:drop-shadow(0 0 10px rgba(59,130,246,.55)) drop-shadow(0 0 4px rgba(59,130,246,.35)); transition:stroke .2s ease, opacity .2s ease, filter .2s ease; }
 .link-hit { stroke:transparent; stroke-width:18; fill:none; pointer-events:stroke; }
 .link-controls { position:absolute; inset:0; width:6000px; height:4000px; pointer-events:none; z-index:3; }
 .link-delete { position:absolute; width:22px; height:22px; border-radius:999px; display:flex; align-items:center; justify-content:center; transform:translate(-50%,-50%); color:#64748b; background:rgba(255,255,255,.94); border:1px solid #e2e8f0; box-shadow:0 8px 20px rgba(15,23,42,.12); opacity:0; pointer-events:none; transition:opacity .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease), background .14s var(--ease); }
@@ -586,6 +587,8 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .output-spinner { width:28px; height:28px; border:3px solid #e2e8f0; border-top-color:#94a3b8; border-radius:50%; animation:spin .8s linear infinite; }
 .output-time-pill { position:absolute; top:7px; right:7px; min-width:38px; height:22px; padding:0 8px; border-radius:999px; display:flex; align-items:center; justify-content:center; background:rgba(17,24,39,.86); color:#fff; font-size:10px; font-weight:900; z-index:3; pointer-events:none; box-shadow:0 6px 18px rgba(15,23,42,.18); }
 .output-time-pill.running { background:rgba(37,99,235,.9); }
+.output-source-label { position:absolute; bottom:4px; left:4px; right:28px; height:18px; padding:0 6px; border-radius:4px; display:flex; align-items:center; background:rgba(17,24,39,.78); color:#e2e8f0; font-size:9px; font-weight:600; z-index:3; pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.output-source-sep { opacity:0.5; margin:0 2px; }
 @keyframes spin { to { transform:rotate(360deg); } }
 .port { position:absolute; top:50%; width:44px; height:44px; border-radius:50%; cursor:crosshair; transform:translateY(-50%); z-index:3; }
 .port::after { content:""; position:absolute; left:15px; top:15px; width:14px; height:14px; border-radius:50%; border:2px solid #fff; background:#111827; box-shadow:0 0 0 1px #94a3b8; transition:transform .14s var(--ease); }

@@ -241,6 +241,7 @@ let managerSelectedPromptIds = new Set();
 let activeCanvasWorkflowCategoryId = '';
 const activeCanvasTaskPolls = new Set();
 let hoveredConnectionId = '';
+let hoveredNodeId = '';
 let lastMouseBoard = {x: 0, y: 0};
 let undoStack = [];
 const UNDO_MAX = 30;
@@ -10916,6 +10917,8 @@ function requestMetaFromResult(result={}){
         task_id: result.task_id || result.raw?.task_id || result.raw?.data?.task_id || (Array.isArray(result.raw?.data) ? result.raw.data[0]?.task_id : '') || '',
         request_id: result.request_id || result.id || result.raw?.id || '',
         provider_id: result.provider_id || result.params?.provider_id || '',
+        provider_name: result.provider_name || '',
+        model: result.model || result.params?.model || '',
         backend: result.backend || '',
         prompt_id: result.prompt_id || '',
         workflow_json: result.workflow_json || '',
@@ -11240,21 +11243,22 @@ function renderOutputMedia(item, useGridLayout=false){
     const grid = useGridLayout ? (meta.grid || null) : null;
     const gridStyle = grid ? ` style="grid-row:${Number(grid.row || 0) + 1};grid-column:${Number(grid.col || 0) + 1};aspect-ratio:${Math.max(1, Number(grid.w || 1))}/${Math.max(1, Number(grid.h || 1))}"` : '';
     const timePill = meta.runMs && !meta.viewed ? `<span class="output-time-pill">${formatRunDuration(meta.runMs)}</span>` : '';
+    const sourceLabelHtml = (meta.providerLabel || meta.modelLabel) ? `<span class="output-source-label" title="${escapeAttr((meta.providerLabel||'') + (meta.providerLabel&&meta.modelLabel?' · ':'') + (meta.modelLabel||''))}">${escapeHtml(meta.providerLabel || '')}${meta.providerLabel&&meta.modelLabel?'<span class="output-source-sep"> · </span>':''}${escapeHtml(meta.modelLabel || '')}</span>` : '';
     if(isMissingAssetUrl(url)){
-        return `<div class="output-img-wrap" data-output-url="${safe}" data-missing-url="${safe}"${gridStyle}>${missingAssetHtml(url, true)}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+        return `<div class="output-img-wrap" data-output-url="${safe}" data-missing-url="${safe}"${gridStyle}>${missingAssetHtml(url, true)}${timePill}${sourceLabelHtml}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
     if(kind === 'video'){
-        return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}><video src="${safe}" data-url="${safe}" preload="metadata" muted playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>${timePill}<div class="output-video-badge"><i data-lucide="play" class="w-3 h-3"></i>VIDEO</div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+        return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}><video src="${safe}" data-url="${safe}" preload="metadata" muted playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>${timePill}<div class="output-video-badge"><i data-lucide="play" class="w-3 h-3"></i>VIDEO</div>${sourceLabelHtml}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
     if(kind === 'audio'){
-        return `<div class="output-img-wrap output-audio-wrap" data-output-url="${safe}"${gridStyle}><div class="output-audio-card"><i data-lucide="file-audio" class="w-7 h-7"></i><span>${escapeHtml(outputImageName(url))}</span><audio src="${safe}" data-url="${safe}" controls preload="metadata"></audio></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+        return `<div class="output-img-wrap output-audio-wrap" data-output-url="${safe}"${gridStyle}><div class="output-audio-card"><i data-lucide="file-audio" class="w-7 h-7"></i><span>${escapeHtml(outputImageName(url))}</span><audio src="${safe}" data-url="${safe}" controls preload="metadata"></audio></div>${timePill}${sourceLabelHtml}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
     if(kind === 'text' || kind === 'file'){
         const icon = kind === 'text' ? 'file-text' : 'file';
         const label = kind === 'text' ? 'TEXT' : 'FILE';
-        return `<div class="output-img-wrap output-file-wrap" data-output-url="${safe}"${gridStyle}><div class="output-file-card"><i data-lucide="${icon}" class="w-7 h-7"></i><span>${escapeHtml(meta.name || outputImageName(url))}</span><small>${label}</small></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+        return `<div class="output-img-wrap output-file-wrap" data-output-url="${safe}"${gridStyle}><div class="output-file-card"><i data-lucide="${icon}" class="w-7 h-7"></i><span>${escapeHtml(meta.name || outputImageName(url))}</span><small>${label}</small></div>${timePill}${sourceLabelHtml}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
-    return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}><img src="${safe}" data-url="${safe}" alt="generated output">${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+    return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}><img src="${safe}" data-url="${safe}" alt="generated output">${timePill}${sourceLabelHtml}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
 }
 function outputGridLayout(node){
     const images = node?.images || [];
@@ -11299,7 +11303,10 @@ function appendOutputImages(out, images, compareRef, metas=[], layout=null){
     out.images = [...(out.images || []), ...list.map((url, i) => {
         const meta = metas[i] || metas[0] || {};
         const source = url && typeof url === 'object' ? url : {};
-        const item = {url:outputUrlValue(url), viewed:false, runMs:meta.runMs || 0, run:meta.run || null};
+        const request = meta.run?.request || {};
+        const item = {url:outputUrlValue(url), viewed:false, runMs:meta.runMs || 0, run:meta.run || null,
+            providerLabel: request.provider_name || runPlatformLabel(meta.run) || '',
+            modelLabel: request.model || meta.run?.taskLabel || runTaskLabel(meta.run) || ''};
         if(source.name) item.name = source.name;
         if(source.kind || source.mediaKind) item.kind = source.kind || source.mediaKind;
         if(meta.kind) item.kind = meta.kind;
@@ -12822,7 +12829,8 @@ function renderLinks(){
     linkControlsEl.innerHTML = '';
     connections.forEach(c => {
         const a = portPoint(c.from, 'out'), b = portPoint(c.to, 'in');
-        linksEl.appendChild(pathEl(a.x, a.y, b.x, b.y, 'link'));
+        const linkClass = hoveredNodeId && (c.from === hoveredNodeId || c.to === hoveredNodeId) ? 'link link-hover' : 'link';
+        linksEl.appendChild(pathEl(a.x, a.y, b.x, b.y, linkClass));
         const btn = linkDeleteButton(c, a, b);
         linkControlsEl.appendChild(btn);
         linksEl.appendChild(linkHitEl(a.x, a.y, b.x, b.y, c.id));
@@ -13102,13 +13110,21 @@ board.addEventListener('mousemove', e => {
     const point = screenToWorld(e.clientX, e.clientY);
     lastMouseBoard = point;
     updateConnectionHoverFromMouse(e);
+    if(!dragNode && !resizeNode && !dragBoard && !tempLink && !knifeActive){
+        const nodeEl = e.target.closest ? e.target.closest('.node') : null;
+        const nodeId = nodeEl?.dataset?.id || '';
+        if(nodeId !== hoveredNodeId){
+            hoveredNodeId = nodeId;
+            renderLinks();
+        }
+    }
     if(canvas && knifeActive && !isEditableTarget(e.target) && !dragNode && !dragBoard && !resizeNode && !tempLink){
         continueKnifeDrag(e);
     } else if(!e.shiftKey) {
         setKnifeMode(false);
     }
 });
-board.addEventListener('mouseleave', () => setHoveredConnection(''));
+board.addEventListener('mouseleave', () => { setHoveredConnection(''); if(hoveredNodeId){ hoveredNodeId = ''; renderLinks(); } });
 board.ondblclick = null;
 board.oncontextmenu = e => {
     if(!canvas) return;
