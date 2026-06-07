@@ -5723,6 +5723,17 @@ def is_gpt_image_2_model(model):
         or compact.endswith("gptimage2")
     )
 
+def is_gpt_image_model(model):
+    raw = str(model or "").strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    compact = re.sub(r"[^a-z0-9]+", "", raw)
+    return (
+        normalized.startswith("gpt-image-")
+        or normalized == "chatgpt-image-latest"
+        or compact.startswith("gptimage")
+        or compact == "chatgptimagelatest"
+    )
+
 def normalize_gpt_image_2_size(size):
     width, height = parse_size_pair(size)
     if not width or not height:
@@ -6693,6 +6704,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
         return await generate_volcengine_provider_image(prompt, size, model, reference_images, provider)
+    is_gpt_image = is_gpt_image_model(model)
     is_gpt2 = is_gpt_image_2_model(model)
     is_apimart = is_apimart_provider(provider)
     quality = str(quality or "").strip().lower()
@@ -6706,7 +6718,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
     refs = [ref for ref in (reference_images or []) if ref.get("url")]
     mask_refs = [ref for ref in refs if str(ref.get("role") or "").strip().lower() == "mask" or str(ref.get("name") or "").lower().endswith("_mask.png")]
     image_refs = [ref for ref in refs if ref not in mask_refs]
-    request_timeout = httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0) if (is_gpt2 or is_apimart) else AI_REQUEST_TIMEOUT
+    request_timeout = httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0) if (is_gpt_image or is_apimart) else AI_REQUEST_TIMEOUT
     async with httpx.AsyncClient(timeout=request_timeout) as client:
         response = None
         async def post_openai_edits(edit_files=None):
@@ -6735,7 +6747,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             if image_refs:
                 body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:16]]
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
-        elif is_gpt2 and not image_refs and not mask_refs:
+        elif is_gpt_image and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
             if quality:
                 body["quality"] = quality
@@ -6750,7 +6762,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             edit_failed_status = None
             edit_failed_text = ""
             try:
-                image_field_name = "image[]" if is_gpt2 and len(image_refs) > 1 else "image"
+                image_field_name = "image[]" if is_gpt_image and len(image_refs) > 1 else "image"
                 for ref in image_refs[:4]:
                     path = output_file_from_url(ref.get("url", ""))
                     if not path:
@@ -6779,10 +6791,10 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     fh.close()
             # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
             if response is None:
-                if is_gpt2:
+                if is_gpt_image:
                     raise HTTPException(
                         status_code=502,
-                        detail=f"GPT-Image-2 编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
+                        detail=f"GPT 图像模型编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
                     )
                 print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
                 image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:4]]
@@ -6800,7 +6812,9 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                         detail=f"编辑接口 /images/edits 调用失败，且该平台不支持 /images/generations：{edit_failed_text[:300] or edit_failed_status}"
                     )
         else:
-            body = {"model": model, "prompt": prompt, "size": size, "response_format": "url", "n": 1}
+            body = {"model": model, "prompt": prompt, "size": size, "n": 1}
+            if not is_gpt_image:
+                body["response_format"] = "url"
             if quality:
                 body["quality"] = quality
             response = await client.post(
