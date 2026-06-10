@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>备份管理</title>
+    <script>
+        (function(){
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if(theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.06.09.1781056691"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.06.09.1781056691"></script>
+    <script src="/static/js/theme.js?v=2026.06.09.1781056685"></script>
+    <script src="/static/js/i18n.js?v=2026.06.09.1781056683"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.09.1781056680">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=2026.06.09.1781056679">
+    <style>
+        .backup-grid { display:flex; flex-direction:column; gap:20px; }
+        .backup-card { border:1px solid var(--line); border-radius:16px; background:var(--panel); padding:20px; }
+        .backup-card-title { font-size:14px; font-weight:900; display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+        .backup-card-title i { color:var(--muted); }
+        .backup-options { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+        .backup-option { display:flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid var(--line); border-radius:10px; font-size:11.5px; font-weight:700; cursor:pointer; transition:all .15s ease; }
+        .backup-option:hover { border-color:var(--faint); }
+        .backup-option.active { background:var(--soft); border-color:var(--text); color:var(--text); }
+        .backup-option input[type="checkbox"] { display:none; }
+        .backup-btn-row { display:flex; gap:10px; flex-wrap:wrap; }
+        .primary-btn { height:40px; padding:0 20px; border-radius:12px; background:var(--accent); color:var(--bg); font-size:12.5px; font-weight:850; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
+        .primary-btn:hover { opacity:.85; transform:translateY(-1px); box-shadow:0 6px 16px rgba(0,0,0,.12); }
+        body.studio-theme-dark .primary-btn { background:#f5f6f8; color:#0e1014; }
+        body.studio-theme-dark .primary-btn:hover { background:#ffffff; }
+        .secondary-btn { height:40px; padding:0 20px; border-radius:12px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:12.5px; font-weight:800; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
+        .secondary-btn:hover { border-color:var(--faint); background:var(--soft); }
+        .danger-btn { height:40px; padding:0 20px; border-radius:12px; border:1px solid #ef4444; color:#ef4444; font-size:12.5px; font-weight:800; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
+        .danger-btn:hover { background:#ef4444; color:#fff; }
+        .backup-table { width:100%; border-collapse:separate; border-spacing:0; }
+        .backup-table th { text-align:left; padding:8px 12px; font-size:10px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); border-bottom:1px solid var(--line); }
+        .backup-table td { padding:10px 12px; font-size:12px; border-bottom:1px solid var(--line); vertical-align:middle; }
+        .backup-table tr:last-child td { border-bottom:none; }
+        .backup-table tr:hover td { background:var(--soft); }
+        .backup-table .actions { display:flex; gap:6px; }
+        .backup-table .actions button { height:30px; padding:0 10px; border-radius:8px; font-size:10.5px; font-weight:800; display:inline-flex; align-items:center; gap:4px; }
+        .tag { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:800; background:var(--soft); color:var(--muted); }
+        .tag-success { background:#dcfce7; color:#166534; }
+        body.studio-theme-dark .tag-success { background:rgba(34,197,94,.12); color:#4ade80; }
+        .tag-warning { background:#fef9c3; color:#854d0e; }
+        body.studio-theme-dark .tag-warning { background:rgba(234,179,8,.12); color:#facc15; }
+        .status-msg { font-size:12px; font-weight:700; color:var(--muted); min-height:20px; margin-top:8px; }
+        .status-msg.success { color:#16a34a; }
+        .status-msg.error { color:#ef4444; }
+        .status-msg.loading { color:var(--muted); }
+        .form-row { display:flex; flex-direction:column; gap:4px; margin-bottom:14px; }
+        .form-row label { font-size:11px; font-weight:800; color:var(--muted); }
+        .form-row input { height:40px; padding:0 14px; border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--text); font-size:13px; font-weight:600; outline:none; transition:border-color .15s ease; }
+        .form-row input:focus { border-color:var(--text); }
+        .form-hint { font-size:10.5px; color:var(--faint); margin-top:2px; }
+        .webdav-status { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; padding:8px 12px; border-radius:10px; margin-bottom:14px; }
+        .webdav-status.connected { background:#dcfce7; color:#166534; }
+        .webdav-status.disconnected { background:#f1f4f8; color:var(--muted); }
+        body.studio-theme-dark .webdav-status.connected { background:rgba(34,197,94,.1); color:#4ade80; }
+        body.studio-theme-dark .webdav-status.disconnected { background:var(--soft); color:var(--faint); }
+        .progress-bar { height:4px; background:var(--line); border-radius:999px; overflow:hidden; margin-top:8px; }
+        .progress-bar-fill { height:100%; background:var(--text); border-radius:999px; transition:width .3s ease; }
+        .progress-bar-fill.indeterminate { width:30%; animation:progressIndeterminate 1.4s ease-in-out infinite; }
+        @keyframes progressIndeterminate {
+            0% { transform:translateX(-100%); }
+            100% { transform:translateX(400%); }
+        }
+        .restore-zone { border:2px dashed var(--line); border-radius:14px; padding:30px; text-align:center; cursor:pointer; transition:all .2s ease; }
+        .restore-zone:hover { border-color:var(--faint); background:var(--soft); }
+        .restore-zone.dragover { border-color:var(--text); background:var(--soft); }
+        .restore-zone i { display:block; margin:0 auto 8px; color:var(--faint); }
+        .restore-zone p { font-size:13px; font-weight:700; color:var(--muted); margin:0; }
+        .restore-zone p small { font-weight:600; font-size:11px; color:var(--faint); display:block; margin-top:4px; }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="wrap">
+            <header class="page-head">
+                <div>
+                    <div class="title">备份管理</div>
+                    <div class="sub">创建本地备份、从 ZIP 恢复、同步到 WebDAV</div>
+                </div>
+                <div id="status" class="status"></div>
+            </header>
+
+            <div class="backup-grid">
+                <!-- 创建备份 -->
+                <div class="backup-card">
+                    <div class="backup-card-title"><i data-lucide="circle-plus" class="w-4 h-4"></i> 创建备份</div>
+                    <div class="backup-options" id="backupOptions">
+                        <label class="backup-option active" data-key="include_secrets">
+                            <input type="checkbox" checked> <i data-lucide="key-round" class="w-3.5 h-3.5"></i> API 密钥
+                        </label>
+                        <label class="backup-option" data-key="include_assets_library">
+                            <input type="checkbox"> <i data-lucide="image" class="w-3.5 h-3.5"></i> 资产库图片
+                        </label>
+                        <label class="backup-option" data-key="include_assets_input">
+                            <input type="checkbox"> <i data-lucide="upload" class="w-3.5 h-3.5"></i> 输入图片
+                        </label>
+                        <label class="backup-option" data-key="include_assets_output">
+                            <input type="checkbox"> <i data-lucide="package" class="w-3.5 h-3.5"></i> 输出图片
+                        </label>
+                        <label class="backup-option" data-key="include_assets_uploads">
+                            <input type="checkbox"> <i data-lucide="folder" class="w-3.5 h-3.5"></i> 上传文件
+                        </label>
+                    </div>
+                    <div class="backup-btn-row">
+                        <button class="primary-btn" type="button" onclick="createBackup()"><i data-lucide="sparkles" class="w-4 h-4"></i> 创建备份</button>
+                    </div>
+                    <div id="createStatus" class="status-msg"></div>
+                </div>
+
+                <!-- 本地备份列表 -->
+                <div class="backup-card">
+                    <div class="backup-card-title"><i data-lucide="archive" class="w-4 h-4"></i> 本地备份</div>
+                    <div id="backupListContainer">
+                        <p style="font-size:12px;color:var(--faint);font-weight:700;">加载中...</p>
+                    </div>
+                </div>
+
+                <!-- 从备份恢复 -->
+                <div class="backup-card">
+                    <div class="backup-card-title"><i data-lucide="upload" class="w-4 h-4"></i> 从备份恢复</div>
+                    <div class="restore-zone" id="restoreZone" onclick="document.getElementById('restoreInput').click()">
+                        <i data-lucide="file-archive" class="w-10 h-10"></i>
+                        <p>点击或拖拽 ZIP 文件到此处<br><small>恢复前建议先创建一次完整备份</small></p>
+                    </div>
+                    <input type="file" id="restoreInput" accept=".zip" style="display:none" onchange="restoreBackup(this.files[0])">
+                    <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
+                        <label class="backup-option" style="margin:0;">
+                            <input type="checkbox" id="restoreSecretsCheck"> <i data-lucide="key-round" class="w-3.5 h-3.5"></i> 恢复 API 密钥
+                        </label>
+                    </div>
+                    <div id="restoreStatus" class="status-msg"></div>
+                    <div id="restoreProgress" class="progress-bar" style="display:none"><div class="progress-bar-fill indeterminate"></div></div>
+                </div>
+
+                <!-- WebDAV 配置与同步 -->
+                <div class="backup-card">
+                    <div class="backup-card-title"><i data-lucide="cloud" class="w-4 h-4"></i> WebDAV 远程同步</div>
+                    <div id="webdavStatus" class="webdav-status disconnected">检查连接中...</div>
+                    <div class="form-row">
+                        <label>服务器地址</label>
+                        <input type="url" id="webdavUrl" placeholder="https://example.com/remote.php/dav/files/user">
+                    </div>
+                    <div class="form-row">
+                        <label>用户名</label>
+                        <input type="text" id="webdavUser" placeholder="username" autocomplete="off">
+                    </div>
+                    <div class="form-row">
+                        <label>密码</label>
+                        <input type="password" id="webdavPass" placeholder="留空则不修改" autocomplete="off">
+                        <div class="form-hint">已配置的密码不会回显，留空保留现有密码</div>
+                    </div>
+                    <div class="form-row">
+                        <label>远程路径</label>
+                        <input type="text" id="webdavPath" placeholder="/backups">
+                        <div class="form-hint">备份文件将存放在此路径下</div>
+                    </div>
+                    <div class="backup-btn-row">
+                        <button class="primary-btn" type="button" onclick="saveWebdav()"><i data-lucide="save" class="w-4 h-4"></i> 保存配置</button>
+                        <button class="secondary-btn" type="button" onclick="testWebdav()"><i data-lucide="refresh-cw" class="w-4 h-4"></i> 测试连接</button>
+                        <button class="danger-btn" type="button" onclick="clearWebdav()"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 清除</button>
+                    </div>
+                    <div id="webdavStatusMsg" class="status-msg"></div>
+                    <hr style="border:none;border-top:1px solid var(--line);margin:18px 0;">
+                    <div class="backup-card-title" style="margin-bottom:12px;font-size:13px;"><i data-lucide="arrow-up-from-line" class="w-3.5 h-3.5"></i> 同步操作</div>
+                    <div class="backup-btn-row">
+                        <button class="secondary-btn" type="button" onclick="pushToWebdav()"><i data-lucide="arrow-up-from-line" class="w-4 h-4"></i> 推送到远程</button>
+                        <button class="secondary-btn" type="button" onclick="listRemoteBackups()"><i data-lucide="refresh-cw" class="w-4 h-4"></i> 列出远程备份</button>
+                        <button class="secondary-btn" type="button" onclick="pullFromWebdavPrompt()"><i data-lucide="arrow-down-to-line" class="w-4 h-4"></i> 拉取恢复</button>
+                    </div>
+                    <div id="webdavSyncStatus" class="status-msg"></div>
+                    <div id="remoteBackupList" style="margin-top:10px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/js/backup-settings.js?v=2026.06.09.1781059077"></script>
+    <script>refreshIcons();</script>
+</body>
+</html>
