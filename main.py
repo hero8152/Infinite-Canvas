@@ -12603,6 +12603,363 @@ def run_workflow(name: str, payload: WorkflowRunRequest):
     )
     return generate(req)
 
+# ---- Backup & WebDAV ----
+
+BACKUP_CONFIG_FILE = os.path.join(DATA_DIR, "backup_config.json")
+BACKUP_VERSION = 1
+BACKUP_DIR = os.path.join(DATA_DIR, "backups")
+BACKUP_ID_RE = re.compile(r"^backup_\d{8}-\d{6}\.zip$")
+
+def webdav_config_load():
+    if not os.path.exists(BACKUP_CONFIG_FILE):
+        return {}
+    try:
+        with open(BACKUP_CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+def webdav_config_save(cfg):
+    os.makedirs(os.path.dirname(BACKUP_CONFIG_FILE), exist_ok=True)
+    with open(BACKUP_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+def webdav_request(method, path_segment, data=None, timeout=30):
+    cfg = webdav_config_load()
+    url = str(cfg.get("url") or "").rstrip("/")
+    username = str(cfg.get("username") or "")
+    password = str(cfg.get("password") or "")
+    remote_path = str(cfg.get("remote_path") or "/backups").strip("/")
+    if not url:
+        raise HTTPException(status_code=400, detail="WebDAV 未配置")
+    full_url = f"{url}/{remote_path}/{path_segment.lstrip('/')}"
+    auth = (username, password) if username or password else None
+    try:
+        resp = requests.request(method, full_url, auth=auth, data=data, timeout=timeout)
+        return resp
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="WebDAV 请求超时")
+    except requests.exceptions.ConnectionError as e:
+        raise HTTPException(status_code=502, detail=f"WebDAV 连接失败：{e}")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"WebDAV 请求失败：{e}")
+
+def webdav_ensure_remote_path():
+    cfg = webdav_config_load()
+    url = str(cfg.get("url") or "").rstrip("/")
+    username = str(cfg.get("username") or "")
+    password = str(cfg.get("password") or "")
+    remote_path = str(cfg.get("remote_path") or "/backups").strip("/")
+    if not url:
+        return
+    auth = (username, password) if username or password else None
+    dir_url = f"{url}/{remote_path}"
+    check = requests.request("PROPFIND", dir_url, auth=auth, timeout=10)
+    if check.status_code in (200, 207):
+        return
+    segments = remote_path.split("/")
+    for i in range(1, len(segments) + 1):
+        parent = f"{url}/{'/'.join(segments[:i])}"
+        r = requests.request("MKCOL", parent, auth=auth, timeout=10)
+        if r.status_code not in (200, 201, 204, 301, 302, 405):
+            break
+
+class BackupCreateRequest(BaseModel):
+    include_secrets: bool = False
+    include_assets_library: bool = False
+    include_assets_input: bool = False
+    include_assets_output: bool = False
+    include_assets_uploads: bool = False
+
+class WebdavConfigRequest(BaseModel):
+    url: str = ""
+    username: str = ""
+    password: str = ""
+    remote_path: str = "/backups"
+
+def backup_collect_files(include_secrets=False, include_library=False, include_input=False, include_output=False, include_uploads=False):
+    files = {}
+    if os.path.isdir(DATA_DIR):
+        for root, dirs, fns in os.walk(DATA_DIR):
+            rel = os.path.relpath(root, BASE_DIR).replace("\\", "/")
+            dirs[:] = [d for d in dirs if d not in ("backups", "update_backups", "update_staging")]
+            for fn in fns:
+                path = os.path.join(root, fn)
+                archive = f"{rel}/{fn}"
+                files[archive] = path
+    if include_secrets and os.path.exists(API_ENV_FILE):
+        files["API/.env"] = API_ENV_FILE
+    if include_library and os.path.isdir(ASSET_LIBRARY_DIR):
+        for root, dirs, fns in os.walk(ASSET_LIBRARY_DIR):
+            rel = os.path.relpath(root, BASE_DIR).replace("\\", "/")
+            for fn in fns:
+                files[f"{rel}/{fn}"] = os.path.join(root, fn)
+    if include_input and os.path.isdir(OUTPUT_INPUT_DIR):
+        for root, dirs, fns in os.walk(OUTPUT_INPUT_DIR):
+            rel = os.path.relpath(root, BASE_DIR).replace("\\", "/")
+            for fn in fns:
+                files[f"{rel}/{fn}"] = os.path.join(root, fn)
+    if include_output and os.path.isdir(OUTPUT_OUTPUT_DIR):
+        for root, dirs, fns in os.walk(OUTPUT_OUTPUT_DIR):
+            rel = os.path.relpath(root, BASE_DIR).replace("\\", "/")
+            dirs[:] = []
+            for fn in fns:
+                files[f"{rel}/{fn}"] = os.path.join(root, fn)
+    if include_uploads and os.path.isdir(LOCAL_UPLOAD_DIR):
+        for root, dirs, fns in os.walk(LOCAL_UPLOAD_DIR):
+            rel = os.path.relpath(root, BASE_DIR).replace("\\", "/")
+            for fn in fns:
+                files[f"{rel}/{fn}"] = os.path.join(root, fn)
+    return files
+
+def create_backup_zip(include_secrets=False, include_library=False, include_input=False, include_output=False, include_uploads=False):
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    zip_path = os.path.join(BACKUP_DIR, f"backup_{ts}.zip")
+    files = backup_collect_files(include_secrets, include_library, include_input, include_output, include_uploads)
+    canvas_count = 0
+    conversation_count = 0
+    total_bytes = 0
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for archive_name, abs_path in files.items():
+            if not os.path.isfile(abs_path):
+                continue
+            if archive_name.startswith("data/canvases/"):
+                canvas_count += 1
+            if archive_name.startswith("data/conversations/"):
+                conversation_count += 1
+            size = os.path.getsize(abs_path)
+            total_bytes += size
+            zf.write(abs_path, archive_name)
+        manifest = {
+            "version": BACKUP_VERSION,
+            "created_at": now_ms(),
+            "app_version": "",
+            "contents": {
+                "data": True,
+                "secrets": include_secrets,
+                "assets_library": include_library,
+                "assets_input": include_input,
+                "assets_output": include_output,
+                "assets_uploads": include_uploads,
+            },
+            "stats": {
+                "file_count": len(files),
+                "total_bytes": total_bytes,
+                "canvas_count": canvas_count,
+                "conversation_count": conversation_count,
+            },
+        }
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+    return zip_path, manifest
+
+def extract_backup_zip(zip_path, restore_secrets=False):
+    errors = []
+    restored_count = 0
+    skipped_secrets = 0
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            archive_name = info.filename
+            if archive_name == "manifest.json":
+                continue
+            if archive_name.startswith("API/.env") or archive_name.startswith("API\\.env"):
+                if not restore_secrets:
+                    skipped_secrets += 1
+                    continue
+            abs_path = os.path.normpath(os.path.join(BASE_DIR, archive_name))
+            if not abs_path.startswith(os.path.normpath(BASE_DIR)):
+                errors.append(f"路径安全检查失败：{archive_name}")
+                continue
+            try:
+                os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+                zf.extract(info, BASE_DIR)
+                restored_count += 1
+            except Exception as e:
+                errors.append(f"{archive_name}: {e}")
+    return restored_count, skipped_secrets, errors
+
+def list_local_backups():
+    if not os.path.isdir(BACKUP_DIR):
+        return []
+    items = []
+    for fn in sorted(os.listdir(BACKUP_DIR), reverse=True):
+        if not BACKUP_ID_RE.match(fn):
+            continue
+        path = os.path.join(BACKUP_DIR, fn)
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                manifest = json.loads(zf.read("manifest.json")) if "manifest.json" in zf.namelist() else {}
+        except Exception:
+            manifest = {}
+        items.append({
+            "id": fn,
+            "path": fn,
+            "created_at": manifest.get("created_at", int(os.path.getmtime(path) * 1000)),
+            "size": os.path.getsize(path),
+            "app_version": manifest.get("app_version", ""),
+            "contents": manifest.get("contents", {}),
+            "stats": manifest.get("stats", {}),
+        })
+    return items
+
+@app.post("/api/backup")
+async def api_create_backup(payload: BackupCreateRequest):
+    try:
+        zip_path, manifest = await asyncio.to_thread(
+            create_backup_zip,
+            payload.include_secrets,
+            payload.include_assets_library,
+            payload.include_assets_input,
+            payload.include_assets_output,
+            payload.include_assets_uploads,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建备份失败：{e}")
+    fn = os.path.basename(zip_path)
+    return {"backup": {"id": fn, "path": fn, "created_at": manifest["created_at"], "size": os.path.getsize(zip_path), "contents": manifest["contents"], "stats": manifest["stats"]}}
+
+@app.get("/api/backup/list")
+async def api_list_backups():
+    return {"backups": list_local_backups()}
+
+@app.get("/api/backup/download/{backup_id}")
+async def api_download_backup(backup_id: str):
+    if not BACKUP_ID_RE.match(backup_id):
+        raise HTTPException(status_code=400, detail="无效的备份 ID")
+    path = os.path.join(BACKUP_DIR, backup_id)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="备份不存在")
+    encoded = urllib.parse.quote(backup_id)
+    return FileResponse(path, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+
+@app.delete("/api/backup/{backup_id}")
+async def api_delete_backup(backup_id: str):
+    if not BACKUP_ID_RE.match(backup_id):
+        raise HTTPException(status_code=400, detail="无效的备份 ID")
+    path = os.path.join(BACKUP_DIR, backup_id)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="备份不存在")
+    os.remove(path)
+    return {"ok": True}
+
+@app.post("/api/backup/restore")
+async def api_restore_backup(file: UploadFile = File(...), restore_secrets: bool = Form(False)):
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="请上传 .zip 文件")
+    try:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+        tmp.write(await file.read())
+        tmp.close()
+        restored, skipped, errors = await asyncio.to_thread(extract_backup_zip, tmp.name, restore_secrets)
+        os.unlink(tmp.name)
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="无效的 ZIP 文件")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"恢复失败：{e}")
+    return {"restored": restored, "skipped_secrets": skipped, "errors": errors[:50]}
+
+@app.get("/api/backup/webdav")
+async def api_webdav_config():
+    cfg = webdav_config_load()
+    has_password = bool(cfg.get("password"))
+    return {
+        "url": cfg.get("url", ""),
+        "username": cfg.get("username", ""),
+        "remote_path": cfg.get("remote_path", "/backups"),
+        "has_password": has_password,
+        "configured": bool(cfg.get("url")),
+    }
+
+@app.put("/api/backup/webdav")
+async def api_webdav_save(payload: WebdavConfigRequest):
+    cfg = webdav_config_load()
+    cfg["url"] = str(payload.url or "").strip().rstrip("/")
+    cfg["username"] = str(payload.username or "").strip()
+    cfg["remote_path"] = str(payload.remote_path or "/backups").strip("/") or "backups"
+    if payload.password:
+        cfg["password"] = payload.password
+    webdav_config_save(cfg)
+    return {"ok": True, "configured": bool(cfg["url"])}
+
+@app.delete("/api/backup/webdav")
+async def api_webdav_clear():
+    if os.path.exists(BACKUP_CONFIG_FILE):
+        os.remove(BACKUP_CONFIG_FILE)
+    return {"ok": True}
+
+@app.post("/api/backup/webdav/push")
+async def api_webdav_push():
+    await asyncio.to_thread(webdav_ensure_remote_path)
+    backups = list_local_backups()
+    targets = backups[:10]
+    uploaded = []
+    for b in targets:
+        path = os.path.join(BACKUP_DIR, b["id"])
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rb") as f:
+            data = f.read()
+        resp = webdav_request("PUT", b["id"], data=data)
+        if resp.status_code == 403:
+            raise HTTPException(status_code=502, detail=f"WebDAV 服务器拒绝写入，请检查远程目录权限或路径 {b['id']}")
+        if resp.status_code not in (200, 201, 204):
+            raise HTTPException(status_code=502, detail=f"上传 {b['id']} 失败：HTTP {resp.status_code}")
+        uploaded.append(b["id"])
+    return {"uploaded": uploaded, "count": len(uploaded)}
+
+@app.get("/api/backup/webdav/list")
+async def api_webdav_list():
+    try:
+        resp = webdav_request("PROPFIND", "", timeout=15)
+        if resp.status_code not in (200, 207, 301, 302, 404):
+            if resp.status_code == 405:
+                return {"backups": [], "note": "服务器不支持 PROPFIND，请检查 WebDAV 地址"}
+            raise HTTPException(status_code=502, detail=f"WebDAV 返回 HTTP {resp.status_code}")
+        backups = []
+        if resp.status_code in (200, 207):
+            import xml.etree.ElementTree as ET
+            try:
+                root = ET.fromstring(resp.text)
+                ns = {"d": "DAV:"}
+                for response_el in root.findall(".//d:response", ns):
+                    href = response_el.find("d:href", ns)
+                    if href is not None:
+                        name = os.path.basename(href.text.strip("/"))
+                        if BACKUP_ID_RE.match(name):
+                            backups.append(name)
+            except ET.ParseError:
+                pass
+        return {"backups": sorted(backups, reverse=True)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"backups": [], "error": str(e)}
+
+@app.post("/api/backup/webdav/pull")
+async def api_webdav_pull(payload: dict = {}):
+    backup_id = str(payload.get("backup_id") or "")
+    if not backup_id or not BACKUP_ID_RE.match(backup_id):
+        raise HTTPException(status_code=400, detail="请指定有效的备份 ID")
+    resp = webdav_request("GET", backup_id, timeout=60)
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail="远程备份不存在")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"下载失败：HTTP {resp.status_code}")
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    dest = os.path.join(BACKUP_DIR, backup_id)
+    with open(dest, "wb") as f:
+        f.write(resp.content)
+    manifest = {}
+    try:
+        with zipfile.ZipFile(dest, "r") as zf:
+            if "manifest.json" in zf.namelist():
+                manifest = json.loads(zf.read("manifest.json"))
+    except Exception:
+        pass
+    return {"backup": {"id": backup_id, "path": backup_id, "size": len(resp.content), "contents": manifest.get("contents", {}), "stats": manifest.get("stats", {})}}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=3000)
