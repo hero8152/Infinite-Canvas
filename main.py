@@ -9108,6 +9108,22 @@ async def save_providers(payload: List[ApiProviderPayload]):
         for i, p in enumerate(providers):
             p["primary"] = (i == winner)
     save_api_providers(providers)
+    # 清理 runninghub_workflows.json 中已被删除/隐藏的工作流残留配置，防止重新显现
+    rh_provider = next((p for p in providers if isinstance(p, dict) and p.get("id") == "runninghub"), None)
+    if rh_provider:
+        active_ids = set()
+        for entry in rh_provider.get("rh_workflows") or []:
+            if isinstance(entry, dict):
+                eid = runninghub_workflow_store_key(entry.get("workflowId") or entry.get("id"))
+                if eid:
+                    active_ids.add(eid)
+        store = load_runninghub_workflow_store()
+        if store:
+            stale = [wid for wid in store if wid not in active_ids]
+            if stale:
+                for wid in stale:
+                    del store[wid]
+                save_runninghub_workflow_store(store)
     if env_updates:
         update_env_values(env_updates)
         reload_env_globals()   # 立即将最新 env 值同步回模块全局变量，无需重启
