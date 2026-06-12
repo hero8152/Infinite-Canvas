@@ -406,8 +406,15 @@ function updateField(fieldId, key, value){
     if(key === 'random_enabled'){
         delete previewRandomActive[fieldId];
     }
-    // 改名字 / 类型时不需要整页重渲染，浮窗自身刷新即可
-    if(key === 'name' || key === 'min' || key === 'max' || key === 'step' || key === 'default' || key === 'options' || key === 'random_enabled'){
+    // 改名字不需要重渲染浮窗——浮窗里只显示原始 key，不显示 f.name，且 input value 已在内存更新
+    // 改名字时如果刷新弹窗 body.innerHTML，输入框 DOM 被销毁导致焦点丢失（尤其中文 IME 无法录入）
+    if(key === 'name'){
+        renderPreview();
+        if(workspaceMode === 'canvas') renderMiniCanvasPreview(miniCanvasHost, true);
+        // 不调用 refreshPopupBody()，避免输入框失焦
+        return;
+    }
+    if(key === 'min' || key === 'max' || key === 'step' || key === 'default' || key === 'options' || key === 'random_enabled'){
         renderPreview();
         if(workspaceMode === 'canvas') renderMiniCanvasPreview(miniCanvasHost, true);
         if(popupNodeId === f.node) refreshPopupBody();
@@ -779,7 +786,7 @@ function renderInputRow(nodeId, inputKey, rawValue){
                 <div class="input-key">${escapeHtml(friendlyName)}${showOriginal ? ` <span style="font-size:10px;font-weight:600;color:var(--faint);margin-left:4px">${escapeHtml(inputKey)}</span>` : ''}</div>
                 <div class="input-orig">${tr('comfy.defaultValue')}${valueBadge}</div>
             </div>
-            <input class="small-input" type="text" placeholder="${tr('comfy.displayName')}" value="${active?escapeAttr(f.name):escapeAttr(friendlyName)}" ${active?'':'disabled'} oninput="updateField('${active?f.id:''}','name',this.value)">
+            <input class="small-input" type="text" placeholder="${tr('comfy.displayName')}" value="${active?escapeAttr(f.name):escapeAttr(friendlyName)}" ${active?'':'disabled'} oninput="if(!this.dataset.composing)updateField('${active?f.id:''}','name',this.value)" oncompositionstart="this.dataset.composing='1'" oncompositionend="delete this.dataset.composing;updateField('${active?f.id:''}','name',this.value)">
             <select class="small-select" ${active?'':'disabled'} onchange="updateField('${active?f.id:''}','type',this.value)">
                 ${TYPES.map(t=>`<option value="${t.v}" ${active && f.type===t.v?'selected':''}>${typeLabel(t.v)}</option>`).join('')}
             </select>
@@ -814,7 +821,8 @@ function renderExtras(f){
                     <span class="opt-index">${i + 1}</span>
                     <input class="small-input" type="text" placeholder="选项 ${i + 1}" value="${escapeAttr(o)}"
                         onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"
-                        oninput="updateDropdownOption('${fid}', ${i}, this.value, this)">
+                        oninput="if(!this.dataset.composing)updateDropdownOption('${fid}', ${i}, this.value, this)"
+                        oncompositionstart="this.dataset.composing='1'" oncompositionend="delete this.dataset.composing;updateDropdownOption('${fid}', ${i}, this.value, this)">
                     ${tag}
                     <button class="opt-del" type="button" onclick="event.stopPropagation();removeDropdownOption('${fid}', ${i})" title="删除"><i data-lucide="x" class="w-3 h-3"></i></button>
                 </div>
