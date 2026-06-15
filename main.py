@@ -14297,7 +14297,18 @@ def runninghub_provider_workflow_config(workflow_id: str):
 
 def runninghub_select_workflow_config(local_cfg, provider_cfg, workflow_id: str = ""):
     static_cfg = runninghub_static_workflow_config(workflow_id)
-    if static_cfg and (isinstance(local_cfg, dict) or isinstance(provider_cfg, dict)):
+    saved_candidates = [
+        cfg for cfg in (local_cfg, provider_cfg)
+        if isinstance(cfg, dict) and runninghub_workflow_config_has_payload(cfg)
+    ]
+    if saved_candidates:
+        def updated_at(cfg):
+            try:
+                return int(cfg.get("updatedAt") or 0)
+            except Exception:
+                return 0
+        return max(saved_candidates, key=updated_at)
+    if isinstance(static_cfg, dict) and runninghub_workflow_config_has_payload(static_cfg):
         return static_cfg
     if isinstance(local_cfg, dict) and isinstance(provider_cfg, dict):
         try:

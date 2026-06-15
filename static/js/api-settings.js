@@ -371,6 +371,7 @@ function rhKnownOptionsForField(field){
     return hit ? RH_EDITOR_KNOWN_FIELD_OPTIONS[hit].map(String) : [];
 }
 function normalizeRhWorkflowField(field){
+    const hasRequired = Object.prototype.hasOwnProperty.call(field || {}, 'required');
     const options = Array.isArray(field?.options)
         ? field.options.map(option => String(option ?? '').trim()).filter(Boolean)
         : String(field?.options || '').split(/\r?\n|,/).map(option => option.trim()).filter(Boolean);
@@ -395,7 +396,7 @@ function normalizeRhWorkflowField(field){
         max:field?.max ?? '',
         step:field?.step ?? '',
         imageOrder:Number(field?.imageOrder || field?.image_order || 0) || 0,
-        required:field?.required === true
+        required:hasRequired ? field?.required === true : undefined
     };
 }
 function normalizeFetchedRhWorkflowField(field){
@@ -886,7 +887,6 @@ function applyRhImageSlotDefaults(config){
     imageFields.forEach((field, index) => {
         if(!Number(field.imageOrder)) field.imageOrder = index + 1;
         if(field.required !== true && field.required !== false) field.required = index === 0;
-        if(index === 0 && field.required !== false) field.required = true;
     });
     config.optionalImageMode = config.optionalImageMode || 'prune-workflow';
     return config;
