@@ -14297,6 +14297,7 @@ def runninghub_provider_workflow_config(workflow_id: str):
 
 def runninghub_select_workflow_config(local_cfg, provider_cfg, workflow_id: str = ""):
     static_cfg = runninghub_static_workflow_config(workflow_id)
+    # 用户保存过的工作流配置优先，避免静态模板覆盖 RH 编辑器里的必填/可选等改动。
     saved_candidates = [
         cfg for cfg in (local_cfg, provider_cfg)
         if isinstance(cfg, dict) and runninghub_workflow_config_has_payload(cfg)

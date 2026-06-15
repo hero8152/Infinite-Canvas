@@ -371,6 +371,7 @@ function rhKnownOptionsForField(field){
     return hit ? RH_EDITOR_KNOWN_FIELD_OPTIONS[hit].map(String) : [];
 }
 function normalizeRhWorkflowField(field){
+    // 保留 required 是否由用户明确设置，避免未设置字段在保存后被误判为可选。
     const hasRequired = Object.prototype.hasOwnProperty.call(field || {}, 'required');
     const options = Array.isArray(field?.options)
         ? field.options.map(option => String(option ?? '').trim()).filter(Boolean)
@@ -886,6 +887,7 @@ function applyRhImageSlotDefaults(config){
     const imageFields = (config.fields || []).filter(field => rhWorkflowFieldKind(field) === 'IMAGE');
     imageFields.forEach((field, index) => {
         if(!Number(field.imageOrder)) field.imageOrder = index + 1;
+        // 只给未设置 required 的图片槽应用默认值，用户保存为可选后不能再被强制改回必选。
         if(field.required !== true && field.required !== false) field.required = index === 0;
     });
     config.optionalImageMode = config.optionalImageMode || 'prune-workflow';
