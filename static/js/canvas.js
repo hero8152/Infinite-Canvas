@@ -3301,10 +3301,10 @@ async function uploadFilesFromDataTransfer(dataTransfer){
     return raw.filter(isSupportedUploadFile);
 }
 function isAudioUrl(url){
-    return /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(String(url || ''));
+    return mediaUrlCandidates(url).some(candidate => /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(candidate));
 }
 function isTextUrl(url){
-    return /\.(txt|json|csv|srt|vtt|md)(\?|$)/i.test(String(url || ''));
+    return mediaUrlCandidates(url).some(candidate => /\.(txt|json|csv|srt|vtt|md)$/i.test(candidate));
 }
 function mediaKindForRef(ref){
     const kind = String(ref?.kind || ref?.mediaKind || '').toLowerCase();
@@ -11179,13 +11179,39 @@ function deleteConnection(id, event){
     scheduleSave();
 }
 function outputDownloadName(url){
-    const clean = (url || '').split('?')[0];
+    const clean = (mediaUrlCandidates(url)[0] || url || '').split(/[?#]/, 1)[0];
     const ext = clean.includes('.') ? clean.split('.').pop() : 'png';
     return `canvas-output-${Date.now()}.${ext || 'png'}`;
 }
+function mediaUrlCandidates(url){
+    const raw = String(url || '').trim();
+    if(!raw) return [];
+    const candidates = [];
+    const add = value => {
+        const clean = String(value || '').trim().split('#', 1)[0].split('?', 1)[0].toLowerCase();
+        if(clean && !candidates.includes(clean)) candidates.push(clean);
+    };
+    add(raw);
+    try {
+        const parsed = new URL(raw, window.location.origin);
+        add(parsed.pathname);
+        ['url','src','file','filename'].forEach(key => {
+            const value = parsed.searchParams.get(key);
+            if(value) add(decodeURIComponent(value));
+        });
+    } catch(e) {}
+    return candidates;
+}
 function isVideoUrl(url){
-    const clean = (url || '').split('?')[0].toLowerCase();
-    return /\.(mp4|webm|mov|m4v|avi|mkv)$/.test(clean);
+    return mediaUrlCandidates(url).some(candidate => /\.(mp4|webm|mov|m4v|avi|mkv)$/.test(candidate));
+}
+function lightboxMediaKindFor(url, out){
+    if(out?.type === 'image') return mediaKindForNode(out);
+    if(out?.type === 'output'){
+        const meta = outputMetaFor(url, out);
+        if(meta && Object.keys(meta).length) return mediaKindForOutputItem(meta);
+    }
+    return mediaKindForRef(url);
 }
 function mediaKindForOutputItem(item){
     const explicit = String(item?.kind || item?.mediaKind || '').toLowerCase();
@@ -11771,8 +11797,9 @@ function markOutputViewed(out, url){
 function outputLightboxItems(out=null){
     const normalize = (item, sourceOut=null) => {
         const url = outputUrlValue(item);
-        if(!url || mediaKindForOutputItem(item) !== 'image') return null;
-        return {url, outId:sourceOut?.id || ''};
+        const kind = mediaKindForOutputItem(item);
+        if(!url || !['image','video'].includes(kind)) return null;
+        return {url, outId:sourceOut?.id || '', kind};
     };
     const sourceOut = out?.id ? nodes.find(n => n.id === out.id) || out : null;
     if(sourceOut){
@@ -12442,7 +12469,8 @@ function openOutputLightbox(url, out){
             if(currentOutputLightboxOutId) downloadGroupNodeImages(currentOutputLightboxOutId);
         };
     }
-    const videoMode = isVideoUrl(url);
+    const mediaKind = lightboxMediaKindFor(url, out);
+    const videoMode = mediaKind === 'video';
     outputLightboxImg.style.display = videoMode ? 'none' : 'block';
     outputLightboxVideo.style.display = videoMode ? 'block' : 'none';
     outputCompareResult.style.display = videoMode ? 'none' : 'block';
