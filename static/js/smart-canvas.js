@@ -532,12 +532,21 @@ function mediaItemForStorage(item){
     delete clean._inlineVideoActive;
     return clean;
 }
+function clearPersistedRunState(target){
+    if(!target || typeof target !== 'object') return target;
+    if(Object.prototype.hasOwnProperty.call(target, 'running')) target.running = false;
+    ['outputs', 'outputSlots'].forEach(key => {
+        if(Array.isArray(target[key])) target[key].forEach(clearPersistedRunState);
+    });
+    return target;
+}
 function canvasForStorage(){
     const clean = JSON.parse(JSON.stringify(canvas || {}));
     clean.settings = settingsForStorage(canvasDefaultSmartSettings || initialSmartSettings);
     // 日志预览的临时节点（编辑器打开期间临时塞进 nodes）绝不能被持久化，否则刷新后会留下幽灵节点。
     if(Array.isArray(clean.nodes)) clean.nodes = clean.nodes.filter(node => node.id !== SMART_LOG_PREVIEW_NODE_ID);
     (clean.nodes || []).forEach(node => {
+        clearPersistedRunState(node);
         if(Array.isArray(node.images)) node.images = node.images.map(mediaItemForStorage);
         if(node.runSettings) node.runSettings = settingsForStorage(node.runSettings);
     });
@@ -1686,9 +1695,12 @@ function resolveChatProviderId(providerId=''){
     if(providers.some(p => p.id === providerId)) return providerId;
     return providers[0]?.id || 'comfly';
 }
+function isConcreteChatModel(model){
+    return Boolean(model) && !String(model).includes('*');
+}
 function providerChatModels(providerId){
     const provider = chatApiProviders().find(p => p.id === providerId);
-    return [...new Set(provider?.chat_models || [])];
+    return [...new Set(provider?.chat_models || [])].filter(isConcreteChatModel);
 }
 function resolveChatModel(model='', providerId=''){
     const models = providerChatModels(resolveChatProviderId(providerId));
@@ -4870,7 +4882,10 @@ async function loadCanvas(){
         canvasUsesConnections = Object.prototype.hasOwnProperty.call(canvas || {}, 'connections');
         document.title = canvas.title || tr('canvas.smartCanvas');
         document.getElementById('smartTitle').textContent = canvas.title || tr('canvas.smartCanvas');
-        nodes = (Array.isArray(canvas.nodes) ? canvas.nodes : []).map(normalizeLegacySmartNode).filter(Boolean);
+        nodes = (Array.isArray(canvas.nodes) ? canvas.nodes : [])
+            .map(normalizeLegacySmartNode)
+            .filter(Boolean)
+            .map(clearPersistedRunState);
         nodes.forEach(n => {
             const pendingTasks = smartPendingTasks(n);
             if(pendingTasks.length){
@@ -11976,6 +11991,7 @@ function coolNodeRunningState(node, ms=2000){
         if(current){
             current.running = false;
             render();
+            scheduleSave();
         }
     }, ms);
     return token;
@@ -13020,6 +13036,7 @@ async function runPromptLLMNode(nodeId){
     } finally {
         node.running = false;
         render();
+        scheduleSave();
     }
 }
 function comfyFieldKind(field){
