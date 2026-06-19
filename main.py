@@ -21,7 +21,7 @@ import httpx
 from PIL import Image
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Header, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from app_config import (
@@ -182,6 +182,9 @@ ASSET_ROOT_DIR = os.path.join(STATIC_DIR, "assets")
 ASSET_LIBRARY_DIR = os.path.join(ASSET_ROOT_DIR, "library")
 ASSET_LIBRARY_FILE = os.path.join(DATA_DIR, "asset_library.json")
 ASSET_LIBRARY_LOCK = Lock()
+FRONTEND_BUILD_DIR = os.path.join(STATIC_DIR, "app")
+FRONTEND_ASSETS_DIR = os.path.join(FRONTEND_BUILD_DIR, "assets")
+FRONTEND_INDEX_FILE = os.path.join(FRONTEND_BUILD_DIR, "index.html")
 API_PROVIDERS_FILE = os.path.join(DATA_DIR, "api_providers.json")
 PROVIDER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,40}$")
 IMAGE_TASK_TIMEOUT = float(os.getenv("IMAGE_TASK_TIMEOUT", str(AI_REQUEST_TIMEOUT)))
@@ -204,6 +207,8 @@ os.makedirs(ASSET_LIBRARY_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
 app.mount("/assets", StaticFiles(directory=ASSET_ROOT_DIR), name="assets")
+if os.path.isdir(FRONTEND_ASSETS_DIR):
+    app.mount("/app/assets", StaticFiles(directory=FRONTEND_ASSETS_DIR), name="app-assets")
 
 # --- Pydantic 模型 ---
 
@@ -3614,12 +3619,42 @@ def upstream_message_from_record(item):
 
 # --- 路由接口 ---
 
-@app.get("/")
-async def index():
+def frontend_index_response():
+    if not os.path.exists(FRONTEND_INDEX_FILE):
+        return Response(
+            "<!doctype html><html><head><title>Feebee Studios</title></head>"
+            "<body><h1>Frontend build missing</h1>"
+            "<p>Run <code>npm --prefix frontend run build</code> to generate the Quiet Creative OS shell.</p>"
+            "</body></html>",
+            status_code=503,
+            media_type="text/html",
+            headers={"Cache-Control": "no-store"},
+        )
     return FileResponse(
-        os.path.join(STATIC_DIR, "index.html"),
+        FRONTEND_INDEX_FILE,
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.get("/")
+async def index():
+    return frontend_index_response()
+
+
+@app.get("/app")
+async def app_index():
+    return frontend_index_response()
+
+
+@app.get("/app/{path:path}")
+async def app_fallback(path: str):
+    return frontend_index_response()
+
+
+@app.get("/legacy")
+@app.get("/legacy/")
+async def legacy_index():
+    return RedirectResponse(url="/app", status_code=302)
 
 @app.get("/api/view")
 def view_image(filename: str, type: str = "input", subfolder: str = ""):

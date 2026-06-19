@@ -60,5 +60,33 @@ Development check:
 python scripts/guardrails.py
 ```
 
+## Quiet Creative OS frontend
+
+Quiet Creative OS uses a Vite + React + TypeScript shell under `frontend/`. The FastAPI backend and existing API schemas remain unchanged.
+
+Current product routes:
+
+- Native React: Generate, Enhance, Edit, Online, Chat, Gallery, and Canvas foundation.
+- Embedded for pending native migration: Angle, API / Models, and ComfyUI.
+- Retired from product navigation: Flatlay and Batch try-on.
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+python main.py
+```
+
+Routes:
+
+- `http://127.0.0.1:3000/` loads the new Quiet Creative OS shell.
+- `http://127.0.0.1:3000/app` also loads the new shell.
+- `http://127.0.0.1:3000/legacy` redirects to `/app`; the old static shell is no longer a product surface.
+- `/app/legacy-*` fallback URLs normalize to their native routes.
+- `/app/flatlay` and `/app/batch-tryon` normalize to `/app/gallery`.
+
+The Vite build writes generated assets to `static/app/`, which is intentionally ignored by git. Rebuild it after frontend source changes before running the FastAPI preview.
+
 <img width="2196" height="1040" alt="image" src="https://github.com/user-attachments/assets/6d823668-cde2-4836-8332-1858efe5f520" />
 <img width="2214" height="771" alt="image" src="https://github.com/user-attachments/assets/52e10958-753f-45ba-a50e-3bbec27be436" />
