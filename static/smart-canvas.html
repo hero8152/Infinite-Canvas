@@ -115,10 +115,12 @@
         .empty-drop .pixel-icon { width:20px; height:20px; }
         .pending-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(86px, 1fr)); gap:8px; align-items:stretch; }
         .pending-grid-single { grid-template-columns:1fr; }
-        .pending-cell { min-height:100px; aspect-ratio:var(--node-aspect, 1 / 1); display:flex; align-items:center; justify-content:center; border:1px dashed var(--line-strong); background:var(--soft); color:var(--muted); font-size:9px; font-weight:950; letter-spacing:.1em; text-transform:uppercase; overflow:hidden; position:relative; }
+        .pending-cell { min-height:100px; aspect-ratio:var(--node-aspect, 1 / 1); display:flex; flex-direction:column; gap:5px; align-items:center; justify-content:center; border:1px dashed var(--line-strong); background:var(--soft); color:var(--muted); font-size:9px; font-weight:950; letter-spacing:.08em; text-transform:uppercase; overflow:hidden; position:relative; padding:8px; text-align:center; }
         .smart-node.node-sized .pending-cell { height:100%; min-height:0; aspect-ratio:auto; }
         .pending-cell::before { content:""; position:absolute; inset:0; opacity:.55; background:repeating-linear-gradient(90deg, transparent 0 8px, rgba(233,92,39,.18) 8px 12px), repeating-linear-gradient(0deg, transparent 0 8px, rgba(15,15,15,.07) 8px 12px); }
-        .pending-cell span { position:relative; border:1px solid var(--line); background:var(--card); padding:4px 6px; }
+        .pending-label { position:relative; border:1px solid var(--line); background:var(--card); padding:4px 6px; }
+        .pending-detail { position:relative; max-width:100%; color:var(--muted); background:rgba(255,255,255,.76); border:1px solid var(--line); padding:3px 5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:8px; letter-spacing:0; text-transform:none; }
+        body.studio-theme-dark .pending-detail { background:rgba(28,28,30,.9); }
         .node-error-box { min-height:116px; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:7px; border:1px solid var(--orange); background:var(--orange-soft); color:var(--ink); padding:12px; text-align:left; font-size:11px; line-height:1.45; }
         .smart-node.node-sized .empty-drop,
         .smart-node.node-sized .node-error-box { height:100%; min-height:0; box-sizing:border-box; }
@@ -143,15 +145,17 @@
         .smart-node.resizing { outline:2px solid var(--orange); outline-offset:4px; }
         .composer { position:absolute; left:50%; bottom:20px; transform:translateX(-50%); z-index:50; width:min(840px, calc(100vw - 36px)); border:2px solid var(--ink); background:var(--panel-bg); box-shadow:none; padding:12px; display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:9px; }
         .composer::before { content:""; position:absolute; left:0; right:0; top:0; height:5px; background:repeating-linear-gradient(90deg, var(--ink) 0 14px, var(--orange) 14px 28px, var(--line) 28px 42px); pointer-events:none; }
-        .composer-head { grid-column:1/-1; display:grid; grid-template-columns:minmax(180px, .72fr) minmax(0, 1fr) auto; align-items:center; gap:8px; padding-top:3px; }
+        .composer-head { grid-column:1/-1; display:grid; grid-template-columns:minmax(180px, .72fr) minmax(0, 1fr) auto auto; align-items:center; gap:8px; padding-top:3px; }
         .composer-kicker { min-width:0; color:var(--muted); font-size:10px; font-weight:950; text-transform:uppercase; letter-spacing:.1em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .composer-advanced-toggle { height:34px; min-width:96px; border:1px solid var(--line); background:var(--card); color:var(--ink); display:inline-flex; align-items:center; justify-content:center; gap:7px; font-size:11px; font-weight:950; }
+        .composer-advanced-toggle, .prompt-template-toggle { height:34px; min-width:96px; border:1px solid var(--line); background:var(--card); color:var(--ink); display:inline-flex; align-items:center; justify-content:center; gap:7px; font-size:11px; font-weight:950; }
         .composer-advanced-toggle.active { background:var(--ink); border-color:var(--ink); color:#fff; }
         .input-thumbs { grid-column:1/-1; display:flex; align-items:center; gap:6px; min-height:26px; overflow-x:auto; padding-bottom:1px; }
         .input-thumbs:empty::before { content:"NO CONTEXT"; height:22px; display:inline-flex; align-items:center; padding:0 8px; border:1px dashed var(--line); color:var(--faint); font-size:9px; font-weight:950; letter-spacing:.1em; }
         .context-chip { height:30px; max-width:190px; display:inline-flex; align-items:center; gap:7px; flex:0 0 auto; border:1px solid var(--line); background:var(--soft); color:var(--ink); padding:3px 8px 3px 3px; font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
         .context-chip img,
         .context-chip video { width:22px; height:22px; object-fit:cover; border:1px solid var(--ink); background:var(--card); }
+        .context-chip .image-audio { width:22px; height:22px; aspect-ratio:auto; gap:0; border:1px solid var(--ink); overflow:hidden; }
+        .context-chip .image-audio span { display:none; }
         .context-chip .pixel-icon { width:14px; height:14px; color:var(--orange); }
         .context-chip span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .input-thumb { position:relative; width:48px; height:48px; border:1px solid var(--ink); background:var(--soft); flex:0 0 auto; }
@@ -161,6 +165,14 @@
         .prompt-input { width:100%; min-height:96px; max-height:250px; overflow:auto; resize:none; border:1px solid var(--ink); background:var(--card); color:var(--ink); outline:none; padding:12px 12px 12px 14px; font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; background-image:linear-gradient(to bottom, transparent 23px, rgba(230,213,168,.48) 24px); background-size:100% 24px; }
         .prompt-input:empty::before { content:attr(data-placeholder); color:var(--faint); }
         .prompt-input:focus { border-color:var(--orange); outline:1px solid var(--orange); }
+        .prompt-template-panel { position:absolute; right:0; bottom:calc(100% + 8px); z-index:74; width:min(480px, calc(100vw - 40px)); max-height:360px; display:none; flex-direction:column; gap:8px; padding:10px; border:2px solid var(--ink); background:var(--panel-bg); }
+        .prompt-template-panel.open { display:flex; }
+        .prompt-template-head { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--ink); font-size:11px; font-weight:950; text-transform:uppercase; letter-spacing:.08em; }
+        .prompt-template-list { min-height:0; overflow:auto; display:grid; gap:7px; }
+        .prompt-template-item { border:1px solid var(--line); background:var(--soft); color:var(--ink); text-align:left; padding:8px; display:grid; gap:5px; }
+        .prompt-template-item:hover { border-color:var(--ink); background:var(--orange-soft); }
+        .prompt-template-title { font-size:11px; font-weight:950; }
+        .prompt-template-scene { color:var(--muted); font-size:10px; line-height:1.45; max-height:30px; overflow:hidden; }
         .composer-advanced { grid-column:1/-1; display:none; grid-template-columns:minmax(150px, .75fr) minmax(180px, 1fr) minmax(180px, 1.1fr) auto auto; gap:8px; align-items:end; padding:9px; border:1px solid var(--line); background:var(--soft); }
         .composer-advanced.open { display:grid; }
         .composer-advanced .field { min-width:0; }
@@ -170,7 +182,9 @@
         .run-btn:hover { background:#000; color:var(--orange-soft); }
         .run-btn:disabled { background:var(--line); border-color:var(--line); color:var(--muted); cursor:wait; }
         .mention-token { display:inline-flex; align-items:center; gap:5px; height:25px; max-width:188px; margin:0 3px 2px; padding:2px 3px 2px 3px; border:1px solid var(--ink); background:var(--soft); color:var(--ink); vertical-align:middle; font-size:11px; font-weight:900; white-space:nowrap; }
-        .mention-token img { width:19px; height:19px; object-fit:cover; border:1px solid var(--line); }
+        .mention-token img, .mention-token video { width:19px; height:19px; object-fit:cover; border:1px solid var(--line); }
+        .mention-token .image-audio { width:19px; height:19px; aspect-ratio:auto; gap:0; border:1px solid var(--line); overflow:hidden; }
+        .mention-token .image-audio span { display:none; }
         .mention-token span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
         .mention-remove { width:17px; height:17px; border:1px solid var(--line); background:var(--card); color:var(--muted); display:inline-flex; align-items:center; justify-content:center; font-size:10px; line-height:1; font-weight:950; }
         .mention-remove:hover { border-color:var(--ink); color:var(--orange); }
@@ -182,7 +196,7 @@
         .mention-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; }
         .mention-option { min-width:0; border:1px solid var(--line); background:var(--soft); padding:4px; color:var(--ink); }
         .mention-option:hover { border-color:var(--ink); background:var(--orange-soft); }
-        .mention-option img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--card); }
+        .mention-option img, .mention-option video { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--card); }
         .mention-option span { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; font-weight:800; }
         .asset-toggle { position:absolute; right:20px; top:84px; z-index:42; }
         .asset-panel { position:absolute; right:20px; top:128px; bottom:150px; z-index:41; width:334px; display:none; flex-direction:column; gap:9px; padding:12px; border:2px solid var(--ink); background:var(--panel-bg); }
@@ -198,7 +212,9 @@
         .asset-grid { min-height:0; overflow:auto; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; padding-right:2px; }
         .asset-item { border:1px solid var(--line); background:var(--card); cursor:grab; }
         .asset-item:hover { border-color:var(--ink); }
-        .asset-item img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--soft); }
+        .asset-item img, .asset-item video { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--soft); }
+        .asset-audio, .image-audio { width:100%; aspect-ratio:1/1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; background:var(--soft); color:var(--muted); font-size:10px; font-weight:950; text-transform:uppercase; letter-spacing:.08em; }
+        .asset-kind { flex:0 0 auto; border:1px solid var(--line); background:var(--soft); color:var(--muted); padding:1px 4px; font-size:9px; font-weight:950; text-transform:uppercase; }
         .asset-meta { display:flex; align-items:center; gap:4px; min-height:32px; padding:5px; border-top:1px solid var(--line); }
         .asset-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; font-weight:850; }
         .selection-tools { position:absolute; z-index:55; display:none; align-items:center; gap:0; border:2px solid var(--ink); background:var(--panel-bg); padding:5px; transform:translate(-50%, -100%); }
@@ -253,6 +269,7 @@
         .theme-dark .composer,
         .theme-dark .asset-panel,
         .theme-dark .mention-picker,
+        .theme-dark .prompt-template-panel,
         .theme-dark .selection-tools { background:#1c1c1e; border-color:#5a5a5d; }
         .theme-dark .node-head { background:#0e0e10; border-color:#3a3a3d; }
         .theme-dark .tool-btn.primary,
@@ -292,7 +309,7 @@
                 </div>
             </div>
             <div class="panel toolbar">
-                <button id="uploadBtn" class="tool-btn" type="button" title="上传图片"><svg class="pixel-icon"><use href="#upload"></use></svg>图片</button>
+                <button id="uploadBtn" class="tool-btn" type="button" title="上传素材"><svg class="pixel-icon"><use href="#upload"></use></svg>素材</button>
                 <button id="promptNodeBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#tool-prompt"></use></svg>Prompt</button>
                 <button id="groupBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#tool-group"></use></svg>分组</button>
                 <button id="copyBtn" class="tool-btn" type="button"><svg class="pixel-icon"><use href="#copy"></use></svg>复制</button>
@@ -324,7 +341,7 @@
                 <div id="nodes" class="nodes"></div>
             </div>
         </div>
-        <div id="dropOverlay" class="drop-overlay">拖放图片到智能画布</div>
+        <div id="dropOverlay" class="drop-overlay">拖放素材到智能画布</div>
         <div id="selectionTools" class="selection-tools"></div>
 
         <div class="composer">
@@ -336,12 +353,14 @@
                     <option value="llm">文本润色</option>
                 </select>
                 <div id="composerKicker" class="composer-kicker">选择图片、Prompt 或资产作为上下文</div>
+                <button id="promptTemplateBtn" class="prompt-template-toggle" type="button"><svg class="pixel-icon"><use href="#tool-prompt"></use></svg>模板</button>
                 <button id="advancedToggle" class="composer-advanced-toggle" type="button"><svg class="pixel-icon"><use href="#settings"></use></svg>Advanced</button>
             </div>
             <div id="inputThumbs" class="input-thumbs"></div>
             <div class="prompt-row">
                 <div id="promptInput" class="prompt-input" contenteditable="true" data-placeholder="描述你要生成或编辑的内容，输入 @ 可引用图片"></div>
                 <div id="mentionPicker" class="mention-picker"></div>
+                <div id="promptTemplatePanel" class="prompt-template-panel"></div>
             </div>
             <div id="composerAdvanced" class="composer-advanced">
                 <label class="field"><span class="field-title">Provider</span><select id="providerSelect" class="select-lite"></select></label>
@@ -352,7 +371,7 @@
             </div>
             <button id="runBtn" class="run-btn" type="button"><svg class="pixel-icon"><use href="#chevron-right"></use></svg>运行</button>
         </div>
-        <input id="fileInput" type="file" accept="image/*" multiple hidden>
+        <input id="fileInput" type="file" accept="image/*,video/*,audio/*" multiple hidden>
     </div>
 
     <script>
@@ -377,7 +396,10 @@
         let linkState = null;
         let clipboard = [];
         let assetLibrary = {categories:[]};
+        let localAssets = {items:[], tree:null};
         let assetLibraryOpen = false;
+        let promptTemplateLibraries = [];
+        let promptTemplatePanelOpen = false;
         let smartAdvancedOpen = false;
         let mentionSource = 'input';
         let mentionRange = null;
@@ -396,6 +418,7 @@
         const titleInput = $('titleInput');
         const promptInput = $('promptInput');
         const mentionPicker = $('mentionPicker');
+        const promptTemplatePanel = $('promptTemplatePanel');
         const inputThumbs = $('inputThumbs');
         const selectionTools = $('selectionTools');
         const assetPanel = $('assetPanel');
@@ -408,15 +431,77 @@
             saveState.textContent = text;
             saveState.dataset.state = String(text || '').trim().toLowerCase().replace(/\s+/g, '-');
         }
-        function isVideoUrl(url){ return /\.(mp4|webm|mov|m4v)(?:\?|$)/i.test(String(url || '')); }
-        function imageIsVideo(img){ return img?.kind === 'video' || isVideoUrl(img?.url); }
+        function isVideoUrl(url){ return /\.(mp4|webm|mov|m4v|mkv)(?:\?|$)/i.test(String(url || '')); }
+        function isAudioUrl(url){ return /\.(mp3|wav|m4a|aac|ogg|flac)(?:\?|$)/i.test(String(url || '')); }
+        function mediaKindForUrl(url){
+            if(isVideoUrl(url)) return 'video';
+            if(isAudioUrl(url)) return 'audio';
+            return 'image';
+        }
+        function mediaKind(item){ return item?.kind || mediaKindForUrl(item?.url); }
+        function imageIsVideo(img){ return mediaKind(img) === 'video'; }
+        function imageIsAudio(img){ return mediaKind(img) === 'audio'; }
+        function mediaPreviewHtml(item, label='media'){
+            const url = item?.url || '';
+            if(!url) return '<svg class="pixel-icon"><use href="#folder"></use></svg>';
+            if(imageIsVideo(item)) return `<video src="${escapeHtml(url)}" muted playsinline></video>`;
+            if(imageIsAudio(item)) return `<div class="image-audio"><svg class="pixel-icon"><use href="#tool-prompt"></use></svg><span>AUDIO</span></div>`;
+            return `<img src="${escapeHtml(url)}" alt="${escapeHtml(label)}">`;
+        }
+        function uniqueStrings(list){
+            const seen = new Set();
+            return (list || []).map(item => String(item || '').trim()).filter(item => {
+                if(!item || seen.has(item)) return false;
+                seen.add(item);
+                return true;
+            });
+        }
         function selectedNode(){ return nodes.find(n => selectedIds.has(n.id)) || null; }
         function selectedNodes(){ return [...selectedIds].map(id => nodes.find(n => n.id === id)).filter(Boolean); }
+        function runningHubEntries(provider, key, prefix){
+            return (provider?.[key] || [])
+                .filter(item => item && item.enabled !== false && item.hidden !== true)
+                .map(item => `${prefix}:${item.workflowId || item.appId || item.id || ''}`)
+                .filter(item => item !== `${prefix}:`);
+        }
         function rawProviderModels(kind, provider){
             if(!provider) return [];
             if(kind === 'video') return provider.video_models?.length ? provider.video_models : [];
             if(kind === 'chat') return provider.chat_models?.length ? provider.chat_models : [];
+            if((provider.protocol || '').toLowerCase() === 'runninghub' || (provider.id || '').toLowerCase() === 'runninghub'){
+                return uniqueStrings([
+                    ...(provider.image_models || []),
+                    ...runningHubEntries(provider, 'rh_apps', 'app'),
+                    ...runningHubEntries(provider, 'rh_workflows', 'workflow')
+                ]);
+            }
             return provider.image_models?.length ? provider.image_models : [];
+        }
+        function providerModelLabel(provider, model){
+            const text = String(model || '');
+            const app = text.match(/^app:(.+)$/);
+            if(app){
+                const entry = (provider?.rh_apps || []).find(item => String(item.appId || item.id || '') === app[1]);
+                return `App · ${entry?.title || app[1]}`;
+            }
+            const workflow = text.match(/^workflow:(.+)$/);
+            if(workflow){
+                const entry = (provider?.rh_workflows || []).find(item => String(item.workflowId || item.id || '') === workflow[1]);
+                return `Workflow · ${entry?.title || workflow[1]}`;
+            }
+            return text;
+        }
+        function runningHubRequiredImages(provider, model){
+            const text = String(model || '');
+            const app = text.match(/^app:(.+)$/);
+            const workflow = text.match(/^workflow:(.+)$/);
+            const entry = app
+                ? (provider?.rh_apps || []).find(item => String(item.appId || item.id || '') === app[1])
+                : workflow
+                    ? (provider?.rh_workflows || []).find(item => String(item.workflowId || item.id || '') === workflow[1])
+                    : null;
+            if(!entry) return 0;
+            return (entry.fields || []).filter(field => field && field.enabled !== false && field.required === true && String(field.fieldType || '').toUpperCase() === 'IMAGE').length;
         }
         function fallbackModels(kind){
             if(kind === 'video') return videoModels;
@@ -730,7 +815,7 @@
             const selectedCount = selectedContextNodes().length;
             const imageCount = selectedContextImages().length;
             const mentionCount = collectMentionedImages().length;
-            if(selectedCount || mentionCount) return `${selectedCount} selected · ${imageCount + mentionCount} images`;
+            if(selectedCount || mentionCount) return `${selectedCount} selected · ${imageCount + mentionCount} media`;
             return '选择图片、Prompt 或资产作为上下文';
         }
         function addNode(node){
@@ -881,6 +966,8 @@
                 model: engine === 'comfy' ? $('workflowSelect').value : ($('modelSelect').value || providerModels(kind, providerId)[0] || ''),
                 size: $('sizeSelect').value || '',
                 reference_images: (request?.refs || []).map(ref => ({url:ref.url, name:ref.name || '', role:ref.role || ''})),
+                videos: request?.videos || [],
+                audios: request?.audios || [],
                 sourceIds: request?.sourceIds || []
             };
         }
@@ -899,12 +986,16 @@
             }
             node.pending = 0;
             node.running = false;
+            delete node.pendingProgress;
+            delete node.pendingTaskId;
             delete node.error;
         }
         function failOutputNode(node, error){
             if(!node) return;
             node.pending = 0;
             node.running = false;
+            delete node.pendingProgress;
+            delete node.pendingTaskId;
             node.error = String(error?.message || error || '运行失败');
             node.title = 'Run Failed';
         }
@@ -948,18 +1039,53 @@
                 ${selected ? `<button class="resize-handle" type="button" data-resize="${escapeHtml(node.id)}" title="调整大小" aria-label="调整大小"></button>` : ''}
             </div>`;
         }
+        function shortTaskId(value){
+            const text = String(value || '').trim();
+            return text.length > 14 ? `${text.slice(0, 8)}…${text.slice(-4)}` : text;
+        }
+        function taskProgressFromResponse(task){
+            const progress = {...(task?.progress || task?.pending?.progress || {})};
+            const raw = task?.raw || task?.pending?.raw || {};
+            const queue = raw.queue_info || raw.queueInfo || {};
+            progress.status = progress.status || task?.status || task?.pending?.status || '';
+            progress.submit_id = progress.submit_id || task?.submit_id || task?.pending?.submit_id || raw.submit_id || '';
+            progress.gen_status = progress.gen_status || raw.gen_status || raw.genStatus || raw.task_status || raw.status || '';
+            progress.queue_status = progress.queue_status || queue.queue_status || queue.queueStatus || '';
+            progress.queue_idx = progress.queue_idx ?? queue.queue_idx ?? queue.queueIdx;
+            progress.queue_length = progress.queue_length ?? queue.queue_length ?? queue.queueLength;
+            progress.credit_count = progress.credit_count ?? raw.credit_count ?? raw.creditCount;
+            progress.provider = progress.provider || task?.provider_id || '';
+            return progress;
+        }
+        function pendingProgressLines(progress){
+            const lines = [];
+            if(progress?.queue_status || progress?.queue_idx != null){
+                const idx = progress.queue_idx != null ? ` #${progress.queue_idx}` : '';
+                lines.push(`${progress.queue_status || 'Queueing'}${idx}`);
+            }
+            if(progress?.credit_count != null) lines.push(`${progress.credit_count} credits`);
+            if(progress?.submit_id) lines.push(shortTaskId(progress.submit_id));
+            if(!lines.length && progress?.gen_status) lines.push(progress.gen_status);
+            return lines;
+        }
+        function renderPendingCell(node, index){
+            const progress = node.pendingProgress || {};
+            const label = progress.provider === 'jimeng' || progress.submit_id ? '即梦排队' : `${outputKindForEngine(node.outputKind === 'video' ? 'video' : 'image')} ${index + 1}`;
+            const detail = pendingProgressLines(progress).slice(0, 3);
+            return `<div class="pending-cell"><div class="pending-label">${escapeHtml(label)}</div>${detail.map(line => `<div class="pending-detail">${escapeHtml(line)}</div>`).join('')}</div>`;
+        }
         function renderNodeBody(node){
             if(node.type === 'smart-image' || node.type === 'smart-group'){
                 const images = nodeImages(node);
                 if(node.error) return `<div class="node-error-box"><strong>RUN FAILED</strong><span>${escapeHtml(node.error)}</span></div>`;
                 if(node.running || node.pending){
                     const count = Math.max(1, Math.min(8, Number(node.pending) || 1));
-                    return `<div class="pending-grid ${count === 1 ? 'pending-grid-single' : ''}">${Array.from({length:count}, (_, index) => `<div class="pending-cell"><span>${escapeHtml(outputKindForEngine(node.outputKind === 'video' ? 'video' : 'image'))} ${index + 1}</span></div>`).join('')}</div>`;
+                    return `<div class="pending-grid ${count === 1 ? 'pending-grid-single' : ''}">${Array.from({length:count}, (_, index) => renderPendingCell(node, index)).join('')}</div>`;
                 }
-                if(!images.length) return `<div class="empty-drop" data-empty-upload="${escapeHtml(node.id)}"><svg class="pixel-icon"><use href="#upload"></use></svg><span>点击或拖入图片</span></div>`;
+                if(!images.length) return `<div class="empty-drop" data-empty-upload="${escapeHtml(node.id)}"><svg class="pixel-icon"><use href="#upload"></use></svg><span>点击或拖入素材</span></div>`;
                 return `<div class="image-grid ${images.length === 1 ? 'image-grid-single' : ''}">${images.map((img, index) => `
-                    <div class="image-tile" draggable="true" data-drag-image="${escapeHtml(node.id)}" data-image-index="${index}" data-url="${escapeHtml(img.url)}" data-name="${escapeHtml(img.name || 'image')}">
-                        ${imageIsVideo(img) ? `<video src="${escapeHtml(img.url)}" muted playsinline controls></video>` : `<img src="${escapeHtml(img.url)}" alt="">`}
+                    <div class="image-tile" draggable="true" data-drag-image="${escapeHtml(node.id)}" data-image-index="${index}" data-url="${escapeHtml(img.url)}" data-name="${escapeHtml(img.name || 'image')}" data-kind="${escapeHtml(mediaKind(img))}">
+                        ${mediaPreviewHtml(img, img.name || 'image').replace('<video ', '<video controls ')}
                         <div class="image-caption">${escapeHtml(img.name || `image-${index + 1}`)}</div>
                         <div class="tile-tools">
                             <button class="icon-btn" type="button" data-save-asset="${escapeHtml(node.id)}" data-image-index="${index}" title="保存资产"><svg class="pixel-icon"><use href="#folder"></use></svg></button>
@@ -1075,7 +1201,7 @@
                 tile.addEventListener('dragstart', e => {
                     e.stopPropagation();
                     e.dataTransfer.effectAllowed = 'copy';
-                    e.dataTransfer.setData('application/x-smart-image', JSON.stringify({url:tile.dataset.url, name:tile.dataset.name}));
+                    e.dataTransfer.setData('application/x-smart-image', JSON.stringify({url:tile.dataset.url, name:tile.dataset.name, kind:tile.dataset.kind || mediaKindForUrl(tile.dataset.url)}));
                     e.dataTransfer.setData('text/plain', tile.dataset.url || '');
                 });
             });
@@ -1096,12 +1222,12 @@
                 const images = nodeImages(node);
                 if(images.length){
                     const first = images[0];
-                    chips.push(`<div class="context-chip" title="${escapeHtml(nodeLabel(node))}">${imageIsVideo(first) ? `<video src="${escapeHtml(first.url)}" muted playsinline></video>` : `<img src="${escapeHtml(first.url)}" alt="">`}<span>${escapeHtml(nodeLabel(node))}${images.length > 1 ? ` · ${images.length}` : ''}</span></div>`);
+                    chips.push(`<div class="context-chip" title="${escapeHtml(nodeLabel(node))}">${mediaPreviewHtml(first, nodeLabel(node))}<span>${escapeHtml(nodeLabel(node))}${images.length > 1 ? ` · ${images.length}` : ''}</span></div>`);
                 } else {
                     chips.push(`<div class="context-chip" title="${escapeHtml(nodeLabel(node))}"><svg class="pixel-icon"><use href="#tool-prompt"></use></svg><span>${escapeHtml(nodeLabel(node))}</span></div>`);
                 }
             });
-            mentioned.forEach(ref => chips.push(`<div class="context-chip" title="@${escapeHtml(ref.name || 'image')}">${imageIsVideo(ref) ? `<video src="${escapeHtml(ref.url)}" muted playsinline></video>` : `<img src="${escapeHtml(ref.url)}" alt="">`}<span>@${escapeHtml(ref.name || 'image')}</span></div>`));
+            mentioned.forEach(ref => chips.push(`<div class="context-chip" title="@${escapeHtml(ref.name || 'image')}">${mediaPreviewHtml(ref, ref.name || 'image')}<span>@${escapeHtml(ref.name || 'image')}</span></div>`));
             inputThumbs.innerHTML = chips.join('');
             $('composerKicker').textContent = contextSummary();
         }
@@ -1128,12 +1254,81 @@
                 $('providerSelect').value = currentProvider;
                 const models = providerModels(kind, currentProvider);
                 const currentModel = $('modelSelect').value || models[0] || '';
-                $('modelSelect').innerHTML = models.map(m => `<option value="${escapeHtml(m)}" ${m === currentModel ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+                const selectedProvider = providerById(currentProvider, kind);
+                $('modelSelect').innerHTML = models.map(m => `<option value="${escapeHtml(m)}" ${m === currentModel ? 'selected' : ''}>${escapeHtml(providerModelLabel(selectedProvider, m))}</option>`).join('');
             } else {
                 $('workflowSelect').innerHTML = comfyWorkflows.length
                     ? comfyWorkflows.map(w => `<option value="${escapeHtml(w.name)}">${escapeHtml(w.title || w.name)}</option>`).join('')
                     : '<option value="">没有自定义工作流</option>';
             }
+        }
+        async function loadPromptTemplates(){
+            try {
+                const data = await fetchJson('/api/smart-canvas/prompt-templates');
+                promptTemplateLibraries = Array.isArray(data.libraries) ? data.libraries : [];
+            } catch(e) {
+                console.error(e);
+                promptTemplateLibraries = [];
+            }
+        }
+        function allPromptTemplateItems(){
+            return promptTemplateLibraries.flatMap(library => (library.items || []).map(item => ({...item, libraryName:library.name || ''})));
+        }
+        function closePromptTemplatePanel(){
+            promptTemplatePanelOpen = false;
+            promptTemplatePanel.classList.remove('open');
+        }
+        function renderPromptTemplatePanel(){
+            const items = allPromptTemplateItems();
+            promptTemplatePanel.innerHTML = `
+                <div class="prompt-template-head">
+                    <span>Prompt Templates</span>
+                    <button class="icon-btn" type="button" data-close-templates><svg class="pixel-icon"><use href="#cross"></use></svg></button>
+                </div>
+                <div class="prompt-template-list">${items.length ? items.map((item, index) => `
+                    <button class="prompt-template-item" type="button" data-template-index="${index}">
+                        <span class="prompt-template-title">${escapeHtml(item.name || 'Template')}</span>
+                        <span class="prompt-template-scene">${escapeHtml(item.scene || item.libraryName || item.category || '')}</span>
+                    </button>`).join('') : '<div class="empty-note">暂无模板</div>'}</div>`;
+            promptTemplatePanel._items = items;
+            promptTemplatePanel.querySelector('[data-close-templates]')?.addEventListener('click', e => {
+                e.stopPropagation();
+                closePromptTemplatePanel();
+            });
+            promptTemplatePanel.querySelectorAll('[data-template-index]').forEach(btn => btn.onclick = e => {
+                e.stopPropagation();
+                applyPromptTemplate(promptTemplatePanel._items[Number(btn.dataset.templateIndex)]);
+            });
+            promptTemplatePanel.classList.toggle('open', promptTemplatePanelOpen);
+            refreshIcons();
+        }
+        function templateText(item){
+            return [item?.positive || '', item?.negative ? `负向提示词：${item.negative}` : ''].filter(Boolean).join('\n\n').trim();
+        }
+        function applyPromptTemplate(item){
+            const text = templateText(item);
+            if(!text) return;
+            const promptNode = selectedNodes().find(node => node.type === 'smart-prompt');
+            if(promptNode){
+                promptNode.text = text;
+                promptNode.outputText = '';
+                render();
+                scheduleSave();
+                setStatus('TEMPLATE TO NODE');
+            } else {
+                promptInput.textContent = text;
+                promptInput.focus();
+                saveMentionRange();
+                renderInputThumbs();
+                scheduleSave();
+                setStatus('TEMPLATE READY');
+            }
+            closePromptTemplatePanel();
+        }
+        async function togglePromptTemplatePanel(){
+            promptTemplatePanelOpen = !promptTemplatePanelOpen;
+            if(promptTemplatePanelOpen && !promptTemplateLibraries.length) await loadPromptTemplates();
+            renderPromptTemplatePanel();
         }
         function selectionBounds(){
             const selected = selectedContextNodes();
@@ -1154,16 +1349,17 @@
             const boardRect = board.getBoundingClientRect();
             const x = boardRect.left + viewport.x + bounds.centerX * viewport.scale;
             const y = boardRect.top + viewport.y + bounds.y * viewport.scale - 12;
-            const hasImages = selectedMediaImages().length > 0;
+            const hasMedia = selectedMediaImages().length > 0;
+            const hasVisualMedia = selectedMediaImages().some(item => mediaKind(item) === 'image');
             const hasPrompt = selectedContextNodes().some(n => textForNode(n) || n.runMeta?.prompt);
             selectionTools.style.left = `${Math.max(78, Math.min(window.innerWidth - 78, x))}px`;
             selectionTools.style.top = `${Math.max(78, y)}px`;
             selectionTools.innerHTML = `
-                <button class="tool-btn" type="button" data-selection-action="variant" ${hasImages ? '' : 'disabled'}><svg class="pixel-icon"><use href="#plus"></use></svg>变体</button>
-                <button class="tool-btn" type="button" data-selection-action="edit" ${hasImages ? '' : 'disabled'}><svg class="pixel-icon"><use href="#tool-prompt"></use></svg>编辑</button>
-                <button class="tool-btn" type="button" data-selection-action="asset" ${hasImages ? '' : 'disabled'}><svg class="pixel-icon"><use href="#folder"></use></svg>入库</button>
+                <button class="tool-btn" type="button" data-selection-action="variant" ${hasVisualMedia ? '' : 'disabled'}><svg class="pixel-icon"><use href="#plus"></use></svg>变体</button>
+                <button class="tool-btn" type="button" data-selection-action="edit" ${hasVisualMedia ? '' : 'disabled'}><svg class="pixel-icon"><use href="#tool-prompt"></use></svg>编辑</button>
+                <button class="tool-btn" type="button" data-selection-action="asset" ${hasMedia ? '' : 'disabled'}><svg class="pixel-icon"><use href="#folder"></use></svg>入库</button>
                 <button class="tool-btn" type="button" data-selection-action="copy-prompt" ${hasPrompt ? '' : 'disabled'}><svg class="pixel-icon"><use href="#copy"></use></svg>提示词</button>
-                <button class="tool-btn" type="button" data-selection-action="download" ${hasImages ? '' : 'disabled'}><svg class="pixel-icon"><use href="#download"></use></svg>下载</button>`;
+                <button class="tool-btn" type="button" data-selection-action="download" ${hasMedia ? '' : 'disabled'}><svg class="pixel-icon"><use href="#download"></use></svg>下载</button>`;
             selectionTools.classList.add('open');
             selectionTools.querySelectorAll('[data-selection-action]').forEach(btn => btn.onclick = e => {
                 e.stopPropagation();
@@ -1173,25 +1369,34 @@
             refreshIcons();
         }
         async function uploadFiles(files, point=null){
-            const list = [...(files || [])].filter(file => file.type.startsWith('image/'));
+            const list = [...(files || [])].filter(file => file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/'));
             if(!list.length) return;
             const form = new FormData();
             list.forEach(file => form.append('files', file));
             const data = await fetchJson('/api/ai/upload', {method:'POST', body:form});
             const p = point || defaultPoint(-120, -40);
-            (data.files || []).forEach((file, index) => addNode(createImageNode(p.x + index * 36, p.y + index * 36, [{url:file.url, name:file.name || `image-${index + 1}`}], {title:file.name || 'Image'})));
+            (data.files || []).forEach((file, index) => {
+                const kind = file.kind || mediaKindForUrl(file.url);
+                addNode(createImageNode(p.x + index * 36, p.y + index * 36, [{url:file.url, name:file.name || `${kind}-${index + 1}`, kind}], {title:file.name || (kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : 'Image'), outputKind:kind}));
+            });
         }
 
         async function loadAssetLibrary(){
             try {
-                const data = await fetchJson('/api/asset-library');
+                const [data, local] = await Promise.all([
+                    fetchJson('/api/asset-library'),
+                    fetchJson('/api/local-assets').catch(() => ({items:[], tree:null}))
+                ]);
                 assetLibrary = data.library || {categories:[]};
+                localAssets = local || {items:[], tree:null};
                 renderAssetLibrary();
             } catch(e) {
                 console.error(e);
             }
         }
         function assetCategories(){ return assetLibrary.categories || []; }
+        function localAssetItems(){ return Array.isArray(localAssets.items) ? localAssets.items : []; }
+        function isLocalAssetView(){ return assetCategorySelect.value === '__local_assets__'; }
         function activeAssetCategory(){
             const cats = assetCategories();
             return cats.find(cat => cat.id === assetCategorySelect.value) || cats[0] || null;
@@ -1202,25 +1407,35 @@
         }
         function renderAssetLibrary(){
             const cats = assetCategories();
-            const current = assetCategorySelect.value || cats[0]?.id || '';
-            assetCategorySelect.innerHTML = cats.map(cat => `<option value="${escapeHtml(cat.id)}" ${cat.id === current ? 'selected' : ''}>${escapeHtml(cat.name || '图片资产')}</option>`).join('');
+            const localItems = localAssetItems();
+            const current = assetCategorySelect.value || cats[0]?.id || (localItems.length ? '__local_assets__' : '');
+            assetCategorySelect.innerHTML = [
+                ...cats.map(cat => `<option value="${escapeHtml(cat.id)}" ${cat.id === current ? 'selected' : ''}>${escapeHtml(cat.name || '图片资产')}</option>`),
+                `<option value="__local_assets__" ${current === '__local_assets__' ? 'selected' : ''}>本地素材 (${localItems.length})</option>`
+            ].join('');
             const cat = activeAssetCategory();
-            const items = cat?.items || [];
+            const localView = isLocalAssetView();
+            const items = localView ? localItems : (cat?.items || []);
             const assetCount = $('assetCount');
             if(assetCount) assetCount.textContent = `${items.length} ITEMS`;
+            ['assetAddFolderBtn', 'assetRenameFolderBtn', 'assetDeleteFolderBtn'].forEach(id => {
+                const btn = $(id);
+                if(btn) btn.disabled = localView;
+            });
             assetGrid.innerHTML = items.length ? items.map(item => `
-                <div class="asset-item" draggable="true" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name || 'asset')}">
-                    <img src="${escapeHtml(item.url)}" alt="">
+                <div class="asset-item" draggable="true" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name || 'asset')}" data-kind="${escapeHtml(mediaKind(item))}" data-local="${localView ? '1' : ''}" data-path="${escapeHtml(item.file || item.id || '')}">
+                    ${mediaPreviewHtml(item, item.name || 'asset')}
                     <div class="asset-meta">
                         <span class="asset-name" title="${escapeHtml(item.name || '')}">${escapeHtml(item.name || 'asset')}</span>
+                        <span class="asset-kind">${escapeHtml(mediaKind(item))}</span>
                         <button class="icon-btn" type="button" data-rename-asset="${escapeHtml(item.id)}"><svg class="pixel-icon"><use href="#nav-klein"></use></svg></button>
                         <button class="icon-btn" type="button" data-delete-asset="${escapeHtml(item.id)}"><svg class="pixel-icon"><use href="#trash"></use></svg></button>
                     </div>
-                </div>`).join('') : '<div class="empty-note" style="grid-column:1/-1">资产库为空。保存画布图片或拖入本地输出图片。</div>';
+                </div>`).join('') : `<div class="empty-note" style="grid-column:1/-1">${localView ? '本地素材为空。可用 Chrome 采集工具或上传素材。' : '资产库为空。保存画布图片或拖入本地输出图片。'}</div>`;
             assetGrid.querySelectorAll('.asset-item').forEach(el => {
                 el.addEventListener('dragstart', e => {
                     e.dataTransfer.effectAllowed = 'copy';
-                    e.dataTransfer.setData('application/x-smart-asset', JSON.stringify({url:el.dataset.url, name:el.dataset.name}));
+                    e.dataTransfer.setData('application/x-smart-asset', JSON.stringify({url:el.dataset.url, name:el.dataset.name, kind:el.dataset.kind || mediaKindForUrl(el.dataset.url)}));
                     e.dataTransfer.setData('text/plain', el.dataset.url || '');
                 });
             });
@@ -1228,12 +1443,24 @@
                 e.stopPropagation();
                 const name = prompt('资产名称', btn.closest('.asset-item')?.dataset.name || '');
                 if(!name) return;
-                setAssetLibrary(await fetchJson(`/api/asset-library/items/${encodeURIComponent(btn.dataset.renameAsset)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}));
+                const row = btn.closest('.asset-item');
+                if(row?.dataset.local === '1'){
+                    await fetchJson('/api/local-assets/items', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:row.dataset.path, name})});
+                    await loadAssetLibrary();
+                } else {
+                    setAssetLibrary(await fetchJson(`/api/asset-library/items/${encodeURIComponent(btn.dataset.renameAsset)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}));
+                }
             });
             assetGrid.querySelectorAll('[data-delete-asset]').forEach(btn => btn.onclick = async e => {
                 e.stopPropagation();
                 if(!confirm('删除这个资产？')) return;
-                setAssetLibrary(await fetchJson(`/api/asset-library/items/${encodeURIComponent(btn.dataset.deleteAsset)}`, {method:'DELETE'}));
+                const row = btn.closest('.asset-item');
+                if(row?.dataset.local === '1'){
+                    await fetchJson('/api/local-assets/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({names:[row.dataset.path]})});
+                    await loadAssetLibrary();
+                } else {
+                    setAssetLibrary(await fetchJson(`/api/asset-library/items/${encodeURIComponent(btn.dataset.deleteAsset)}`, {method:'DELETE'}));
+                }
             });
             refreshIcons();
         }
@@ -1260,13 +1487,16 @@
         function collectMentionedImages(){
             const images = [];
             promptInput.querySelectorAll('.mention-token').forEach(token => {
-                if(token.dataset.url) images.push({url:token.dataset.url, name:token.dataset.name || 'image', role:token.dataset.source || 'mention'});
+                if(token.dataset.url) images.push({url:token.dataset.url, name:token.dataset.name || 'image', kind:token.dataset.kind || mediaKindForUrl(token.dataset.url), role:token.dataset.source || 'mention'});
             });
             return images;
         }
         function mentionCandidates(source=mentionSource){
             if(source === 'asset'){
-                return assetCategories().flatMap(cat => (cat.items || []).map(item => ({url:item.url, name:item.name || 'asset', source:'asset'})));
+                return [
+                    ...assetCategories().flatMap(cat => (cat.items || []).map(item => ({url:item.url, name:item.name || 'asset', kind:item.kind || mediaKindForUrl(item.url), source:'asset'}))),
+                    ...localAssetItems().map(item => ({url:item.url, name:item.name || 'local asset', kind:item.kind || mediaKindForUrl(item.url), source:'local'}))
+                ];
             }
             return uniqueImages([...selectedContextImages(), ...recentCanvasImages()]).map((img, index) => ({...img, name:img.name || `图片${index + 1}`, source:'input'}));
         }
@@ -1299,7 +1529,7 @@
                 </div>
                 <div class="mention-grid">${items.map((img, index) => `
                     <button class="mention-option" type="button" data-mention-index="${index}">
-                        <img src="${escapeHtml(img.url)}" alt=""><span>${escapeHtml(img.name || 'image')}</span>
+                        ${mediaPreviewHtml(img, img.name || 'image')}<span>${escapeHtml(img.name || 'image')}</span>
                     </button>`).join('')}</div>`;
             mentionPicker._items = items;
             mentionPicker.classList.add('open');
@@ -1342,8 +1572,9 @@
             token.contentEditable = 'false';
             token.dataset.url = img.url;
             token.dataset.name = img.name || 'image';
+            token.dataset.kind = mediaKind(img);
             token.dataset.source = img.source || '';
-            token.innerHTML = `<img src="${escapeHtml(img.url)}" alt=""><span>${escapeHtml(img.name || 'image')}</span><button class="mention-remove" type="button" aria-label="移除引用">×</button>`;
+            token.innerHTML = `${mediaPreviewHtml(img, img.name || 'image')}<span>${escapeHtml(img.name || 'image')}</span><button class="mention-remove" type="button" aria-label="移除引用">×</button>`;
             range.insertNode(token);
             const spacer = document.createTextNode(' ');
             token.after(spacer);
@@ -1371,8 +1602,11 @@
             const composerText = collectPromptText();
             const upstreamText = selectedContextText();
             const prompt = [upstreamText, composerText].filter(Boolean).join('\n\n').trim();
-            const refs = uniqueImages([...selectedContextImages(), ...collectMentionedImages()]).map((img, index) => ({...img, role:img.role || `image_${index + 1}`}));
-            return {prompt:prompt || 'Edit the reference images.', refs, sourceIds:contextSourceIds()};
+            const media = uniqueImages([...selectedContextImages(), ...collectMentionedImages()]).map(img => ({...img, kind:mediaKind(img)}));
+            const refs = media.filter(img => mediaKind(img) === 'image').map((img, index) => ({...img, role:img.role || `image_${index + 1}`}));
+            const videos = media.filter(img => mediaKind(img) === 'video').map(img => img.url);
+            const audios = media.filter(img => mediaKind(img) === 'audio').map(img => img.url);
+            return {prompt:prompt || 'Edit the reference images.', refs, videos, audios, media, sourceIds:contextSourceIds()};
         }
         async function pollImageTask(taskId){
             const deadline = Date.now() + 30 * 60 * 1000;
@@ -1383,6 +1617,17 @@
                 await new Promise(resolve => setTimeout(resolve, 1500));
             }
             throw new Error('生成任务超时');
+        }
+        async function pollVideoTask(taskId, onProgress=null){
+            const deadline = Date.now() + 30 * 60 * 1000;
+            while(Date.now() < deadline){
+                const task = await fetchJson(`/api/canvas-video-tasks/${encodeURIComponent(taskId)}`);
+                if(task.status === TASK_SUCCEEDED) return task.result || {};
+                if(task.status === TASK_FAILED || task.status === 'timeout') throw new Error(task.error || '视频生成失败');
+                if(onProgress) onProgress(taskProgressFromResponse(task), task);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            throw new Error('视频任务超时');
         }
         async function runGeneration(){
             const engine = $('engineSelect').value;
@@ -1416,18 +1661,28 @@
                 } else if(engine === 'video'){
                     const providerId = selectedProviderId('video');
                     outputNode = prepareOutputNode(engine, contextNodes, expectedOutputCount(engine), request);
-                    const result = await fetchJson('/api/canvas-video', {
+                    outputNode.pendingProgress = {provider:providerId === 'jimeng' ? 'jimeng' : providerId, status:TASK_RUNNING};
+                    const task = await fetchJson('/api/canvas-video-tasks', {
                         method:'POST',
                         headers:{'Content-Type':'application/json'},
                         body:JSON.stringify({
                             prompt:request.prompt,
                             images:request.refs,
+                            videos:request.videos || [],
+                            audios:request.audios || [],
+                            multimodal:Boolean((request.videos || []).length || (request.audios || []).length),
                             provider_id:providerId,
                             model:$('modelSelect').value || providerModels('video', providerId)[0] || '',
                             duration:5,
                             aspect_ratio:'16:9',
                             resolution:''
                         })
+                    });
+                    outputNode.pendingTaskId = task.task_id;
+                    render();
+                    const result = await pollVideoTask(task.task_id, progress => {
+                        outputNode.pendingProgress = progress;
+                        render();
                     });
                     urls = result.videos || [];
                 } else if(engine === 'comfy'){
@@ -1443,12 +1698,18 @@
                     urls = result.images || [];
                 } else {
                     const providerId = selectedProviderId('image');
+                    const provider = providerById(providerId, 'image');
+                    const selectedModel = $('modelSelect').value || providerModels('image', providerId)[0] || '';
+                    const requiredImages = runningHubRequiredImages(provider, selectedModel);
+                    if(requiredImages && request.refs.length < requiredImages){
+                        throw new Error(`RunningHub workflow 需要 ${requiredImages} 张引用图`);
+                    }
                     const count = expectedOutputCount(engine);
                     outputNode = prepareOutputNode(engine, contextNodes, count, request);
                     const payload = {
                         prompt:request.prompt,
                         provider_id:providerId,
-                        model:$('modelSelect').value || providerModels('image', providerId)[0] || '',
+                        model:selectedModel,
                         size:$('sizeSelect').value || '1024x1024',
                         quality:'auto',
                         reference_images:request.refs
@@ -1488,7 +1749,7 @@
             render();
             try {
                 const text = [inputPromptTextFor(node), node.text || ''].filter(Boolean).join('\n\n') || 'Rewrite this into a concise image prompt.';
-                const images = lineImagesFor(node).map(img => img.url);
+                const images = lineImagesFor(node).filter(img => mediaKind(img) === 'image').map(img => img.url);
                 const providerId = defaultProvider('chat').id;
                 const result = await fetchJson('/api/canvas-llm', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text, images, provider:providerId, model:providerModels('chat', providerId)[0] || '', system_prompt:node.systemPrompt || 'You are a helpful assistant.'})});
                 node.outputText = result.text || '';
@@ -1691,7 +1952,8 @@
             const point = screenToWorld(e.clientX, e.clientY);
             if(assetPayload){
                 const item = JSON.parse(assetPayload);
-                addNode(createImageNode(point.x, point.y, [{url:item.url, name:item.name || 'asset'}], {title:item.name || 'Asset'}));
+                const kind = item.kind || mediaKindForUrl(item.url);
+                addNode(createImageNode(point.x, point.y, [{url:item.url, name:item.name || 'asset', kind}], {title:item.name || 'Asset', outputKind:kind}));
                 return;
             }
             await uploadFiles(e.dataTransfer.files, point);
@@ -1725,6 +1987,7 @@
         });
         document.addEventListener('mousedown', e => {
             if(!e.target.closest('.mention-picker') && !e.target.closest('#promptInput')) closeMentionPicker();
+            if(!e.target.closest('.prompt-template-panel') && !e.target.closest('#promptTemplateBtn')) closePromptTemplatePanel();
         });
         selectionTools.addEventListener('mousedown', e => e.stopPropagation());
         $('engineSelect').onchange = () => { renderComposerControls(); scheduleSave(); };
@@ -1738,6 +2001,7 @@
             renderComposerControls();
             scheduleSave();
         };
+        $('promptTemplateBtn').onclick = togglePromptTemplatePanel;
         $('runBtn').onclick = runGeneration;
         $('backBtn').onclick = () => { saveCanvas(); location.href = '/static/canvas.html'; };
         titleInput.oninput = scheduleSave;
@@ -1783,6 +2047,7 @@
         (async function init(){
             try {
                 await loadConfig();
+                await loadPromptTemplates();
                 await loadCanvas();
                 await loadAssetLibrary();
             } catch(e) {

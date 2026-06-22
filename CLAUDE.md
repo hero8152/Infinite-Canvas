@@ -13,13 +13,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 安装依赖.bat        # python -m pip install --no-index --find-links=packages -r requirements.txt
 run.bat            # 等价于 python main.py，自动打开 http://127.0.0.1:3000
 
+# Windows 便携测试包（给非开发同事）
+python scripts/build_windows_portable.py
+# 产物：dist/Infinite-Canvas-Windows-Portable.zip
+# 内含 Windows embeddable Python + 已解压依赖 + 启动 Infinite Canvas.bat
+
 # 跨平台
 pip install -r requirements.txt
 python main.py     # 默认监听 127.0.0.1:3000
 python scripts/guardrails.py
 ```
 
-仓库没有打包流程；`scripts/guardrails.py` 是最低限度自动化护栏（编译、workflow JSON、安全、token flow、设计反例扫描）。改动后仍需通过浏览器手动验证相关 iframe 页面。
+`scripts/build_windows_portable.py` 是当前分发给 Windows 测试同事的打包流程；`scripts/guardrails.py` 是最低限度自动化护栏（编译、workflow JSON、安全、token flow、设计反例扫描）。改动后仍需通过浏览器手动验证相关 iframe 页面。
 
 ### 配置文件 `API/.env`（**手动创建，未入库**）
 
@@ -117,7 +122,7 @@ API/.env                         # 运行配置（手动创建，gitignore）
 
 ## 与项目无关的提示
 
-- 仓库根有 `说明.png` / `运行说明.txt` / `readme.txt`（中英双语用户说明）+ `安装依赖.bat` / `run.bat`（Windows 批处理）。修改启动方式需同步这几份文档。
+- 仓库根有 `说明.png` / `运行说明.txt` / `readme.txt`（中英双语用户说明）+ `安装依赖.bat` / `run.bat`（Windows 批处理）。便携包会额外生成 `启动 Infinite Canvas.bat` / `检查运行环境.bat` / `生成EXE启动器.bat`。修改启动方式需同步这些文档和 `scripts/build_windows_portable.py`。
 - `packages/` 内为 **Windows cp314 wheel**，仅供国内离线安装；macOS / Linux 跑 `pip install -r requirements.txt` 走在线源即可。
 - `GEMINI.md`、`DESIGN.md` 是给其它 agent 看的项目说明 / 设计系统，改架构或外观时同步更新。
 - 没有自动化测试。验证改动靠：启动服务 → 浏览器逐个 iframe（文生图 / 细节增强 / 图片编辑 / 角度控制 / 在线生图 / GPT 对话 / 画布）跑一遍 golden path。

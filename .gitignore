@@ -3,6 +3,8 @@ output/
 data/
 history.json
 global_config.json
+static/assets/uploads/
+static/assets/library/
 
 # 配置 / 凭据
 API/.env
@@ -14,6 +16,10 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+
+# Packaging output
+.package-cache/
+dist/
 
 # 操作系统
 .DS_Store

@@ -5,3 +5,4 @@ pydantic
 python-multipart
 httpx
 pillow
+websockets

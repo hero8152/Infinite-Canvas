@@ -26,7 +26,9 @@ COMFYUI_INSTANCES=127.0.0.1:8188,127.0.0.1:4090
 
 ----Instructions-----
 
-Run "Start Service.bat" directly. If dependencies are missing, run "Install Dependencies.bat".
+Source folder: run "run.bat" directly. If dependencies are missing, run "Install Dependencies.bat".
+
+Windows portable test bundle: unzip the whole folder and run "启动 Infinite Canvas.bat". The portable bundle already includes an embedded Python runtime and dependencies, so testers do not need to install Python or download packages.
 
 ---Error Troubleshooting---
 

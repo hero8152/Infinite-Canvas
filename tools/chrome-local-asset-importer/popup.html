@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>本地素材导入</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <div class="brand">
+        <span class="brand-mark">DX</span>
+        <div>
+          <h1>大雄画布工具</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="githubBtn" class="github-btn" type="button" title="hero8152/Infinite-Canvas">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.2.8-.6v-2.1c-3.3.7-4-1.4-4-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 .1.3 2.6 3.4 1.9.1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.2 11.2 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.9 1.2 1.9 1.2 3.2 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.2c0 .4.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
+          <span>GitHub</span>
+        </button>
+        <button id="pinBtn" class="icon-btn" type="button" title="固定到浏览器侧边栏" aria-label="固定到浏览器侧边栏">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3l7 7-2 2-2-2-4 4v5l-1 1-4.5-4.5L3 20l-1-1 4.5-4.5L2 10l1-1h5l4-4-2-2 2-2z"/></svg>
+        </button>
+        <button id="settingsToggleBtn" class="icon-btn" type="button" title="展开/折叠设置" aria-label="展开/折叠设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13.5a7.8 7.8 0 0 0 .1-1.5 7.8 7.8 0 0 0-.1-1.5l2-1.5-2-3.5-2.4 1a7.2 7.2 0 0 0-2.6-1.5L14 2h-4l-.4 2.5A7.2 7.2 0 0 0 7 6L4.6 5l-2 3.5 2 1.5a7.8 7.8 0 0 0-.1 1.5 7.8 7.8 0 0 0 .1 1.5l-2 1.5 2 3.5L7 17a7.2 7.2 0 0 0 2.6 1.5L10 21h4l.4-2.5A7.2 7.2 0 0 0 17 17l2.4 1 2-3.5-2-1.5zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <div class="content-pane">
+        <section id="settingsPanel" class="settings-panel">
+          <div class="settings-head">
+            <strong>参数设置</strong>
+            <span id="settingsSummary">127.0.0.1:3000</span>
+          </div>
+          <div id="settingsBody" class="settings-body">
+            <div class="settings-grid">
+              <label class="field port-field">
+                <span>服务地址</span>
+                <input id="serverInput" type="text" value="127.0.0.1:3000" placeholder="ip:端口，例如 192.168.1.10:3000">
+              </label>
+              <label class="field folder-field">
+                <span>文件夹</span>
+                <input id="folderInput" type="text" placeholder="网页采集">
+              </label>
+              <div class="connect-stack">
+                <span id="statusText" class="connect-hint">请输入服务地址后点击连接，例如 192.168.1.10:3000。</span>
+                <button id="testBtn" class="btn" type="button">连接</button>
+              </div>
+            </div>
+
+            <div class="ai-grid">
+              <label class="check">
+                <input id="classifyInput" type="checkbox" checked>
+                <span>导入后智能分类</span>
+              </label>
+              <select id="providerSelect" title="平台"></select>
+              <select id="modelSelect" title="模型"></select>
+              <textarea id="promptInput" rows="2" placeholder="可选：追加分类要求，例如材质、用途、人像风格等"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="scan-panel">
+          <button id="scanBtn" class="scan-main" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 19l-5.15-5.15a7 7 0 1 0-1.41 1.41L19.59 20.41 21 19zM5 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>
+            <span>扫描当前页面图片</span>
+          </button>
+          <div class="scan-extra">
+            <label class="check scan-opt">
+              <input id="autoScrollInput" type="checkbox">
+              <span>自动翻页加载</span>
+            </label>
+            <button id="captureBtn" class="capture-btn" type="button" title="截取浏览器当前显示的画面，适用于地图 / WebGL / 加密画布等无法直接读取的内容">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5h-3.17l-1.24-1.35A2 2 0 0 0 14.12 3H9.88a2 2 0 0 0-1.47.65L7.17 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm-8 13a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
+              <span>截图</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="toolbar">
+          <span id="countText">未扫描</span>
+          <div>
+            <button id="selectAllBtn" class="link-btn" type="button">全选</button>
+            <button id="clearBtn" class="link-btn" type="button">清空</button>
+          </div>
+        </section>
+
+        <section id="grid" class="grid empty">
+          <div class="empty-state">点击“扫描”读取当前页面图片。</div>
+        </section>
+
+        <footer class="bottom">
+          <button id="downloadBtn" class="ghost" type="button" disabled title="把所选素材下载到浏览器下载目录，不需要连接后端">下载到本地</button>
+          <button id="importBtn" class="primary" type="button" disabled>导入资产库</button>
+        </footer>
+      </div>
+    </section>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

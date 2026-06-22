@@ -47,8 +47,18 @@
         .btn { height:38px; border:1px solid var(--border); border-radius:0; padding:0 12px; background:var(--bg-2); color:var(--ink); cursor:pointer; font-weight:700; display:inline-flex; align-items:center; gap:7px; }
         .btn.primary { background:#111; color:#fff; border-color:#111; }
         .btn.danger { color:#b42318; }
+        .jimeng-panel, .runninghub-panel { display:none; gap:10px; border:1px solid var(--border); background:var(--bg-2); padding:10px; }
+        .jimeng-panel.open, .runninghub-panel.open { display:grid; }
+        .jimeng-query, .rh-query { display:grid; gap:8px; }
+        .jimeng-status, .rh-status { min-height:42px; white-space:pre-wrap; overflow-wrap:anywhere; font-family:var(--font-mono); font-size:11px; color:var(--muted); border:1px dashed var(--border); background:var(--stage-bg); padding:8px; }
+        .rh-list { display:grid; gap:7px; max-height:220px; overflow:auto; }
+        .rh-entry { border:1px solid var(--border); background:var(--stage-bg); padding:8px; display:grid; gap:4px; }
+        .rh-entry-title { font-weight:800; font-size:12px; }
+        .rh-entry-id { font-family:var(--font-mono); font-size:10px; color:var(--muted); }
         body.studio-theme-dark .btn { background:var(--dark-surface); border-color:var(--dark-border); color:var(--dark-text); }
         body.studio-theme-dark .btn.primary { background:#f2f2f2; color:#111; border-color:#f2f2f2; }
+        body.studio-theme-dark .jimeng-panel, body.studio-theme-dark .runninghub-panel { background:var(--dark-surface); border-color:var(--dark-border); }
+        body.studio-theme-dark .jimeng-status, body.studio-theme-dark .rh-status, body.studio-theme-dark .rh-entry { background:#1c1c1e; border-color:var(--dark-border); }
         .status { min-height:18px; color:var(--muted); font-family:var(--font-mono); font-size:12px; }
         .pixel-icon { width:14px; height:14px; color:var(--primary); }
         @media (max-width:900px){ .page{padding:16px}.layout,.grid{grid-template-columns:1fr}.head{display:grid} }
@@ -59,7 +69,7 @@
     <header class="head">
         <div>
             <h1><svg class="pixel-icon"><use href="#key"></use></svg><span>API Providers</span></h1>
-            <div class="sub">统一管理兼容 OpenAI / APIMart 的上游 API。密钥保存到本机 API/.env；Canvas 的 API、LLM、Video 节点按这里的 provider 和模型列表路由。</div>
+            <div class="sub">统一管理兼容 OpenAI / APIMart / Jimeng CLI / RunningHub 的上游能力。HTTP 密钥保存到本机 API/.env；Jimeng 读取本机 dreamina CLI 登录状态。</div>
         </div>
         <button class="btn primary" type="button" id="saveBtn"><svg class="pixel-icon"><use href="#download"></use></svg>Save</button>
     </header>
@@ -77,13 +87,15 @@
                 </div>
                 <div class="grid">
                     <div class="field"><label>Base URL</label><input id="baseUrl" spellcheck="false" placeholder="https://..."></div>
-                    <div class="field"><label>Protocol</label><select id="protocol"><option value="openai">OpenAI compatible</option><option value="apimart">APIMart async</option></select></div>
+                    <div class="field"><label>Protocol</label><select id="protocol"><option value="openai">OpenAI compatible</option><option value="apimart">APIMart async</option><option value="jimeng">Jimeng CLI</option><option value="runninghub">RunningHub</option></select></div>
                 </div>
+                <div class="field"><label>Image request mode</label><select id="imageRequestMode"><option value="openai">OpenAI multipart/JSON</option><option value="openai-json">OpenAI JSON extra_body</option></select></div>
                 <div class="grid">
                     <div class="field"><label>Image generation endpoint</label><input id="imageGenerationEndpoint" spellcheck="false" placeholder="/v1/images/generations"></div>
                     <div class="field"><label>Image edit endpoint</label><input id="imageEditEndpoint" spellcheck="false" placeholder="/v1/images/edits"></div>
                 </div>
                 <div class="field"><label>API Key</label><input id="apiKey" type="password" spellcheck="false" autocomplete="off" placeholder="留空表示不修改已有密钥"></div>
+                <div class="field"><label>RunningHub Wallet Key</label><input id="walletApiKey" type="password" spellcheck="false" autocomplete="off" placeholder="留空表示不修改钱包密钥"></div>
                 <div class="checks">
                     <button class="check" type="button" data-toggle="enabled">Enabled</button>
                     <button class="check" type="button" data-toggle="primary">Primary</button>
@@ -96,6 +108,43 @@
                 <div class="grid">
                     <div class="field"><label>ModelScope LoRA JSON</label><textarea id="msLoras" spellcheck="false" placeholder='{"model/id":{"lora/id":1}}'></textarea></div>
                     <div class="field"><label>Model defaults version</label><input id="msDefaultsVersion" spellcheck="false" placeholder="1"></div>
+                </div>
+                <div id="jimengPanel" class="jimeng-panel">
+                    <div class="label">Jimeng CLI</div>
+                    <div class="jimeng-status" id="jimengStatus">未检查。支持 JIMENG_BIN / DREAMINA_BIN、JIMENG_USE_WSL、JIMENG_WSL_DISTRO、JIMENG_POLL_SECONDS。</div>
+                    <div class="actions">
+                        <button class="btn" type="button" id="jimengStatusBtn"><svg class="pixel-icon"><use href="#info"></use></svg>Status</button>
+                        <button class="btn" type="button" id="jimengLoginBtn"><svg class="pixel-icon"><use href="#key"></use></svg>Login</button>
+                        <button class="btn" type="button" id="jimengLoginRefreshBtn"><svg class="pixel-icon"><use href="#refresh"></use></svg>Login status</button>
+                        <button class="btn" type="button" id="jimengCreditBtn"><svg class="pixel-icon"><use href="#check"></use></svg>Credit</button>
+                        <button class="btn" type="button" id="jimengHelpBtn"><svg class="pixel-icon"><use href="#info"></use></svg>Help</button>
+                        <button class="btn danger" type="button" id="jimengLogoutBtn"><svg class="pixel-icon"><use href="#cross"></use></svg>Logout</button>
+                    </div>
+                    <div class="jimeng-query">
+                        <div class="grid">
+                            <div class="field"><label>Submit ID</label><input id="jimengSubmitId" spellcheck="false" placeholder="query_result submit_id"></div>
+                            <div class="field"><label>Kind</label><select id="jimengQueryKind"><option value="video">Video</option><option value="image">Image</option></select></div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn" type="button" id="jimengQueryBtn"><svg class="pixel-icon"><use href="#refresh"></use></svg>Query media</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="runninghubPanel" class="runninghub-panel">
+                    <div class="label">RunningHub</div>
+                    <div class="rh-status" id="runninghubStatus">未检查。默认模型、AI App 和 Workflow 会从 static/runninghub/api_providers.json 合并。</div>
+                    <div class="actions">
+                        <button class="btn" type="button" id="runninghubListBtn"><svg class="pixel-icon"><use href="#refresh"></use></svg>List workflows</button>
+                        <button class="btn" type="button" id="runninghubRegistryBtn"><svg class="pixel-icon"><use href="#refresh"></use></svg>Fetch registry</button>
+                        <button class="btn danger" type="button" id="clearWalletBtn"><svg class="pixel-icon"><use href="#cross"></use></svg>Clear wallet key</button>
+                    </div>
+                    <div class="rh-query">
+                        <div class="grid">
+                            <div class="field"><label>Task ID</label><input id="runninghubTaskId" spellcheck="false" placeholder="RunningHub taskId"></div>
+                            <div class="field"><label>Query</label><button class="btn" type="button" id="runninghubQueryBtn"><svg class="pixel-icon"><use href="#refresh"></use></svg>Query task</button></div>
+                        </div>
+                    </div>
+                    <div class="rh-list" id="runninghubEntries"></div>
                 </div>
                 <div class="actions">
                     <button class="btn" type="button" id="testBtn"><svg class="pixel-icon"><use href="#check"></use></svg>Test</button>
@@ -111,12 +160,55 @@
 </main>
 <script>
     const state = { providers: [], selected: '' };
+    let jimengLoginTimer = null;
     const $ = id => document.getElementById(id);
     const lines = value => String(value || '').split(/\n|,/).map(v => v.trim()).filter(Boolean);
     const textLines = list => (list || []).join('\n');
     const setStatus = text => $('status').textContent = text || '';
     function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function current(){ return state.providers.find(p => p.id === state.selected) || state.providers[0] || null; }
+    function isJimeng(p){ return (p?.protocol || '').toLowerCase() === 'jimeng' || (p?.id || '').toLowerCase() === 'jimeng'; }
+    function isRunningHub(p){ return (p?.protocol || '').toLowerCase() === 'runninghub' || (p?.id || '').toLowerCase() === 'runninghub'; }
+    function rhVisibleEntries(list, kind){
+        return (list || []).filter(item => item && item.hidden !== true && item.enabled !== false).map(item => ({
+            id: item.workflowId || item.appId || item.id || '',
+            title: item.title || item.name || item.id || kind,
+            kind,
+            fields: Array.isArray(item.fields) ? item.fields.length : 0
+        })).filter(item => item.id);
+    }
+    function rhModelLabel(model, p){
+        const text = String(model || '');
+        const app = text.match(/^app:(.+)$/);
+        if(app){
+            const entry = (p.rh_apps || []).find(item => (item.appId || item.id) === app[1]);
+            return `app:${entry?.title || app[1]}`;
+        }
+        const workflow = text.match(/^workflow:(.+)$/);
+        if(workflow){
+            const entry = (p.rh_workflows || []).find(item => (item.workflowId || item.id) === workflow[1]);
+            return `workflow:${entry?.title || workflow[1]}`;
+        }
+        return text;
+    }
+    function renderRunningHubPanel(p){
+        if(!p || !isRunningHub(p)) return;
+        const apps = rhVisibleEntries(p.rh_apps || [], 'app');
+        const workflows = rhVisibleEntries(p.rh_workflows || [], 'workflow');
+        const models = p.image_models || [];
+        $('runninghubStatus').textContent = [
+            `base ${p.base_url || 'https://www.runninghub.cn'}`,
+            `key ${p.has_key ? p.key_preview || 'set' : 'missing'}`,
+            `wallet ${p.has_wallet_key ? p.wallet_key_preview || 'set' : 'not set'}`,
+            `models ${models.length} · apps ${apps.length} · workflows ${workflows.length}`
+        ].join('\n');
+        $('runninghubEntries').innerHTML = [...apps, ...workflows].map(item => `
+            <div class="rh-entry">
+                <div class="rh-entry-title">${esc(item.kind.toUpperCase())} · ${esc(item.title)}</div>
+                <div class="rh-entry-id">${esc(item.id)} · ${item.fields} fields · model ${esc(item.kind === 'app' ? `app:${item.id}` : `workflow:${item.id}`)}</div>
+            </div>
+        `).join('') || '<div class="provider-meta">No RunningHub apps/workflows.</div>';
+    }
     function normalizeDraft(){
         const p = current();
         if(!p) return;
@@ -125,6 +217,7 @@
         p.name = $('providerName').value.trim() || p.id;
         p.base_url = $('baseUrl').value.trim();
         p.protocol = $('protocol').value;
+        p.image_request_mode = $('imageRequestMode').value || 'openai';
         p.image_generation_endpoint = $('imageGenerationEndpoint').value.trim();
         p.image_edit_endpoint = $('imageEditEndpoint').value.trim();
         p.image_models = lines($('imageModels').value);
@@ -137,14 +230,37 @@
             throw new Error('ModelScope LoRA JSON 格式不正确');
         }
         const key = $('apiKey').value.trim();
-        if(key) p.api_key = key;
+        const walletKey = $('walletApiKey').value.trim();
+        if(isJimeng(p)){
+            p.base_url = '';
+            p.image_generation_endpoint = '';
+            p.image_edit_endpoint = '';
+            p.chat_models = [];
+            delete p.api_key;
+            delete p.clear_key;
+            delete p.wallet_api_key;
+            delete p.clear_wallet_api_key;
+        } else {
+            if(isRunningHub(p)){
+                p.base_url = p.base_url || 'https://www.runninghub.cn';
+                p.protocol = 'runninghub';
+                p.image_generation_endpoint = '';
+                p.image_edit_endpoint = '';
+                p.chat_models = [];
+                p.video_models = [];
+                p.rh_apps = Array.isArray(p.rh_apps) ? p.rh_apps : [];
+                p.rh_workflows = Array.isArray(p.rh_workflows) ? p.rh_workflows : [];
+                if(walletKey) p.wallet_api_key = walletKey;
+            }
+            if(key) p.api_key = key;
+        }
         if(oldId !== p.id) state.selected = p.id;
     }
     function renderList(){
         $('providerList').innerHTML = state.providers.map(p => `
             <button class="provider-item ${p.id === state.selected ? 'active' : ''}" type="button" data-id="${esc(p.id)}">
                 <span class="provider-name">${esc(p.name || p.id)}${p.primary ? ' · primary' : ''}</span>
-                <span class="provider-meta">${esc(p.id)} · ${esc(p.protocol || 'openai')} · ${p.has_key ? 'key set' : 'no key'}</span>
+                <span class="provider-meta">${esc(p.id)} · ${esc(p.protocol || 'openai')} · ${p.has_key ? 'key set' : 'no key'}${isRunningHub(p) && p.has_wallet_key ? ' · wallet set' : ''}</span>
             </button>`).join('') || '<div class="provider-meta">No providers.</div>';
         document.querySelectorAll('.provider-item').forEach(btn => btn.onclick = () => { normalizeDraft(); state.selected = btn.dataset.id; render(); });
     }
@@ -157,16 +273,38 @@
         $('providerName').value = p.name || '';
         $('baseUrl').value = p.base_url || '';
         $('protocol').value = p.protocol || 'openai';
+        $('imageRequestMode').value = p.image_request_mode || 'openai';
         $('imageGenerationEndpoint').value = p.image_generation_endpoint || '';
         $('imageEditEndpoint').value = p.image_edit_endpoint || '';
         $('apiKey').value = '';
+        $('walletApiKey').value = '';
         $('imageModels').value = textLines(p.image_models);
         $('chatModels').value = textLines(p.chat_models);
         $('videoModels').value = textLines(p.video_models);
         $('msLoras').value = p.ms_loras && Object.keys(p.ms_loras).length ? JSON.stringify(p.ms_loras, null, 2) : '';
         $('msDefaultsVersion').value = p.ms_defaults_version || '';
         document.querySelectorAll('[data-toggle]').forEach(btn => btn.classList.toggle('active', Boolean(p[btn.dataset.toggle])));
-        $('deleteBtn').disabled = p.id === 'comfly' || p.id === 'modelscope';
+        const jimeng = isJimeng(p);
+        const runninghub = isRunningHub(p);
+        ['baseUrl', 'imageRequestMode', 'imageGenerationEndpoint', 'imageEditEndpoint', 'apiKey', 'msLoras', 'msDefaultsVersion'].forEach(id => {
+            const field = $(id).closest('.field');
+            if(field) field.style.display = jimeng || (runninghub && ['imageRequestMode', 'imageGenerationEndpoint', 'imageEditEndpoint', 'msLoras', 'msDefaultsVersion'].includes(id)) ? 'none' : '';
+        });
+        $('walletApiKey').closest('.field').style.display = runninghub ? '' : 'none';
+        $('chatModels').closest('.field').style.display = jimeng || runninghub ? 'none' : '';
+        $('videoModels').closest('.field').style.display = runninghub ? 'none' : '';
+        $('testBtn').style.display = jimeng ? 'none' : '';
+        $('fetchBtn').style.display = jimeng ? 'none' : '';
+        $('probeBtn').style.display = jimeng || runninghub ? 'none' : '';
+        $('clearKeyBtn').style.display = jimeng ? 'none' : '';
+        $('jimengPanel').classList.toggle('open', jimeng);
+        $('runninghubPanel').classList.toggle('open', runninghub);
+        if(jimeng) $('keyState').textContent = 'CLI';
+        if(runninghub) {
+            $('keyState').textContent = `${p.key_preview || (p.has_key ? 'key set' : 'no key')} · wallet ${p.wallet_key_preview || (p.has_wallet_key ? 'set' : 'empty')}`;
+            renderRunningHubPanel(p);
+        }
+        $('deleteBtn').disabled = p.id === 'comfly' || p.id === 'modelscope' || p.id === 'jimeng' || p.id === 'runninghub';
     }
     function render(){ renderList(); renderEditor(); }
     async function load(){
@@ -190,7 +328,7 @@
     async function providerAction(path){
         normalizeDraft();
         const p = current();
-        const payload = {...p, api_key:$('apiKey').value.trim()};
+        const payload = {...p, api_key:$('apiKey').value.trim(), wallet_api_key:$('walletApiKey').value.trim()};
         const res = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
         const data = await res.json();
         if(!res.ok) throw new Error(data.detail || '请求失败');
@@ -200,10 +338,64 @@
         render();
         return data;
     }
+    function jimengStatusText(data){
+        if(!data) return '';
+        if(Array.isArray(data.urls)){
+            const progress = data.progress || {};
+            const queue = progress.queue_status || progress.queue_idx != null ? `queue ${progress.queue_status || 'waiting'}${progress.queue_idx != null ? ` #${progress.queue_idx}` : ''}${progress.queue_length != null ? ` / ${progress.queue_length}` : ''}` : '';
+            const lines = [
+                `status ${data.status || '-'}`,
+                data.submit_id ? `submit_id ${data.submit_id}` : '',
+                progress.gen_status ? `gen_status ${progress.gen_status}` : '',
+                queue,
+                progress.credit_count != null ? `credits ${progress.credit_count}` : '',
+                ...(data.urls || []).map(url => `url ${url}`),
+                data.raw ? `raw ${JSON.stringify(data.raw, null, 2)}` : ''
+            ].filter(Boolean);
+            return lines.join('\n');
+        }
+        if(data.login){
+            const login = data.login;
+            const loginText = login.running ? 'login running' : login.returncode === 0 ? 'login finished' : login.returncode == null ? 'login idle' : `login exited ${login.returncode}`;
+            const qr = login.qr_url ? `\nQR: ${login.qr_url}` : '';
+            const uri = login.verification_uri ? `\nOpen: ${login.verification_uri}` : '';
+            const code = login.user_code ? `\nCode: ${login.user_code}` : '';
+            const device = login.device_code ? `\nDevice: ${login.device_code}` : '';
+            return `${data.ok === false ? 'CLI unavailable' : 'CLI ready'} · ${data.executable || 'dreamina'} · poll ${data.poll_seconds || '-'}s\n${data.version ? `version ${data.version}\n` : ''}${loginText}${qr}${uri}${code}${device}\n${data.detail || login.text || ''}`.trim();
+        }
+        if(data.raw) return JSON.stringify(data.raw, null, 2);
+        return [data.stdout, data.stderr, data.detail].filter(Boolean).join('\n').trim() || JSON.stringify(data, null, 2);
+    }
+    async function jimengFetch(path, options={}){
+        const res = await fetch(path, options);
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || 'Jimeng CLI 请求失败');
+        $('jimengStatus').textContent = jimengStatusText(data) || 'OK';
+        return data;
+    }
+    async function runninghubFetch(path, options={}){
+        const res = await fetch(path, options);
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || 'RunningHub 请求失败');
+        $('runninghubStatus').textContent = JSON.stringify(data, null, 2);
+        return data;
+    }
+    function startJimengLoginPolling(){
+        clearInterval(jimengLoginTimer);
+        jimengLoginTimer = setInterval(async () => {
+            try {
+                const data = await jimengFetch('/api/jimeng/login/status');
+                if(!data.login?.running) clearInterval(jimengLoginTimer);
+            } catch(e) {
+                clearInterval(jimengLoginTimer);
+                $('jimengStatus').textContent = e.message;
+            }
+        }, 2000);
+    }
     $('addBtn').onclick = () => {
         normalizeDraft();
         const id = `provider_${Date.now().toString(36)}`;
-        state.providers.push({id, name:'New Provider', base_url:'', protocol:'openai', enabled:true, primary:false, image_generation_endpoint:'', image_edit_endpoint:'', image_models:[], chat_models:[], video_models:[], ms_loras:{}, ms_defaults_version:''});
+        state.providers.push({id, name:'New Provider', base_url:'', protocol:'openai', image_request_mode:'openai', enabled:true, primary:false, image_generation_endpoint:'', image_edit_endpoint:'', image_models:[], chat_models:[], video_models:[], ms_loras:{}, ms_defaults_version:''});
         state.selected = id;
         render();
     };
@@ -211,6 +403,46 @@
     $('testBtn').onclick = () => providerAction('/api/providers/test-connection').then(d => setStatus(`Connected. ${d.raw_count || 0} models found.`)).catch(e => setStatus(e.message));
     $('fetchBtn').onclick = () => providerAction('/api/providers/fetch-models').then(d => setStatus(`Fetched ${(d.models || []).length} models.`)).catch(e => setStatus(e.message));
     $('probeBtn').onclick = () => providerAction('/api/providers/probe-async').then(d => setStatus(d.ok ? `Async protocol OK (${d.status_code}).` : `Async protocol unavailable: ${d.detail || d.status_code}`)).catch(e => setStatus(e.message));
+    $('jimengStatusBtn').onclick = () => jimengFetch('/api/jimeng/status').catch(e => $('jimengStatus').textContent = e.message);
+    $('jimengCreditBtn').onclick = () => jimengFetch('/api/jimeng/credit').catch(e => $('jimengStatus').textContent = e.message);
+    $('jimengHelpBtn').onclick = () => jimengFetch('/api/jimeng/help', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({command:''})}).catch(e => $('jimengStatus').textContent = e.message);
+    $('jimengLogoutBtn').onclick = () => jimengFetch('/api/jimeng/logout', {method:'POST'}).catch(e => $('jimengStatus').textContent = e.message);
+    $('jimengLoginBtn').onclick = () => jimengFetch('/api/jimeng/login/start', {method:'POST'}).then(startJimengLoginPolling).catch(e => $('jimengStatus').textContent = e.message);
+    $('jimengLoginRefreshBtn').onclick = () => jimengFetch('/api/jimeng/login/status').catch(e => $('jimengStatus').textContent = e.message);
+    $('jimengQueryBtn').onclick = () => {
+        const submitId = $('jimengSubmitId').value.trim();
+        if(!submitId){ $('jimengStatus').textContent = 'submit_id 不能为空'; return; }
+        jimengFetch('/api/jimeng/query-media', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({submit_id:submitId, kind:$('jimengQueryKind').value || 'video'})
+        }).catch(e => $('jimengStatus').textContent = e.message);
+    };
+    $('runninghubListBtn').onclick = () => runninghubFetch('/api/runninghub/workflows').catch(e => $('runninghubStatus').textContent = e.message);
+    $('runninghubRegistryBtn').onclick = async () => {
+        normalizeDraft();
+        const p = current();
+        if(!p || !isRunningHub(p)) return;
+        try {
+            const data = await fetch(`/api/providers/${encodeURIComponent(p.id)}/fetch-models`).then(async r => {
+                const body = await r.json().catch(() => ({}));
+                if(!r.ok) throw new Error(body.detail || 'RunningHub registry 拉取失败');
+                return body;
+            });
+            p.image_models = data.image_models || p.image_models || [];
+            p.chat_models = data.chat_models || p.chat_models || [];
+            p.video_models = data.video_models || p.video_models || [];
+            $('runninghubStatus').textContent = JSON.stringify(data, null, 2);
+            render();
+        } catch(e) {
+            $('runninghubStatus').textContent = e.message;
+        }
+    };
+    $('runninghubQueryBtn').onclick = () => {
+        const taskId = $('runninghubTaskId').value.trim();
+        if(!taskId){ $('runninghubStatus').textContent = 'taskId 不能为空'; return; }
+        runninghubFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).catch(e => $('runninghubStatus').textContent = e.message);
+    };
     $('clearKeyBtn').onclick = async () => {
         normalizeDraft();
         const p = current();
@@ -221,9 +453,19 @@
         delete p.clear_key;
         setStatus('Key cleared.');
     };
+    $('clearWalletBtn').onclick = async () => {
+        normalizeDraft();
+        const p = current();
+        if(!p || !isRunningHub(p)) return;
+        p.clear_wallet_api_key = true;
+        p.wallet_api_key = '';
+        await save().catch(e => setStatus(e.message));
+        delete p.clear_wallet_api_key;
+        setStatus('Wallet key cleared.');
+    };
     $('deleteBtn').onclick = () => {
         const p = current();
-        if(!p || p.id === 'comfly' || p.id === 'modelscope') return;
+        if(!p || p.id === 'comfly' || p.id === 'modelscope' || p.id === 'jimeng' || p.id === 'runninghub') return;
         state.providers = state.providers.filter(item => item !== p);
         state.selected = state.providers[0]?.id || '';
         render();
@@ -237,6 +479,9 @@
         if(key === 'primary' && p.primary) state.providers.forEach(item => { if(item !== p) item.primary = false; });
         render();
     });
+    $('protocol').onchange = () => {
+        try { normalizeDraft(); render(); } catch(e) { setStatus(e.message); }
+    };
     window.addEventListener('message', event => { if(event.data?.type === 'theme') document.body.classList.toggle('studio-theme-dark', event.data.theme === 'dark'); });
     load().catch(e => setStatus(e.message));
 </script>
