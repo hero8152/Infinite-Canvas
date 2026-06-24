@@ -263,9 +263,17 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "fal"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
+FAL_DEFAULT_BASE_URL = "https://queue.fal.run"
+FAL_MODELS_API_URL = "https://api.fal.ai/v1/models"
+FAL_DEFAULT_IMAGE_MODELS = [
+    "fal-ai/flux/schnell",
+    "fal-ai/flux/dev",
+    "fal-ai/flux-pro",
+    "fal-ai/nano-banana",
+]
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
 RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/models_registry.json"
 RUNNINGHUB_LLM_BASE_URL = "https://llm.runninghub.cn/v1"
@@ -771,6 +779,22 @@ def default_api_providers():
             "ms_loras": [],
             "ms_defaults_version": 0,
         },
+        {
+            "id": "fal",
+            "name": "fal.ai",
+            "base_url": FAL_DEFAULT_BASE_URL,
+            "protocol": "fal",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": FAL_DEFAULT_IMAGE_MODELS,
+            "chat_models": [],
+            "video_models": [],
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
     ]
 
 def merge_default_api_providers(providers):
@@ -850,6 +874,19 @@ def merge_default_api_providers(providers):
             protocols.update(normalize_model_protocols(lingjing_default.get("model_protocols")))
             current["model_protocols"] = protocols
     # 即梦 CLI 不再是强制保留的默认平台：仅在用户已添加了即梦协议的平台时，规范化其默认模型/地址。
+    fal_default = next((d for d in default_api_providers() if d["id"] == "fal"), None)
+    if fal_default:
+        current = next((item for item in merged if item.get("id") == "fal"), None)
+        if not current:
+            merged.append(fal_default)
+        else:
+            if not current.get("base_url"):
+                current["base_url"] = fal_default["base_url"]
+            current["protocol"] = "fal"
+            current["image_request_mode"] = normalize_image_request_mode(current.get("image_request_mode"))
+            current["image_models"] = model_list_from_values([*(current.get("image_models") or []), *(fal_default.get("image_models") or [])])
+            current["chat_models"] = model_list_from_values(current.get("chat_models") or [])
+            current["video_models"] = []
     for current in merged:
         if not is_jimeng_provider(current):
             continue
@@ -1170,6 +1207,9 @@ def normalize_provider(item):
     if provider_id == "runninghub":
         protocol = "runninghub"
         base_url = base_url or RUNNINGHUB_DEFAULT_BASE_URL
+    if provider_id == "fal":
+        protocol = "fal"
+        base_url = base_url or FAL_DEFAULT_BASE_URL
     return {
         "id": provider_id,
         "name": name,
@@ -3779,7 +3819,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "fal"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
@@ -3835,6 +3875,9 @@ def is_runninghub_provider(provider):
 
 def is_jimeng_provider(provider):
     return provider_protocol(provider) == "jimeng" or str((provider or {}).get("id") or "").strip().lower() == "jimeng"
+
+def is_fal_provider(provider):
+    return provider_protocol(provider) == "fal" or str((provider or {}).get("id") or "").strip().lower() == "fal"
 
 def is_yuli_provider(provider):
     # 玉玉API（yuli.host）的视频接口走自有格式（/v1/video/create + /v1/video/query），
@@ -8625,6 +8668,132 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {"videos": local_urls, "task_id": task_id, "raw": result}
 
+def fal_api_key(provider=None):
+    provider_id = str((provider or {}).get("id") or "fal").strip().lower() or "fal"
+    api_key = str((provider or {}).get("api_key") or "").strip() or provider_env_key_value(provider_id)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 fal.ai API Key，请在 API 设置中填写。")
+    return strip_auth_scheme(api_key, "Key")
+
+def fal_headers(provider=None, json_body=True):
+    headers = {
+        "Authorization": f"Key {fal_api_key(provider)}",
+        "Accept": "application/json",
+    }
+    if json_body:
+        headers["Content-Type"] = "application/json"
+    return headers
+
+def fal_queue_base_url(provider=None):
+    base_url = str((provider or {}).get("base_url") or FAL_DEFAULT_BASE_URL).strip().rstrip("/")
+    return base_url or FAL_DEFAULT_BASE_URL
+
+def fal_queue_url(provider, model):
+    model_id = selected_model(model, FAL_DEFAULT_IMAGE_MODELS[0]).strip().strip("/")
+    if not model_id:
+        raise HTTPException(status_code=400, detail="fal.ai 模型名称不能为空")
+    if model_id.startswith(("http://", "https://")):
+        return model_id
+    return f"{fal_queue_base_url(provider)}/{model_id}"
+
+def fal_image_size(size):
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        return "square_hd"
+    ratio = width / max(1, height)
+    if abs(ratio - 1.0) < 0.08:
+        return "square_hd"
+    if abs(ratio - (4 / 3)) < 0.08:
+        return "landscape_4_3"
+    if abs(ratio - (3 / 4)) < 0.08:
+        return "portrait_4_3"
+    if abs(ratio - (16 / 9)) < 0.08:
+        return "landscape_16_9"
+    if abs(ratio - (9 / 16)) < 0.08:
+        return "portrait_16_9"
+    return {"width": width, "height": height}
+
+def fal_reference_url(ref):
+    return reference_to_data_url(ref, max_size=1536)
+
+def fal_submit_payload(prompt, size, model, reference_images=None):
+    body = {
+        "prompt": prompt,
+        "image_size": fal_image_size(size),
+    }
+    refs = [fal_reference_url(ref) for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]]
+    refs = [url for url in refs if url]
+    if refs:
+        model_lc = str(model or "").lower()
+        if len(refs) > 1 or "nano-banana" in model_lc:
+            body["image_urls"] = refs
+        else:
+            body["image_url"] = refs[0]
+    return body
+
+def fal_response_url(provider, model, request_id):
+    model_id = selected_model(model, FAL_DEFAULT_IMAGE_MODELS[0]).strip().strip("/")
+    base = fal_queue_base_url(provider)
+    return f"{base}/{model_id}/requests/{urllib.parse.quote(str(request_id), safe='')}"
+
+def fal_status_value(raw):
+    if not isinstance(raw, dict):
+        return ""
+    return str(raw.get("status") or raw.get("state") or "").strip().upper()
+
+def fal_failure_message(raw):
+    if not isinstance(raw, dict):
+        return str(raw or "")
+    error = raw.get("error") or raw.get("detail") or raw.get("message") or raw.get("logs")
+    if isinstance(error, str):
+        return error
+    if isinstance(error, (dict, list)):
+        return json.dumps(error, ensure_ascii=False)[:800]
+    return ""
+
+async def wait_for_fal_result(client, provider, model, submit_raw):
+    request_id = str((submit_raw or {}).get("request_id") or "").strip()
+    status_url = str((submit_raw or {}).get("status_url") or "").strip()
+    response_url = str((submit_raw or {}).get("response_url") or "").strip()
+    if not response_url and request_id:
+        response_url = fal_response_url(provider, model, request_id)
+    if not status_url and response_url:
+        status_url = response_url
+    if not response_url:
+        raise HTTPException(status_code=502, detail=f"fal.ai 未返回 response_url/request_id：{submit_raw}")
+
+    deadline = time.monotonic() + IMAGE_TASK_TIMEOUT
+    last_payload = submit_raw
+    headers = fal_headers(provider, json_body=False)
+    while status_url and time.monotonic() < deadline:
+        await asyncio.sleep(IMAGE_POLL_INTERVAL)
+        status_response = await client.get(status_url, headers=headers)
+        status_response.raise_for_status()
+        last_payload = status_response.json() if status_response.text else {}
+        status = fal_status_value(last_payload)
+        if status in {"COMPLETED", "SUCCEEDED", "SUCCESS", "DONE"}:
+            break
+        if status in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}:
+            raise HTTPException(status_code=502, detail=f"fal.ai 任务失败：{fal_failure_message(last_payload) or last_payload}")
+    else:
+        raise HTTPException(status_code=504, detail=f"fal.ai 生图任务超时：request_id={request_id or response_url}，最后响应：{last_payload}")
+
+    result_response = await client.get(response_url, headers=headers)
+    result_response.raise_for_status()
+    return result_response.json() if result_response.text else {}
+
+async def generate_fal_provider_image(prompt, size, model, reference_images=None, provider=None):
+    provider = provider or get_api_provider_exact("fal")
+    body = fal_submit_payload(prompt, size, model, reference_images)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0)) as client:
+        response = await client.post(fal_queue_url(provider, model), headers=fal_headers(provider), json=body)
+        response.raise_for_status()
+        submit_raw = response.json() if response.text else {}
+        raw = await wait_for_fal_result(client, provider, model, submit_raw)
+        if isinstance(raw, dict):
+            raw.setdefault("_fal_request", submit_raw)
+        return extract_image(raw), raw
+
 async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly"):
     provider = get_api_provider(provider_id)
     if provider["id"] == "modelscope":
@@ -8637,6 +8806,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
         return await generate_volcengine_provider_image(prompt, size, model, reference_images, provider)
+    if is_fal_provider(provider):
+        return await generate_fal_provider_image(prompt, size, model, reference_images, provider)
     is_gpt2 = is_gpt_image_2_model(model)
     is_apimart = is_apimart_provider(provider)
     # 不对 GPT 尺寸做任何缩小/拦截：用户选什么尺寸就原样发给上游；
@@ -10368,6 +10539,8 @@ async def save_providers(payload: List[ApiProviderPayload]):
             provider["protocol"] = "runninghub"
         if provider["id"] == "volcengine":
             provider["protocol"] = "volcengine"
+        if provider["id"] == "fal":
+            provider["protocol"] = "fal"
     if not providers:
         raise HTTPException(status_code=400, detail="至少保留一个 API 平台")
     # 强制最多一个 primary（取最后被标记的；都没标记则保持原样不强制）
@@ -10416,9 +10589,13 @@ def protocol_from_payload(payload):
         return "runninghub"
     if provider_id == "jimeng":
         return "jimeng"
+    if provider_id == "fal":
+        return "fal"
     base_url = str(getattr(payload, "base_url", "") or "").strip().lower()
     if "runninghub.cn" in base_url or "runninghub.ai" in base_url:
         return "runninghub"
+    if "fal.ai" in base_url or "fal.run" in base_url:
+        return "fal"
     protocol = str(getattr(payload, "protocol", "") or "openai").strip().lower()
     return protocol if protocol in SUPPORTED_PROVIDER_PROTOCOLS else "openai"
 
@@ -10438,6 +10615,8 @@ def api_key_from_payload(payload, protocol: str = ""):
             return value
     if protocol == "volcengine":
         return volcengine_provider_api_key("")
+    if protocol == "fal":
+        return provider_env_key_value("fal")
     return ""
 
 def upstream_models_url(base_url: str, protocol: str):
@@ -10452,9 +10631,86 @@ def upstream_models_url(base_url: str, protocol: str):
 def upstream_model_headers(api_key: str, protocol: str):
     if protocol == "gemini":
         return {"x-goog-api-key": api_key, "Accept": "application/json"}
+    if protocol == "fal":
+        return {"Authorization": f"Key {strip_auth_scheme(api_key, 'Key')}", "Accept": "application/json"}
     if protocol == "runninghub":
         return {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}
     return {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}
+
+def fal_model_id(item):
+    if isinstance(item, str):
+        return item.strip()
+    if not isinstance(item, dict):
+        return ""
+    return str(
+        item.get("id")
+        or item.get("endpoint_id")
+        or item.get("endpointId")
+        or item.get("model_id")
+        or item.get("modelId")
+        or item.get("slug")
+        or item.get("name")
+        or ""
+    ).strip()
+
+def fal_is_image_model(item):
+    if not isinstance(item, dict):
+        return True
+    text = " ".join(
+        str(item.get(key) or "")
+        for key in ("category", "type", "tags", "description", "id", "endpoint_id", "name")
+    ).lower()
+    if any(word in text for word in ("video", "audio", "speech", "voice", "music", "llm", "chat", "embedding", "3d")):
+        return False
+    return any(word in text for word in ("image", "flux", "stable-diffusion", "sdxl", "text-to-image", "image-to-image", "nano-banana"))
+
+async def fetch_fal_models_payload(api_key: str):
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请先填写或保存 fal.ai API Key")
+    headers = upstream_model_headers(api_key, "fal")
+    categories = ["text-to-image", "image-to-image", "image-editing"]
+    ids = []
+    raw_items = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        for category in categories:
+            cursor = ""
+            for _page in range(5):
+                params = {"category": category, "limit": 100}
+                if cursor:
+                    params["cursor"] = cursor
+                response = await client.get(FAL_MODELS_API_URL, headers=headers, params=params)
+                if response.status_code >= 400 and category != categories[0]:
+                    break
+                response.raise_for_status()
+                raw = response.json() if response.text else {}
+                items = []
+                if isinstance(raw, dict):
+                    for key in ("data", "models", "items", "results"):
+                        if isinstance(raw.get(key), list):
+                            items = raw[key]
+                            break
+                    cursor = str(raw.get("next_cursor") or raw.get("nextCursor") or raw.get("cursor") or "").strip()
+                elif isinstance(raw, list):
+                    items = raw
+                    cursor = ""
+                raw_items.extend(items)
+                for item in items:
+                    model_id = fal_model_id(item)
+                    if model_id and fal_is_image_model(item) and model_id not in ids:
+                        ids.append(model_id)
+                if not cursor:
+                    break
+    if not ids:
+        ids = list(FAL_DEFAULT_IMAGE_MODELS)
+    return {
+        "total": len(ids),
+        "protocol": "fal",
+        "image_models": ids,
+        "chat_models": [],
+        "video_models": [],
+        "all": ids,
+        "raw": {"models": raw_items[:200]},
+    }
 
 def volcengine_default_model_payload(status=200, message="", raw=None):
     return {
@@ -10557,16 +10813,21 @@ async def probe_openai_models_endpoint(client, base_url: str, api_key: str):
         return False, {"status": response.status_code, "message": f"OpenAI /v1/models 不可用 (HTTP {response.status_code})", "raw": raw}
     return False, {"status": response.status_code, "message": f"OpenAI /v1/models 服务端错误 {response.status_code}", "raw": raw}
 
-async def probe_volcengine_auto_detect(client, base_url: str, api_key: str):
+def is_likely_volcengine_base_url(base_url: str):
+    host = urllib.parse.urlparse(str(base_url or "").strip()).netloc.lower()
+    return any(key in host for key in ("volces.com", "volcengine", "byteplusapi.com"))
+
+async def probe_volcengine_auto_detect(client, base_url: str, api_key: str, force: bool = False):
+    likely_volcengine = force or is_likely_volcengine_base_url(base_url)
     task_ok, task_probe = await probe_volcengine_task_endpoint(client, base_url, api_key)
-    if task_ok:
+    if task_ok and likely_volcengine and task_probe.get("status") != 404:
         return True, {
             "status": task_probe.get("status") or 200,
             "message": "检测到方舟/Ark 任务协议",
             "raw": {"task_probe": task_probe.get("raw")},
         }
     compat_ok, compat_probe = await probe_openai_compat_bearer_endpoint(client, base_url, api_key)
-    if compat_ok:
+    if compat_ok and likely_volcengine:
         return True, {
             "status": compat_probe.get("status") or 200,
             "message": "检测到方舟/Ark Bearer 鉴权入口（OpenAI 兼容透传）",
@@ -10659,6 +10920,21 @@ async def test_provider_connection(payload: TestConnectionPayload):
             "protocol": "runninghub",
             "raw": payload_models.get("raw"),
         }
+    if protocol == "fal":
+        api_key = api_key_from_payload(payload, protocol)
+        payload_models = await fetch_fal_models_payload(api_key)
+        return {
+            "ok": True,
+            "status": 200,
+            "message": "fal.ai API 可用，已拉取图像生成模型。",
+            "model_count": payload_models["total"],
+            "image_models": payload_models["image_models"],
+            "chat_models": [],
+            "video_models": [],
+            "all": payload_models["all"],
+            "protocol": "fal",
+            "raw": payload_models.get("raw"),
+        }
     base_url = (payload.base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -10682,7 +10958,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
                 return {"ok": False, "status": resp.status_code, "message": f"上游 {endpoint_label} 返回网页 HTML，请检查请求地址是否为 API Base URL"}
             if resp.status_code >= 400:
                 if protocol == "volcengine":
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key, force=True)
                     if detected:
                         message = f"{probe.get('message') or '方舟任务接口可达'}；但 /api/v3/models 不可用。请按实际方舟控制台模型名称手动填写视频模型。"
                         return volcengine_default_model_payload(status=probe.get("status") or resp.status_code, message=message, raw={"models_error": resp.text[:300], **(probe.get("raw") or {})})
@@ -10696,7 +10972,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
             grouped, ids = parse_upstream_models(data, protocol)
             grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
             if protocol == "volcengine" and not ids:
-                detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+                detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key, force=True)
                 if detected:
                     return volcengine_default_model_payload(status=resp.status_code, raw=data)
             return {
@@ -10713,7 +10989,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
         if protocol == "volcengine":
             try:
                 async with httpx.AsyncClient(timeout=15) as client:
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key, force=True)
                     if detected:
                         message = f"{probe.get('message') or '方舟任务接口可达'}；但模型列表请求失败。请按实际方舟控制台模型名称手动填写视频模型。"
                         return volcengine_default_model_payload(status=probe.get("status") or 0, message=message, raw={"models_error": str(e)[:300], **(probe.get("raw") or {})})
@@ -10732,6 +11008,20 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
     api_key = api_key_from_payload(payload, protocol)
     if not api_key:
         raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
+    if protocol == "fal":
+        payload_models = await fetch_fal_models_payload(api_key)
+        return {
+            "ok": True,
+            "protocol": "fal",
+            "status_code": 200,
+            "message": "fal.ai API 可用，已拉取图像生成模型。",
+            "raw": payload_models.get("raw"),
+            "model_count": payload_models["total"],
+            "image_models": payload_models["image_models"],
+            "chat_models": [],
+            "video_models": [],
+            "all": payload_models["all"],
+        }
     if protocol == "volcengine":
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -10863,6 +11153,8 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     if protocol == "runninghub":
         provider = {"id": "runninghub", "name": "RunningHub", "base_url": base_url or RUNNINGHUB_DEFAULT_BASE_URL, "protocol": "runninghub", "api_key": api_key}
         return await runninghub_models_payload(provider)
+    if protocol == "fal":
+        return await fetch_fal_models_payload(api_key)
     base_url = (base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -10885,7 +11177,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
                 raise HTTPException(status_code=400, detail=f"上游 {endpoint_label} 返回网页 HTML，请检查请求地址是否为 API Base URL")
             if resp.status_code >= 400:
                 if protocol == "volcengine":
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key, force=True)
                     if detected:
                         payload = volcengine_default_model_payload(
                             status=probe.get("status") or resp.status_code,
@@ -10926,7 +11218,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
         if protocol == "volcengine":
             try:
                 async with httpx.AsyncClient(timeout=15) as client:
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key, force=True)
                     if detected:
                         payload = volcengine_default_model_payload(
                             status=probe.get("status") or 0,
