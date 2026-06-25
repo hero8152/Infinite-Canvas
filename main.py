@@ -884,7 +884,7 @@ def merge_default_api_providers(providers):
                 current["base_url"] = fal_default["base_url"]
             current["protocol"] = "fal"
             current["image_request_mode"] = normalize_image_request_mode(current.get("image_request_mode"))
-            current["image_models"] = model_list_from_values([*(current.get("image_models") or []), *(fal_default.get("image_models") or [])])
+            current["image_models"] = model_list_from_values(current.get("image_models") or [])
             current["chat_models"] = model_list_from_values(current.get("chat_models") or [])
             current["video_models"] = []
     for current in merged:
@@ -8713,14 +8713,58 @@ def fal_image_size(size):
         return "portrait_16_9"
     return {"width": width, "height": height}
 
-def fal_reference_url(ref):
-    return reference_to_data_url(ref, max_size=1536)
+FAL_KREA_ASPECT_RATIOS = (
+    ("1:1", 1 / 1),
+    ("4:3", 4 / 3),
+    ("3:2", 3 / 2),
+    ("16:9", 16 / 9),
+    ("2.35:1", 2.35 / 1),
+    ("4:5", 4 / 5),
+    ("2:3", 2 / 3),
+    ("9:16", 9 / 16),
+)
 
-def fal_submit_payload(prompt, size, model, reference_images=None):
+def fal_krea_aspect_ratio(width, height):
+    try:
+        width = float(width)
+        height = float(height)
+    except (TypeError, ValueError):
+        return "1:1"
+    if width <= 0 or height <= 0:
+        return "1:1"
+    ratio = width / height
+    return min(FAL_KREA_ASPECT_RATIOS, key=lambda item: abs(math.log(ratio / item[1])))[0]
+
+def build_fal_model_input(model, prompt, size, quality=None):
+    model_id = selected_model(model, FAL_DEFAULT_IMAGE_MODELS[0]).strip().strip("/")
+    model_lc = model_id.lower()
+    width, height = parse_size_pair(size)
     body = {
         "prompt": prompt,
         "image_size": fal_image_size(size),
     }
+    if model_lc.startswith("krea/v2/"):
+        body = {
+            "prompt": prompt,
+            "aspect_ratio": fal_krea_aspect_ratio(width, height),
+        }
+        quality_value = str(quality or "").strip().lower()
+        if quality_value in {"low", "medium", "high"}:
+            body["creativity"] = quality_value
+        for key in ("image_size", "width", "height", "negative_prompt", "num_inference_steps", "guidance_scale"):
+            body.pop(key, None)
+    elif model_lc == "fal-ai/flux-2-max":
+        if width and height:
+            body["image_size"] = {"width": width, "height": height}
+        for key in ("aspect_ratio", "creativity", "negative_prompt", "num_inference_steps", "guidance_scale"):
+            body.pop(key, None)
+    return body
+
+def fal_reference_url(ref):
+    return reference_to_data_url(ref, max_size=1536)
+
+def fal_submit_payload(prompt, size, model, reference_images=None, quality=None):
+    body = build_fal_model_input(model, prompt, size, quality)
     refs = [fal_reference_url(ref) for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]]
     refs = [url for url in refs if url]
     if refs:
@@ -8782,9 +8826,9 @@ async def wait_for_fal_result(client, provider, model, submit_raw):
     result_response.raise_for_status()
     return result_response.json() if result_response.text else {}
 
-async def generate_fal_provider_image(prompt, size, model, reference_images=None, provider=None):
+async def generate_fal_provider_image(prompt, size, model, reference_images=None, provider=None, quality=None):
     provider = provider or get_api_provider_exact("fal")
-    body = fal_submit_payload(prompt, size, model, reference_images)
+    body = fal_submit_payload(prompt, size, model, reference_images, quality)
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0)) as client:
         response = await client.post(fal_queue_url(provider, model), headers=fal_headers(provider), json=body)
         response.raise_for_status()
@@ -8807,7 +8851,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
     if is_volcengine_provider(provider):
         return await generate_volcengine_provider_image(prompt, size, model, reference_images, provider)
     if is_fal_provider(provider):
-        return await generate_fal_provider_image(prompt, size, model, reference_images, provider)
+        return await generate_fal_provider_image(prompt, size, model, reference_images, provider, quality)
     is_gpt2 = is_gpt_image_2_model(model)
     is_apimart = is_apimart_provider(provider)
     # 不对 GPT 尺寸做任何缩小/拦截：用户选什么尺寸就原样发给上游；
