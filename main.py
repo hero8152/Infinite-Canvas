@@ -532,6 +532,15 @@ LLM_MESSAGE_MAX_LENGTH = int(os.getenv("LLM_MESSAGE_MAX_LENGTH", "20000"))
 CHAT_ATTACHMENT_MAX = int(os.getenv("CHAT_ATTACHMENT_MAX", "20"))
 ONLINE_IMAGE_REFERENCE_MAX = int(os.getenv("ONLINE_IMAGE_REFERENCE_MAX", "20"))
 
+# ("GEMINI_SPLIT_CONTENTS", "0")不启用新 Gemini 拆分传图方式
+#     {"role": "user", "parts": [文本, 图1, 图2, ...]}
+# ("GEMINI_SPLIT_CONTENTS", "1")启用新的 Gemini 拆分传图方式
+#     {"role": "user", "parts": [图1]},
+#     {"role": "user", "parts": [图2]},
+#     {"role": "user", "parts": [图...]},
+#     {"role": "user", "parts": [{"text": prompt}]},
+GEMINI_SPLIT_CONTENTS = os.getenv("GEMINI_SPLIT_CONTENTS", "1") == "1"
+
 FIELD_LABELS = {
     "prompt": "提示词",
     "message": "文本",
@@ -3701,15 +3710,36 @@ def extract_images(data):
                 if not isinstance(part, dict):
                     continue
                 inline = part.get("inlineData") or part.get("inline_data") or {}
-                if not isinstance(inline, dict):
-                    continue
-                value = inline.get("data")
-                if value:
-                    add_image({
-                        "type": "b64",
-                        "value": value,
-                        "mime_type": inline.get("mimeType") or inline.get("mime_type") or "image/png",
-                    })
+                if isinstance(inline, dict):
+                    value = inline.get("data")
+                    if value:
+                        add_image({
+                            "type": "b64",
+                            "value": value,
+                            "mime_type": inline.get("mimeType") or inline.get("mime_type") or "image/png",
+                        })
+                file_data = part.get("fileData") or part.get("file_data") or {}
+                if isinstance(file_data, dict):
+                    file_uri = (
+                        file_data.get("fileUri")
+                        or file_data.get("file_uri")
+                        or file_data.get("url")
+                        or file_data.get("uri")
+                    )
+                    if isinstance(file_uri, str) and file_uri.strip():
+                        add_image({
+                            "type": "url",
+                            "value": file_uri.strip(),
+                        })
+                # 有些中转站会把图片 URL 放在 text / markdown 里
+                text_value = part.get("text")
+                if isinstance(text_value, str) and text_value.strip():
+                    for image_url in re.findall(r'https?://[^\s\]\)"]+', text_value):
+                        if re.search(r'\.(png|jpe?g|webp|gif)(\?|#|$)', image_url, re.I):
+                            add_image({
+                                "type": "url",
+                                "value": image_url,
+                            })
 
     current = data
     if isinstance(current, dict) and isinstance(current.get("data"), dict) and isinstance(current["data"].get("result"), dict):
@@ -3754,15 +3784,37 @@ def extract_image(data):
                 if not isinstance(part, dict):
                     continue
                 inline = part.get("inlineData") or part.get("inline_data") or {}
-                if not isinstance(inline, dict):
-                    continue
-                value = inline.get("data")
-                if value:
-                    return {
-                        "type": "b64",
-                        "value": value,
-                        "mime_type": inline.get("mimeType") or inline.get("mime_type") or "image/png",
-                    }
+                if isinstance(inline, dict):
+                    value = inline.get("data")
+                    if value:
+                        return {
+                            "type": "b64",
+                            "value": value,
+                            "mime_type": inline.get("mimeType") or inline.get("mime_type") or "image/png",
+                        }
+
+                file_data = part.get("fileData") or part.get("file_data") or {}
+                if isinstance(file_data, dict):
+                    file_uri = (
+                        file_data.get("fileUri")
+                        or file_data.get("file_uri")
+                        or file_data.get("url")
+                        or file_data.get("uri")
+                    )
+                    if isinstance(file_uri, str) and file_uri.strip():
+                        return {
+                            "type": "url",
+                            "value": file_uri.strip(),
+                        }
+
+                text_value = part.get("text")
+                if isinstance(text_value, str) and text_value.strip():
+                    for image_url in re.findall(r'https?://[^\s\]\)"]+', text_value):
+                        if re.search(r'\.(png|jpe?g|webp|gif)(\?|#|$)', image_url, re.I):
+                            return {
+                                "type": "url",
+                                "value": image_url,
+                            }
     if isinstance(data.get("data"), dict) and isinstance(data["data"].get("result"), dict):
         data = data["data"]
     if isinstance(data.get("result"), dict):
@@ -3793,17 +3845,44 @@ def extract_image(data):
     raise HTTPException(status_code=502, detail="无法识别生图接口返回格式")
 
 def extract_task_id(data):
-    if data.get("task_id"):
-        return str(data["task_id"])
-    if data.get("id") and str(data.get("id", "")).startswith("task"):
-        return str(data["id"])
-    nested = data.get("data")
-    if isinstance(nested, list) and nested:
-        first = nested[0]
-        if isinstance(first, dict):
-            return extract_task_id(first)
-    if isinstance(nested, dict):
-        return extract_task_id(nested)
+    if not isinstance(data, dict):
+        return None
+
+    # 常见异步任务 ID 字段
+    for key in (
+        "task_id", "taskId", "taskID",
+        "job_id", "jobId",
+        "generation_id", "generationId",
+    ):
+        value = data.get(key)
+        if value:
+            return str(value)
+
+    # 有些中转站直接把任务 ID 放在 id 里，不一定以 task 开头
+    value = data.get("id")
+    if value:
+        text = str(value)
+        if (
+            text.startswith(("task", "job", "gen", "generation", "img"))
+            or re.fullmatch(r"[0-9a-fA-F-]{16,80}", text)
+            or data.get("status")
+            or data.get("task_status")
+        ):
+            return text
+
+    # 递归兼容 data / result / task / job 包装层
+    for key in ("data", "result", "task", "job", "output"):
+        nested = data.get(key)
+        if isinstance(nested, dict):
+            found = extract_task_id(nested)
+            if found:
+                return found
+        if isinstance(nested, list):
+            for item in nested:
+                found = extract_task_id(item)
+                if found:
+                    return found
+
     return None
 
 def extract_task_id_from_text(text):
@@ -3814,6 +3893,128 @@ def extract_task_id_from_text(text):
 def images_api_unsupported(response):
     text = str(getattr(response, "text", "") or "").lower()
     return "images api is not supported" in text or "not supported for this platform" in text
+
+def async_image_payload_variants(prompt, size, quality, model, image_refs=None, prefer_apimart=False):
+    """
+    给异步生图协议准备多种常见 JSON 格式。
+    真实 APIMart 优先 APIMart 格式；
+    其他“支持异步协议”的中转站优先 OpenAI JSON 格式。
+    """
+    raw_size = str(size or "1024x1024").strip() or "1024x1024"
+    aspect_ratio, resolution = apimart_size_resolution(raw_size)
+    width, height = parse_size_pair(raw_size)
+
+    q = str(quality or "").strip().lower()
+    if q not in {"low", "medium", "high"}:
+        q = ""
+
+    image_values = []
+    for ref in (image_refs or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
+        try:
+            value = reference_to_data_url(ref, max_size=1536)
+        except Exception:
+            value = ""
+        if value:
+            image_values.append(value)
+
+    variants = []
+
+    # 1) 第三方异步站通用 JSON：同时兼容 prompt/input 与 image/image_urls/images
+    openai_image = {
+        "model": model,
+        "prompt": prompt,
+        "input": prompt,
+        "size": raw_size,
+        "n": 1,
+        "response_format": "url",
+    }
+    if q:
+        openai_image["quality"] = q
+    if width and height:
+        openai_image["width"] = width
+        openai_image["height"] = height
+    if image_values:
+        # 不同中转站字段名不一致：有的认 image，有的认 image_urls，有的认 images
+        openai_image["image"] = image_values
+        openai_image["image_urls"] = image_values
+        openai_image["images"] = image_values
+    variants.append(("openai-json-universal", openai_image))
+
+    # 2) 另一种通用写法：image_urls
+    openai_image_urls = {
+        "model": model,
+        "prompt": prompt,
+        "size": raw_size,
+        "n": 1,
+        "response_format": "url",
+    }
+    if q:
+        openai_image_urls["quality"] = q
+    if width and height:
+        openai_image_urls["width"] = width
+        openai_image_urls["height"] = height
+    if image_values:
+        openai_image_urls["image_urls"] = image_values
+    variants.append(("openai-json-image_urls", openai_image_urls))
+
+    # 3) APIMart 风格：保留原来能用的那套
+    apimart_body = {
+        "model": model,
+        "prompt": prompt,
+        "n": 1,
+        "size": aspect_ratio,
+        "resolution": resolution,
+        "official_fallback": False,
+    }
+    if image_values:
+        apimart_body["image_urls"] = image_values
+    variants.append(("apimart", apimart_body))
+
+    # 4) extra_body 风格：部分聚合站把图片参数放这里
+    extra = {
+        "response_format": "url",
+        "size": raw_size,
+        "aspect_ratio": aspect_ratio,
+        "aspectRatio": aspect_ratio,
+        "resolution": resolution,
+    }
+    if width and height:
+        extra["width"] = width
+        extra["height"] = height
+    if image_values:
+        extra["image"] = image_values
+        extra["image_urls"] = image_values
+
+    extra_body = {
+        "model": model,
+        "prompt": prompt,
+        "size": raw_size,
+        "n": 1,
+        "extra_body": extra,
+    }
+    if q:
+        extra_body["quality"] = q
+    variants.append(("extra_body", extra_body))
+
+    if prefer_apimart:
+        order = ["apimart", "openai-json-universal", "openai-json-image_urls", "extra_body"]
+    else:
+        order = ["openai-json-universal", "openai-json-image_urls", "extra_body"]
+
+    by_name = {name: body for name, body in variants}
+    out = []
+    seen = set()
+    for name in order:
+        body = by_name.get(name)
+        if not body:
+            continue
+        sig = json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append((name, body))
+
+    return out
 
 def provider_protocol(provider):
     return str((provider or {}).get("protocol") or "openai").strip().lower()
@@ -4937,12 +5138,40 @@ async def generate_jimeng_video(payload: CanvasVideoRequest, provider):
 IMAGE_TASK_SUCCESS_STATUSES = {"SUCCESS", "SUCCESSFUL", "SUCCEED", "SUCCEEDED", "COMPLETED", "COMPLETE", "DONE", "FINISHED", "OK", "READY"}
 IMAGE_TASK_FAILED_STATUSES = {"FAILURE", "FAILED", "FAIL", "ERROR", "ERRORED", "CANCELED", "CANCELLED", "TIMEOUT", "REJECTED", "EXPIRED"}
 
-def image_task_url_for_provider(provider, task_id):
+def image_task_url_candidates_for_provider(provider, task_id):
     base_url = (provider.get("base_url") if provider else AI_BASE_URL).rstrip("/")
-    is_apimart = is_apimart_provider(provider)
-    if is_apimart:
-        return f"{base_url}/tasks/{task_id}" if base_url.endswith("/v1") else f"{base_url}/v1/tasks/{task_id}"
-    return f"{base_url}/images/tasks/{task_id}" if base_url.endswith("/v1") else f"{base_url}/v1/images/tasks/{task_id}"
+    base_v1 = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+    task_id = urllib.parse.quote(str(task_id or "").strip(), safe="")
+
+    candidates = []
+
+    if is_apimart_provider(provider):
+        # APIMart 真站一般是 /v1/tasks/{id}
+        candidates.extend([
+            f"{base_v1}/tasks/{task_id}",
+            f"{base_v1}/images/tasks/{task_id}",
+        ])
+    else:
+        # OpenAI 兼容异步站一般是 /v1/images/tasks/{id}
+        candidates.extend([
+            f"{base_v1}/images/tasks/{task_id}",
+            f"{base_v1}/tasks/{task_id}",
+        ])
+
+    # 去重
+    out = []
+    seen = set()
+    for url in candidates:
+        if url and url not in seen:
+            seen.add(url)
+            out.append(url)
+
+    return out
+
+
+def image_task_url_for_provider(provider, task_id):
+    urls = image_task_url_candidates_for_provider(provider, task_id)
+    return urls[0] if urls else ""
 
 def image_task_data(payload):
     if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
@@ -4959,10 +5188,36 @@ def image_task_fail_reason(payload):
     return task_data.get("fail_reason") or task_data.get("message") or error.get("message") or (payload.get("message") if isinstance(payload, dict) else "") or "生图任务失败"
 
 async def fetch_image_task_payload(client, task_id, provider=None):
-    task_url = image_task_url_for_provider(provider, task_id)
-    response = await client.get(task_url, headers=api_headers(provider=provider))
-    response.raise_for_status()
-    return response.json()
+    errors = []
+
+    for task_url in image_task_url_candidates_for_provider(provider, task_id):
+        try:
+            response = await client.get(
+                task_url,
+                headers=api_headers(provider=provider),
+            )
+
+            if response.status_code in (404, 405):
+                errors.append(f"{task_url} -> HTTP {response.status_code}")
+                continue
+
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            text = exc.response.text[:300]
+            errors.append(f"{task_url} -> HTTP {status} {text}")
+
+            if status in (404, 405):
+                continue
+
+            raise
+
+    raise HTTPException(
+        status_code=502,
+        detail="查询异步生图任务失败，已尝试：" + "；".join(errors[:4]),
+    )
 
 async def wait_for_image_task(client, task_id, provider=None):
     is_apimart = is_apimart_provider(provider)
@@ -7821,27 +8076,103 @@ def gemini_reference_part(ref):
     if isinstance(value, str) and value.startswith(("http://", "https://")):
         return {"fileData": {"mimeType": "image/png", "fileUri": value}}
     return None
-
 async def generate_gemini_provider_image(prompt, size, model, reference_images=None, provider=None):
     model_name = gemini_model_name(model)
     endpoint = gemini_endpoint_url(provider, model_name)
-    parts = [{"text": prompt.strip()}]
+
+    ref_parts = []
     for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
         part = gemini_reference_part(ref)
         if part:
+            ref_parts.append(part)
+
+    if GEMINI_SPLIT_CONTENTS:
+        # 每张参考图拆成独立 user content。
+        contents = []
+        for part in ref_parts:
+            contents.append({
+                "role": "user",
+                "parts": [part],
+            })
+        contents.append({
+            "role": "user",
+            "parts": [{"text": prompt.strip()}],
+        })
+    else:
+        # 保持原来的 Gemini 传入结构，不改变原功能。
+        parts = [{"text": prompt.strip()}]
+        for part in ref_parts:
             parts.append(part)
+        contents = [{"role": "user", "parts": parts}]
+
     body = {
-        "contents": [{"role": "user", "parts": parts}],
+        "contents": contents,
         "generationConfig": {
             "responseModalities": ["TEXT", "IMAGE"],
             "imageConfig": gemini_image_config(size),
         },
     }
+
+    print(
+        f"[gemini-image] split_contents={GEMINI_SPLIT_CONTENTS} "
+        f"contents={len(contents)} refs={len(ref_parts)} "
+        f"prompt_len={len(str(prompt or ''))} size={size} model={model}"
+    )
+
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0)) as client:
         response = await client.post(endpoint, headers=api_headers(provider=provider), json=body)
-        response.raise_for_status()
-        raw = response.json()
-        return extract_image(raw), raw
+
+        raw = None
+        try:
+            raw = response.json()
+        except Exception:
+            raw = None
+
+        if response.status_code >= 400:
+            task_id = extract_task_id(raw) if isinstance(raw, dict) else ""
+            if not task_id:
+                task_id = extract_task_id_from_text(response.text)
+
+            # 有些上游虽然 HTTP 状态码是 4xx/5xx，但 body 里实际已经带了图片，先尝试解析。
+            if isinstance(raw, dict):
+                try:
+                    return extract_image(raw), raw
+                except Exception:
+                    pass
+
+                # 如果错误体里带 task_id，尝试按异步任务再查一次。
+                if task_id:
+                    try:
+                        task_raw = await wait_for_image_task(client, task_id, provider)
+                        return extract_image(task_raw), task_raw
+                    except Exception as exc:
+                        print(f"[gemini-image] HTTP {response.status_code} 后尝试查询任务失败 task_id={task_id}: {exc}")
+
+            raw_preview = json.dumps(raw, ensure_ascii=False)[:1000] if isinstance(raw, dict) else (response.text or "")[:1000]
+            print(f"[gemini-image] HTTP错误 status={response.status_code} raw={raw_preview}")
+
+            if response.status_code == 504:
+                raise HTTPException(
+                    status_code=504,
+                    detail=(
+                        "Gemini 上游同步生图等待超时。上游后台可能仍会继续生成成功，"
+                        "但本次 HTTP 返回没有直接图片结果"
+                        + (f"，任务 ID：{task_id}" if task_id else "，也没有返回可查询的 task_id")
+                        + f"。原始返回：{raw_preview[:500]}"
+                    )
+                )
+
+            response.raise_for_status()
+
+        if raw is None:
+            raise HTTPException(status_code=502, detail=f"Gemini 生图接口返回非 JSON 响应：{(response.text or '')[:500]}")
+
+        try:
+            return extract_image(raw), raw
+        except Exception:
+            print("[gemini-image] 未解析到图片，原始返回如下：")
+            print(json.dumps(raw, ensure_ascii=False)[:8000])
+            raise
 
 def volcengine_endpoint_url(provider):
     return provider_endpoint_url(provider, "image_generation_endpoint", "/api/v3/images/generations")
@@ -8995,20 +9326,61 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_apimart:
-            apimart_size, resolution = apimart_size_resolution(size)
-            # APIMart 的 GPT-Image-2 图生图仍走 /images/generations，
-            # 通过 image_urls 传参考图，不使用 OpenAI multipart /images/edits。
-            body = {
-                "model": model,
-                "prompt": prompt,
-                "n": 1,
-                "size": apimart_size,
-                "resolution": resolution,
-                "official_fallback": False,
-            }
-            if image_refs:
-                body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
-            response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
+            # APIMart 真站继续优先 APIMart 格式；
+            # 其他“支持异步协议”的中转站优先 OpenAI JSON 格式，避免只吃 prompt、不吃 size/quality/image。
+            base_host = urllib.parse.urlparse(str(base_url or "")).netloc.lower()
+            prefer_apimart = base_host == "apimart.ai" or base_host.endswith(".apimart.ai")
+
+            response = None
+            last_status = 0
+            last_text = ""
+
+            for variant_name, body in async_image_payload_variants(
+                prompt,
+                size,
+                quality,
+                model,
+                image_refs,
+                prefer_apimart=prefer_apimart,
+            ):
+                print(
+                    f"[async-image] submit variant={variant_name} "
+                    f"provider={provider.get('id')} model={model} "
+                    f"prompt_len={len(str(body.get('prompt') or body.get('input') or ''))} "
+                    f"image_count={len(body.get('image_urls') or body.get('image') or body.get('images') or [])} "
+                    f"size={body.get('size')} quality={body.get('quality')} "
+                    f"keys={list(body.keys())}"
+                )
+                if isinstance(body.get("extra_body"), dict):
+                    print(f"[async-image] extra_body keys={list(body['extra_body'].keys())}")
+
+                resp = await client.post(
+                    gen_url,
+                    headers=api_headers(provider=provider, model=model),
+                    json=body,
+                )
+
+                if resp.status_code < 400:
+                    response = resp
+                    break
+
+                last_status = resp.status_code
+                last_text = resp.text[:800]
+                print(f"[async-image] variant={variant_name} failed status={last_status}: {last_text[:300]}")
+
+                # 鉴权、限流、服务端错误不要反复重试，避免重复扣费或打爆上游
+                if resp.status_code in (401, 403, 429) or resp.status_code >= 500:
+                    resp.raise_for_status()
+
+                # 400 / 404 / 405 / 415 / 422 多半是字段名或端点格式不兼容，可以换一种格式再试
+                if resp.status_code not in (400, 404, 405, 415, 422):
+                    resp.raise_for_status()
+
+            if response is None:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"异步生图提交失败：{last_status} {last_text[:300]}",
+                )
         elif is_gpt2 and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
             if quality:
