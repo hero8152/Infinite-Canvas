@@ -347,16 +347,19 @@
             providerSelect.innerHTML = providers.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === provider ? 'selected' : ''}>${escapeHtml(p.name || p.id)}</option>`).join('');
             if(isRunningHubProvider(provider)){
                 const entries = runningHubEntries(provider);
-                const keys = entries.map(e => `${e.kind}:${e.id}`);
+                const apiModels = providerModels(provider);
+                const entryKeys = entries.map(e => `${e.kind}:${e.id}`);
+                const modelKeys = apiModels.map(m => String(m || '').trim()).filter(Boolean);
+                const keys = [...entryKeys, ...modelKeys];
                 if(!keys.includes(selectedModel)) selectedModel = keys[0] || '';
-                modelSelect.innerHTML = entries.length
-                    ? entries.map(e => {
+                const entryOptions = entries.map(e => {
                         const key = `${e.kind}:${e.id}`;
                         const tag = e.kind === 'workflow' ? tr('online.rhWorkflow') : tr('online.rhApp');
                         const label = e.title || e.id;
                         return `<option value="${escapeHtml(key)}" ${key === selectedModel ? 'selected' : ''}>${escapeHtml(`[${tag}] ${label}`)}</option>`;
-                    }).join('')
-                    : `<option value="">${escapeHtml(tr('online.rhNoEntries'))}</option>`;
+                    });
+                const modelOptions = apiModels.map(m => `<option value="${escapeHtml(m)}" ${m === selectedModel ? 'selected' : ''}>${escapeHtml(`[OpenAPI] ${m}`)}</option>`);
+                modelSelect.innerHTML = [...entryOptions, ...modelOptions].join('') || `<option value="">${escapeHtml(tr('online.rhNoEntries'))}</option>`;
             } else {
                 const modelsForProvider = providerModels(provider);
                 if(!modelsForProvider.includes(selectedModel)) selectedModel = modelsForProvider[0] || models.gpt;

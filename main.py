@@ -328,10 +328,14 @@ RUNNINGHUB_DEFAULT_IMAGE_MODELS = [
     "nano-banana/edit-official-stable",
 ]
 RUNNINGHUB_DEFAULT_VIDEO_MODELS = [
+    "xai/grok-imagine/image-to-video-channel-low-price-v1.5",
     "google/veo3.1-fast/text-to-video-channel-low-price",
     "sora-2/text-to-video-official-stable",
     "seedance-2.0-global/text-to-video",
     "seedance-2.0-global/image-to-video",
+]
+RUNNINGHUB_PINNED_VIDEO_MODELS = [
+    "xai/grok-imagine/image-to-video-channel-low-price-v1.5",
 ]
 RUNNINGHUB_DEFAULT_APPS = [
     {
@@ -827,7 +831,7 @@ def merge_default_api_providers(providers):
                 current["protocol"] = "runninghub"
             current["image_models"] = model_list_from_values(current.get("image_models") or [])
             current["chat_models"] = model_list_from_values(current.get("chat_models") or [])
-            current["video_models"] = model_list_from_values(current.get("video_models") or [])
+            current["video_models"] = model_list_from_values([*(current.get("video_models") or []), *RUNNINGHUB_PINNED_VIDEO_MODELS])
             current["rh_apps"] = merge_runninghub_system_entries(rh_default.get("rh_apps") or [], current.get("rh_apps") or [], "app")
             current["rh_workflows"] = merge_runninghub_system_entries(rh_default.get("rh_workflows") or [], current.get("rh_workflows") or [], "workflow")
     volc_default = next((d for d in default_api_providers() if d["id"] == "volcengine"), None)
@@ -896,6 +900,9 @@ def merge_default_api_providers(providers):
             *[item for item in (current.get("video_models") or []) if str(item or "").strip() not in JIMENG_LEGACY_VIDEO_MODELS],
             *JIMENG_DEFAULT_VIDEO_MODELS,
         ])
+    for current in merged:
+        if str(current.get("protocol") or "").lower() == "runninghub":
+            current["video_models"] = model_list_from_values([*(current.get("video_models") or []), *RUNNINGHUB_PINNED_VIDEO_MODELS])
     return merged
 
 def normalize_model_list(values):
@@ -8080,6 +8087,54 @@ def runninghub_registry_fallback():
         {"name_en": "nano-banana/edit-official-stable", "endpoint": "rhart-image-v1-official/edit", "output_type": "image"},
     ]
     video = [
+        {
+            "name_en": "xai/grok-imagine/image-to-video-channel-low-price-v1.5",
+            "endpoint": "rhart-video-g/image-to-video",
+            "output_type": "video",
+            "params": [
+                {
+                    "type": "STRING",
+                    "fieldKey": "prompt",
+                    "required": True,
+                    "defaultValue": "Fixed scene, cute puppy running and playing with a ball on the grass.",
+                    "multipleInputs": False,
+                },
+                {
+                    "type": "LIST",
+                    "fieldKey": "aspectRatio",
+                    "required": True,
+                    "defaultValue": "16:9",
+                    "options": [{"value": value} for value in ("2:3", "3:2", "1:1", "16:9", "9:16")],
+                    "multipleInputs": False,
+                },
+                {
+                    "type": "IMAGE",
+                    "fieldKey": "imageUrls",
+                    "required": True,
+                    "defaultValue": "",
+                    "multipleInputs": True,
+                    "maxInpuNum": 7,
+                },
+                {
+                    "type": "LIST",
+                    "fieldKey": "resolution",
+                    "required": False,
+                    "defaultValue": "480p",
+                    "options": [{"value": value} for value in ("720p", "480p")],
+                    "multipleInputs": False,
+                },
+                {
+                    "type": "INT",
+                    "fieldKey": "duration",
+                    "required": False,
+                    "defaultValue": 6,
+                    "multipleInputs": False,
+                    "min": 6,
+                    "max": 30,
+                    "step": 1,
+                },
+            ],
+        },
         {"name_en": "google/veo3.1-fast/text-to-video-channel-low-price", "endpoint": "rhart-video-v3.1-fast/text-to-video", "output_type": "video"},
         {"name_en": "sora-2/text-to-video-official-stable", "endpoint": "rhart-video-s-official/text-to-video", "output_type": "video"},
         {"name_en": "seedance-2.0-global/text-to-video", "endpoint": "bytedance/seedance-2.0-global/text-to-video", "output_type": "video"},
@@ -8896,7 +8951,15 @@ async def generate_runninghub_video(payload, provider):
         body["size"] = runninghub_schema_value(field, runninghub_size_for_aspect(aspect))
     if runninghub_schema_field(params, "duration"):
         field = runninghub_schema_field(params, "duration")
-        body["duration"] = runninghub_schema_value(field, str(max(1, min(60, int(payload.duration or 5)))))
+        try:
+            duration_value = int(payload.duration or field.get("defaultValue") or 5)
+            if field.get("min") not in (None, ""):
+                duration_value = max(duration_value, int(field.get("min")))
+            if field.get("max") not in (None, ""):
+                duration_value = min(duration_value, int(field.get("max")))
+        except Exception:
+            duration_value = field.get("defaultValue") or 5
+        body["duration"] = duration_value
     if runninghub_schema_field(params, "resolution"):
         field = runninghub_schema_field(params, "resolution")
         body["resolution"] = runninghub_schema_value(field, str(payload.resolution or "720p").lower())
@@ -11733,23 +11796,34 @@ async def image_params(provider_id: str = "", model: str = ""):
 VIDEO_URL_KEYS = (
     "url", "video_url", "videoUrl", "mp4_url", "mp4Url",
     "output", "output_url", "outputUrl", "download_url", "downloadUrl",
+    "file_url", "fileUrl", "result_url", "resultUrl",
     "video", "src", "uri", "preview_url", "previewUrl", "path",
     "last_frame_url", "lastFrameUrl", "remixed_from_video_id",
+    "resultShow", "result_show", "result_json", "resultJson",
 )
 
 def _collect_video_url(value, urls):
     if not value:
         return
     if isinstance(value, str):
-        if value.startswith("http://") or value.startswith("https://") or value.startswith("/output/") or value.startswith("/assets/"):
-            urls.append(value)
+        text = value.strip()
+        if not text:
+            return
+        if text.startswith("[") or text.startswith("{"):
+            try:
+                _collect_video_url(json.loads(text), urls)
+                return
+            except Exception:
+                pass
+        if text.startswith("http://") or text.startswith("https://") or text.startswith("/output/") or text.startswith("/assets/"):
+            urls.append(text)
         return
     if isinstance(value, list):
         for item in value:
             _collect_video_url(item, urls)
         return
     if isinstance(value, dict):
-        for key in ("videos", "outputs", "data", "result", "content"):
+        for key in ("videos", "outputs", "output", "data", "result", "results", "content", "items", "files"):
             if key in value:
                 _collect_video_url(value.get(key), urls)
         for key in VIDEO_URL_KEYS:
@@ -11759,6 +11833,7 @@ def _collect_video_url(value, urls):
 def video_output_urls(raw):
     urls = []
     if not isinstance(raw, dict):
+        _collect_video_url(raw, urls)
         return urls
     candidates = [raw]
     data = raw.get("data")
@@ -11786,7 +11861,7 @@ def video_output_urls(raw):
     for node in candidates:
         if not isinstance(node, dict):
             continue
-        for key in ("videos", "outputs", "content"):
+        for key in ("videos", "outputs", "output", "results", "result", "data", "content", "items", "files"):
             value = node.get(key)
             if value:
                 _collect_video_url(value, urls)
