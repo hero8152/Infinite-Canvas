@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自媒体日更工作流</title>
+    <script>
+        (function(){
+            try {
+                document.documentElement.dataset.studioFitScale = 'off';
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if(theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/lucide.js?v=2026.07.4.2.1783172522"></script>
+    <script src="/static/js/theme.js?v=2026.07.4.2.1783172522"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2026.07.4.2.1783172522">
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.4.2.1783172522">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'HarmonyOS Sans SC','PingFang SC','Microsoft YaHei',sans-serif; background: var(--bg, #f5f6f8); color: var(--text, #1c1e21); }
+        .page { max-width: 1180px; margin: 0 auto; padding: 24px 20px 60px; }
+        .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+        .title { font-size: 22px; font-weight: 700; }
+        .sub { color: var(--muted, #71717a); font-size: 13px; margin-top: 6px; line-height: 1.6; }
+        .head-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+        @media (max-width: 920px) { .layout { grid-template-columns: 1fr; } }
+        .card { background: var(--card, #fff); border: 1px solid var(--line, #e4e4e7); border-radius: 14px; padding: 18px; margin-bottom: 18px; }
+        .card-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+        .card-desc { font-size: 12px; color: var(--muted, #71717a); margin-bottom: 14px; line-height: 1.6; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
+        .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+        .field label { font-size: 12px; font-weight: 600; color: var(--muted, #52525b); }
+        .field input[type=text], .field input[type=time], .field input[type=number], .field select, .field textarea {
+            border: 1px solid var(--line, #d4d4d8); border-radius: 9px; padding: 8px 10px; font-size: 13px;
+            background: var(--bg, #fafafa); color: var(--text, #18181b); outline: none; width: 100%; font-family: inherit;
+        }
+        .field textarea { min-height: 64px; resize: vertical; }
+        .field input:focus, .field select:focus, .field textarea:focus { border-color: #8b5cf6; }
+        .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line, #e4e4e7); border-radius: 10px; margin-bottom: 12px; }
+        .switch-row .sw-label { font-size: 13px; font-weight: 600; }
+        .switch-row .sw-hint { font-size: 11px; color: var(--muted, #71717a); margin-top: 2px; }
+        .btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line, #d4d4d8); background: var(--card, #fff); color: var(--text, #18181b); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; }
+        .btn:hover { border-color: #8b5cf6; color: #8b5cf6; }
+        .btn.primary { background: #8b5cf6; border-color: #8b5cf6; color: #fff; }
+        .btn.primary:hover { background: #7c3aed; color: #fff; }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+        .btn svg, .btn i { width: 15px; height: 15px; }
+        .status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+        .status-pill.ok { background: rgba(34,197,94,.12); color: #16a34a; }
+        .status-pill.warn { background: rgba(245,158,11,.12); color: #d97706; }
+        .status-pill.fail { background: rgba(239,68,68,.12); color: #dc2626; }
+        .status-pill.idle { background: rgba(113,113,122,.12); color: var(--muted, #71717a); }
+        .toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); background: #18181b; color: #fff; font-size: 13px; padding: 9px 18px; border-radius: 999px; z-index: 99; opacity: 0; pointer-events: none; transition: opacity .2s; }
+        .toast.show { opacity: 1; }
+        .runs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        .runs-table th { text-align: left; color: var(--muted, #71717a); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line, #e4e4e7); }
+        .runs-table td { padding: 8px; border-bottom: 1px solid var(--line, #f0f0f2); vertical-align: top; }
+        .runs-table tr:last-child td { border-bottom: none; }
+        .run-steps { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+        .step-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(113,113,122,.1); color: var(--muted, #71717a); }
+        .step-chip.succeeded { background: rgba(34,197,94,.12); color: #16a34a; }
+        .step-chip.failed { background: rgba(239,68,68,.12); color: #dc2626; }
+        .step-chip.running { background: rgba(139,92,246,.12); color: #8b5cf6; }
+        .check-list { display: flex; flex-direction: column; gap: 8px; }
+        .check-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; border: 1px solid var(--line, #ececee); border-radius: 10px; font-size: 13px; }
+        .check-item .ci-detail { color: var(--muted, #71717a); font-size: 12px; margin-top: 2px; word-break: break-all; }
+        .check-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+        .check-dot.pass { background: #22c55e; }
+        .check-dot.warn { background: #f59e0b; }
+        .check-dot.fail { background: #ef4444; }
+        .canvas-link { color: #8b5cf6; text-decoration: none; font-weight: 600; }
+        .canvas-link:hover { text-decoration: underline; }
+        .err-text { color: #dc2626; font-size: 11.5px; margin-top: 3px; word-break: break-all; }
+        .muted { color: var(--muted, #71717a); }
+        .flow-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); background: rgba(139,92,246,.06); border: 1px dashed rgba(139,92,246,.35); padding: 10px 12px; border-radius: 10px; margin-bottom: 14px; }
+        .flow-hint b { color: #8b5cf6; }
+        html.theme-dark body { background: var(--bg, #0f141d); }
+    </style>
+</head>
+<body>
+<div class="page">
+    <header class="page-head">
+        <div>
+            <div class="title">自媒体日更工作流</div>
+            <div class="sub">每天定时：选题 → 文案 → 口播/分镜脚本 → 图片提示词 → 自动生成「智能画布」节点图（可选直接出图）。<br>产出的画布与 ComfyUI 一样按节点连线，打开即可微调并一键生图。</div>
+        </div>
+        <div class="head-actions">
+            <span id="schedPill" class="status-pill idle">加载中…</span>
+        </div>
+    </header>
+
+    <div class="flow-hint">
+        节点流：<b>01 选题</b> → <b>02 文案</b> → <b>03 脚本</b> → <b>04 每镜提示词</b> → <b>05 图片节点</b>
+        <span class="muted">（在画布中提示词节点已连线到图片节点，点运行即出图）</span>
+    </div>
+
+    <div class="layout">
+        <div>
+            <div class="card">
+                <div class="card-title">每日循环设置</div>
+                <div class="card-desc">开启后，服务会在每天设定时间自动执行整条流水线；错过时间（休眠/关机）可自动补跑，失败自动重试。</div>
+                <div class="switch-row">
+                    <div>
+                        <div class="sw-label">开启每日自动执行</div>
+                        <div class="sw-hint">需保持本服务运行（run.bat 常驻）</div>
+                    </div>
+                    <input type="checkbox" id="cfg_enabled" style="width:18px;height:18px;">
+                </div>
+                <div class="grid2">
+                    <div class="field"><label>每天执行时间</label><input type="time" id="cfg_daily_time" value="07:30"></div>
+                    <div class="field"><label>目标平台</label>
+                        <select id="cfg_platform">
+                            <option>抖音</option><option>小红书</option><option>快手</option>
+                            <option>视频号</option><option>B站</option><option>公众号</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field"><label>账号主题方向（选题依据，必填）</label><textarea id="cfg_topic_direction" placeholder="例：农资科普，面向种植户讲肥料、病虫害防治的实用知识"></textarea></div>
+                <div class="grid2">
+                    <div class="field"><label>目标人群（可选）</label><input type="text" id="cfg_audience" placeholder="例：30-55岁 种植户"></div>
+                    <div class="field"><label>内容风格（可选）</label><input type="text" id="cfg_style_notes" placeholder="例：接地气、口语化、多用比喻"></div>
+                </div>
+                <div class="grid2">
+                    <div class="field"><label>分镜数量（1-9）</label><input type="number" id="cfg_shot_count" min="1" max="9" value="4"></div>
+                    <div class="field"><label>画布归属项目</label><input type="text" id="cfg_project_name" value="自媒体日更"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">模型设置</div>
+                <div class="card-desc">LLM 负责选题/文案/脚本/提示词；生图平台写入画布设置（自动出图也用它）。平台与 Key 在「API 设置」页管理。</div>
+                <div class="grid2">
+                    <div class="field"><label>LLM 平台</label><select id="cfg_llm_provider"></select></div>
+                    <div class="field"><label>LLM 模型</label><select id="cfg_llm_model"></select></div>
+                </div>
+                <div class="grid2">
+                    <div class="field"><label>生图平台</label><select id="cfg_image_provider"></select></div>
+                    <div class="field"><label>生图模型</label><select id="cfg_image_model"></select></div>
+                </div>
+                <div class="grid2">
+                    <div class="field"><label>出图比例</label>
+                        <select id="cfg_image_ratio">
+                            <option value="portrait">竖图 2:3</option><option value="story">竖屏 9:16</option>
+                            <option value="square">方图 1:1</option><option value="landscape">横图 3:2</option>
+                            <option value="wide">横屏 16:9</option>
+                        </select>
+                    </div>
+                    <div class="field"><label>分辨率</label>
+                        <select id="cfg_image_resolution"><option value="1k">1K</option><option value="2k">2K</option><option value="4k">4K</option></select>
+                    </div>
+                </div>
+                <div class="field"><label>图片统一风格（可选，附加到每条提示词）</label><input type="text" id="cfg_image_style" placeholder="例：bright flat illustration, warm tone"></div>
+                <div class="switch-row">
+                    <div>
+                        <div class="sw-label">生成画布后直接自动出图</div>
+                        <div class="sw-hint">关闭则只生成画布与提示词，打开画布手动出图（更省额度）</div>
+                    </div>
+                    <input type="checkbox" id="cfg_auto_generate_images" style="width:18px;height:18px;">
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">
+                    <button class="btn primary" onclick="saveConfig()"><i data-lucide="save"></i>保存配置</button>
+                    <button class="btn" id="runNowBtn" onclick="runNow(false)"><i data-lucide="play"></i>立即执行一次</button>
+                    <button class="btn" onclick="runNow(true)" title="不调用大模型，用示例内容验证整条链路"><i data-lucide="flask-conical"></i>离线试跑</button>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <div class="card">
+                <div class="card-title">自检
+                    <span id="checkPill" class="status-pill idle" style="margin-left:auto;">未检测</span>
+                </div>
+                <div class="card-desc">逐项检查配置、存储、Key、调度线程与画布模板；「连 LLM 检测」会真实调用一次大模型。</div>
+                <div style="display:flex;gap:10px;margin-bottom:12px;">
+                    <button class="btn" onclick="selfCheck(false)"><i data-lucide="shield-check"></i>快速自检</button>
+                    <button class="btn" onclick="selfCheck(true)"><i data-lucide="radio"></i>连 LLM 检测</button>
+                </div>
+                <div id="checkList" class="check-list"><div class="muted" style="font-size:12px;">尚未执行自检</div></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">运行记录
+                    <button class="btn" style="margin-left:auto;padding:4px 10px;font-size:12px;" onclick="loadRuns()"><i data-lucide="refresh-cw"></i>刷新</button>
+                </div>
+                <div class="card-desc" id="todayLine">—</div>
+                <table class="runs-table">
+                    <thead><tr><th style="width:88px;">日期</th><th>选题 / 状态</th><th style="width:70px;">画布</th></tr></thead>
+                    <tbody id="runsBody"><tr><td colspan="3" class="muted">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+let PROVIDERS = [];
+let CFG = null;
+let pollTimer = null;
+
+function $(id){ return document.getElementById(id); }
+function toast(msg){
+    const el = $('toast'); el.textContent = msg; el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2600);
+}
+function fmtTime(ms){
+    if(!ms) return '—';
+    const d = new Date(ms);
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+async function jfetch(url, opts){
+    const resp = await fetch(url, opts);
+    if(!resp.ok){
+        let detail = '';
+        try { detail = (await resp.json()).detail || ''; } catch(e) {}
+        throw new Error(detail || `${resp.status} ${resp.statusText}`);
+    }
+    return resp.json();
+}
+
+function fillProviderSelect(sel, listKey, currentId){
+    const usable = PROVIDERS.filter(p => (p[listKey] || []).length || p.id === 'modelscope');
+    sel.innerHTML = '<option value="">（未选择）</option>' + usable.map(p =>
+        `<option value="${p.id}" ${p.id===currentId?'selected':''}>${p.name || p.id}</option>`).join('');
+}
+function fillModelSelect(sel, providerId, listKey, current){
+    const p = PROVIDERS.find(x => x.id === providerId);
+    const models = (p && p[listKey]) || [];
+    sel.innerHTML = '<option value="">（平台默认）</option>' + models.map(m =>
+        `<option value="${m}" ${m===current?'selected':''}>${m}</option>`).join('');
+}
+function syncModelSelects(){
+    fillModelSelect($('cfg_llm_model'), $('cfg_llm_provider').value, 'chat_models', CFG?.llm_model);
+    fillModelSelect($('cfg_image_model'), $('cfg_image_provider').value, 'image_models', CFG?.image_model);
+}
+
+async function loadAll(){
+    try {
+        const [cfgData, cfgApi] = await Promise.all([
+            jfetch('/api/media-workflow/config'),
+            jfetch('/api/config'),
+        ]);
+        CFG = cfgData.config;
+        PROVIDERS = (cfgApi.api_providers || []).filter(p => p.enabled !== false);
+        $('cfg_enabled').checked = !!CFG.enabled;
+        $('cfg_daily_time').value = CFG.daily_time || '07:30';
+        $('cfg_platform').value = CFG.platform || '抖音';
+        $('cfg_topic_direction').value = CFG.topic_direction || '';
+        $('cfg_audience').value = CFG.audience || '';
+        $('cfg_style_notes').value = CFG.style_notes || '';
+        $('cfg_shot_count').value = CFG.shot_count || 4;
+        $('cfg_project_name').value = CFG.project_name || '自媒体日更';
+        $('cfg_image_ratio').value = CFG.image_ratio || 'portrait';
+        $('cfg_image_resolution').value = CFG.image_resolution || '1k';
+        $('cfg_image_style').value = CFG.image_style || '';
+        $('cfg_auto_generate_images').checked = !!CFG.auto_generate_images;
+        fillProviderSelect($('cfg_llm_provider'), 'chat_models', CFG.llm_provider);
+        fillProviderSelect($('cfg_image_provider'), 'image_models', CFG.image_provider);
+        syncModelSelects();
+    } catch(e) {
+        toast('加载配置失败：' + e.message);
+    }
+    refreshStatus();
+    loadRuns();
+}
+
+function collectConfig(){
+    return {
+        enabled: $('cfg_enabled').checked,
+        daily_time: $('cfg_daily_time').value || '07:30',
+        platform: $('cfg_platform').value,
+        topic_direction: $('cfg_topic_direction').value.trim(),
+        audience: $('cfg_audience').value.trim(),
+        style_notes: $('cfg_style_notes').value.trim(),
+        shot_count: parseInt($('cfg_shot_count').value || '4', 10),
+        project_name: $('cfg_project_name').value.trim() || '自媒体日更',
+        llm_provider: $('cfg_llm_provider').value,
+        llm_model: $('cfg_llm_model').value,
+        image_provider: $('cfg_image_provider').value,
+        image_model: $('cfg_image_model').value,
+        image_ratio: $('cfg_image_ratio').value,
+        image_resolution: $('cfg_image_resolution').value,
+        image_style: $('cfg_image_style').value.trim(),
+        auto_generate_images: $('cfg_auto_generate_images').checked,
+        catch_up: CFG?.catch_up !== false,
+        max_daily_attempts: CFG?.max_daily_attempts || 3,
+        retry_per_step: CFG?.retry_per_step ?? 2,
+    };
+}
+
+async function saveConfig(){
+    const body = collectConfig();
+    if(body.enabled && !body.topic_direction){
+        toast('请先填写「账号主题方向」再开启自动执行'); return;
+    }
+    try {
+        const data = await jfetch('/api/media-workflow/config', {
+            method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+        });
+        CFG = data.config;
+        toast('配置已保存');
+        refreshStatus();
+    } catch(e) { toast('保存失败：' + e.message); }
+}
+
+async function runNow(offline){
+    try {
+        const data = await jfetch('/api/media-workflow/run', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({force: true, offline}),
+        });
+        toast(data.message || (data.started ? '已开始执行' : '未能启动'));
+        if(data.started) startPolling();
+    } catch(e) { toast('启动失败：' + e.message); }
+}
+
+function startPolling(){
+    if(pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+        const st = await refreshStatus();
+        loadRuns();
+        if(st && !st.running){ clearInterval(pollTimer); pollTimer = null; }
+    }, 3000);
+}
+
+async function refreshStatus(){
+    try {
+        const st = await jfetch('/api/media-workflow/status');
+        const pill = $('schedPill');
+        if(st.running){ pill.className = 'status-pill warn'; pill.textContent = '执行中…'; }
+        else if(!st.enabled){ pill.className = 'status-pill idle'; pill.textContent = '自动执行未开启'; }
+        else if(!st.scheduler_alive){ pill.className = 'status-pill fail'; pill.textContent = '调度线程异常'; }
+        else { pill.className = 'status-pill ok'; pill.textContent = '已开启 · 下次 ' + fmtTime(st.next_run_at); }
+        const t = st.today || {};
+        $('todayLine').textContent = `今天（${t.date}）：${
+            {succeeded:'已成功', running:'执行中', failed:'失败（会自动重试）', idle:'尚未执行', skipped:'已跳过'}[t.status] || t.status
+        }，已尝试 ${t.attempts} 次`;
+        return st;
+    } catch(e) { return null; }
+}
+
+async function loadRuns(){
+    try {
+        const data = await jfetch('/api/media-workflow/runs?limit=20');
+        const rows = (data.runs || []).map(r => {
+            const steps = (r.steps || []).map(s =>
+                `<span class="step-chip ${s.status}">${s.label}${s.attempts > 1 ? '×' + s.attempts : ''}</span>`).join('');
+            const statusText = {succeeded:'✅', failed:'❌', running:'⏳', skipped:'⏭️'}[r.status] || r.status;
+            const err = r.error ? `<div class="err-text">${escapeHtml(r.error)}</div>` : '';
+            const canvas = r.canvas_url ? `<a class="canvas-link" href="${r.canvas_url}" target="_blank">打开</a>` : '—';
+            const offline = r.offline ? '<span class="step-chip">离线</span>' : '';
+            return `<tr><td>${r.date}<div class="muted" style="font-size:11px;">${fmtTime(r.started_at)}</div></td>
+                <td>${statusText} ${escapeHtml(r.topic || '（无选题）')} ${offline}
+                    <div class="run-steps">${steps}</div>${err}</td>
+                <td>${canvas}</td></tr>`;
+        });
+        $('runsBody').innerHTML = rows.length ? rows.join('') : '<tr><td colspan="3" class="muted">还没有运行记录，点「立即执行一次」或「离线试跑」试试</td></tr>';
+    } catch(e) {
+        $('runsBody').innerHTML = `<tr><td colspan="3" class="err-text">加载失败：${escapeHtml(e.message)}</td></tr>`;
+    }
+}
+
+async function selfCheck(llmPing){
+    const pill = $('checkPill');
+    pill.className = 'status-pill warn'; pill.textContent = '检测中…';
+    $('checkList').innerHTML = '<div class="muted" style="font-size:12px;">检测中…</div>';
+    try {
+        const data = await jfetch('/api/media-workflow/self-check', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({llm_ping: llmPing}),
+        });
+        const cls = {pass:'ok', warn:'warn', fail:'fail'}[data.overall] || 'idle';
+        pill.className = 'status-pill ' + cls;
+        pill.textContent = {pass:'全部通过', warn:'有警告', fail:'有失败项'}[data.overall] || data.overall;
+        $('checkList').innerHTML = data.items.map(i => `
+            <div class="check-item"><span class="check-dot ${i.status}"></span>
+                <div><div>${escapeHtml(i.label)}</div>
+                ${i.detail ? `<div class="ci-detail">${escapeHtml(i.detail)}</div>` : ''}</div>
+            </div>`).join('');
+    } catch(e) {
+        pill.className = 'status-pill fail'; pill.textContent = '检测失败';
+        $('checkList').innerHTML = `<div class="err-text">${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function escapeHtml(s){
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+loadAll();
+$('cfg_llm_provider').addEventListener('change', syncModelSelects);
+$('cfg_image_provider').addEventListener('change', syncModelSelects);
+setInterval(refreshStatus, 30000);
+if(window.lucide?.createIcons) lucide.createIcons();
+</script>
+</body>
+</html>

@@ -1549,6 +1549,13 @@
                     </svg>
                     <span class="nav-text" data-i18n="nav.assetManager">素材库</span>
                 </div>
+                <div class="nav-item" onclick="switchUI(this, 'media-workflow')">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <span class="nav-text" data-i18n="nav.mediaWorkflow">自媒体日更</span>
+                </div>
             </nav>
 
             <div class="side-actions">
@@ -1682,6 +1689,7 @@
             <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.07.3.1783152169" scrolling="yes"></iframe>
             <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2026.07.3.1783152169" scrolling="yes"></iframe>
             <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.07.3.1783152169" scrolling="yes"></iframe>
+            <iframe id="frame-media-workflow" data-src="/static/media-workflow.html?v=2026.07.3.1783152169" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -1789,7 +1797,7 @@
         const SIDEBAR_SETTINGS_COLLAPSED_KEY = 'studio_sidebar_settings_collapsed';
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
         const DEFAULT_PAGE_ID = 'zimage';
-        const PAGE_IDS = ['zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
+        const PAGE_IDS = ['zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings','media-workflow'];
         const LOCAL_PAGE_IDS = ['zimage','enhance','klein','angle'];
         const PROJECT_URL = 'https://github.com/hero8152/Infinite-Canvas';
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION' };

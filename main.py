@@ -16324,6 +16324,10 @@ def run_workflow(name: str, payload: WorkflowRunRequest):
     )
     return generate(req)
 
+# --- 自媒体日更工作流（选题→文案→脚本→提示词→画布/出图，详见 media_workflow.py 与 docs/media-workflow.md）---
+import media_workflow as _media_workflow
+_media_workflow.init(app, globals())
+
 if __name__ == "__main__":
     import uvicorn
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
