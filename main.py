@@ -9534,6 +9534,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                 "resolution": resolution,
                 "official_fallback": False,
             }
+            if quality:
+                body["quality"] = quality
             if image_refs:
                 body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
