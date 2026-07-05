@@ -126,8 +126,10 @@ html[data-studio-scale="off"].studio-scale-managed .workspace {
 .ws-board-name { font-size:17px; font-weight:850; letter-spacing:0; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:40vw; }
 .ws-board-count { min-width:20px; height:20px; padding:0 8px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:var(--soft-2); color:var(--muted); font-size:11px; font-weight:800; }
 .ws-topbar-right { display:flex; align-items:center; gap:8px; flex:0 0 auto; }
-.ws-icon-btn { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); background:var(--card-solid); border:1px solid var(--line); cursor:pointer; transition:all .15s var(--ease); }
+.ws-icon-btn { width:36px; min-width:36px; height:36px; flex:0 0 36px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); background:var(--card-solid); border:1px solid var(--line); cursor:pointer; transition:all .15s var(--ease); }
 .ws-icon-btn:hover { color:var(--text); border-color:var(--line-2); background:var(--soft); box-shadow:0 6px 14px var(--shadow); }
+.ws-icon-btn:disabled { opacity:.58; cursor:default; transform:none; box-shadow:none; }
+#importCanvasBtn { display:flex !important; visibility:visible !important; }
 .ws-primary-btn { height:36px; padding:0 14px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; gap:7px; background:var(--strong); color:var(--strong-text); border:none; cursor:pointer; font-size:12px; font-weight:850; box-shadow:0 8px 18px var(--shadow); }
 .ws-primary-btn:hover { transform:translateY(-1px); box-shadow:0 12px 24px var(--shadow-strong); }
 /* 粘贴到此项目：剪切后才出现的强调按钮，固定高对比色避免主题变量冲淡文字。 */
@@ -140,7 +142,24 @@ html[data-studio-scale="off"].studio-scale-managed .workspace {
 
 .ws-board { position:relative; flex:1; min-height:0; overflow:hidden; background:var(--page); background-image:linear-gradient(rgba(100,116,139,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(100,116,139,.045) 1px, transparent 1px), radial-gradient(var(--grid) 1px, transparent 1px); background-size:120px 120px, 120px 120px, 24px 24px; cursor:grab; user-select:none; }
 .ws-board.panning { cursor:grabbing; }
+.ws-board.import-dragging::after { content:""; position:absolute; inset:18px; z-index:34; border:2px dashed var(--accent); border-radius:8px; background:rgba(37,99,235,.08); box-shadow:inset 0 0 0 1px rgba(255,255,255,.18); pointer-events:none; }
 .ws-board-world { position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; }
+
+
+.ws-import-progress { position:absolute; inset:0; z-index:35; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(246,247,249,.42); opacity:0; pointer-events:none; transition:opacity .18s var(--ease); }
+.ws-import-progress.open { opacity:1; pointer-events:auto; }
+.ws-import-progress-panel { width:min(420px, calc(100vw - 56px)); padding:14px; border-radius:8px; background:var(--card-solid); border:1px solid var(--line); box-shadow:0 20px 50px var(--shadow-strong); }
+.ws-import-progress-head { display:flex; align-items:center; gap:10px; min-width:0; }
+.ws-import-progress-icon { width:34px; height:34px; flex:0 0 34px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent-line); }
+.ws-import-progress-title { font-size:13px; line-height:1.2; font-weight:850; color:var(--text); }
+.ws-import-progress-sub { margin-top:3px; font-size:11.5px; line-height:1.4; font-weight:650; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:260px; }
+.ws-import-progress-pct { margin-left:auto; flex:0 0 auto; min-width:42px; text-align:right; font-size:12px; font-weight:850; color:var(--muted); }
+.ws-import-progress-track { margin-top:12px; height:7px; overflow:hidden; border-radius:999px; background:var(--soft-2); border:1px solid var(--line); }
+.ws-import-progress-bar { width:0%; height:100%; border-radius:999px; background:var(--accent); transition:width .18s var(--ease), background .18s var(--ease); }
+.ws-import-progress.done .ws-import-progress-icon { color:var(--success); background:#ecfdf5; border-color:#a7f3d0; }
+.ws-import-progress.done .ws-import-progress-bar { background:var(--success); }
+.ws-import-progress.failed .ws-import-progress-icon { color:var(--danger); background:var(--danger-soft); border-color:#fecaca; }
+.ws-import-progress.failed .ws-import-progress-bar { background:var(--danger); }
 
 .ws-board-empty { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:12px; width:min(320px, calc(100% - 48px)); color:var(--faint); }
 .ws-board-empty.hidden { display:none; }
@@ -270,6 +289,10 @@ html[data-studio-scale="off"].studio-scale-managed .workspace {
 .theme-dark .ws-trash-act.purge:hover { color:#fecaca; background:rgba(220,38,38,.18); border-color:rgba(248,113,113,.35); }
 .theme-dark .ws-pop-item.danger:hover { background:rgba(220,38,38,.18); }
 .theme-dark .ws-card-delete-no { background:var(--soft); }
+
+.theme-dark .ws-import-progress { background:rgba(16,20,29,.46); }
+.theme-dark .ws-import-progress.done .ws-import-progress-icon { background:rgba(5,150,105,.16); border-color:rgba(16,185,129,.34); }
+.theme-dark .ws-import-progress.failed .ws-import-progress-icon { background:rgba(220,38,38,.16); border-color:rgba(248,113,113,.34); }
 
 /* ===== Responsive ===== */
 @media (max-width:760px) {

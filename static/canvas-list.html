@@ -21,7 +21,7 @@
     <script src="/static/js/theme.js?v=2026.07.3.1783117645"></script>
     <script src="/static/js/touch-mouse.js?v=2026.07.3.1783079819"></script>
     <script src="/static/js/i18n.js?v=2026.07.3.1783116068"></script>
-    <link rel="stylesheet" href="/static/css/canvas-list.css?v=2026.07.3.1783079294">
+    <link rel="stylesheet" href="/static/css/canvas-list.css?v=2026.07.5.canvas-import">
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.3.1782696682">
 </head>
 <body>
@@ -57,7 +57,9 @@
                     <span id="boardCanvasCount" class="ws-board-count">0</span>
                 </div>
                 <div class="ws-topbar-right">
+                    <input id="importCanvasInput" type="file" accept=".json,.zip,application/json,application/zip" hidden>
                     <button id="pasteCanvasBtn" class="ws-paste-btn" type="button" title="粘贴到此项目" style="display:none"><i data-lucide="clipboard-paste" class="w-4 h-4"></i><span>粘贴到此项目</span></button>
+                    <button id="importCanvasBtn" class="ws-icon-btn" type="button" title="导入画布" aria-label="导入画布"><i data-lucide="upload" class="w-4 h-4"></i></button>
                     <button id="boardResetView" class="ws-icon-btn" type="button" title="重置视图" aria-label="重置视图"><i data-lucide="locate-fixed" class="w-4 h-4"></i></button>
                     <button id="boardRefresh" class="ws-icon-btn" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
                     <button id="newCanvasBtn" class="ws-primary-btn" type="button"><i data-lucide="plus" class="w-4 h-4"></i><span>新建画布</span></button>
@@ -67,6 +69,19 @@
             <!-- Board (pan/zoom) -->
             <div id="board" class="ws-board">
                 <div id="boardWorld" class="ws-board-world"></div>
+                <div id="importProgress" class="ws-import-progress" aria-live="polite">
+                    <div class="ws-import-progress-panel">
+                        <div class="ws-import-progress-head">
+                            <span class="ws-import-progress-icon"><i data-lucide="upload-cloud" class="w-4 h-4"></i></span>
+                            <div>
+                                <div id="importProgressTitle" class="ws-import-progress-title">导入画布</div>
+                                <div id="importProgressSub" class="ws-import-progress-sub">准备上传...</div>
+                            </div>
+                            <span id="importProgressPct" class="ws-import-progress-pct">0%</span>
+                        </div>
+                        <div class="ws-import-progress-track"><div id="importProgressBar" class="ws-import-progress-bar"></div></div>
+                    </div>
+                </div>
                 <div id="boardEmptyHint" class="ws-board-empty">
                     <div class="ws-board-empty-icon"><i data-lucide="mouse-pointer-click" class="w-7 h-7"></i></div>
                     <div class="ws-board-empty-text">暂无画布</div>
@@ -90,6 +105,6 @@
             <div id="boardStatus" class="ws-status"></div>
         </main>
     </div>
-    <script src="/static/js/canvas-list.js?v=2026.07.3.1783077284"></script>
+    <script src="/static/js/canvas-list.js?v=2026.07.5.canvas-import"></script>
 </body>
 </html>
