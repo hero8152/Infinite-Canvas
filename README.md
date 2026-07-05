@@ -13,6 +13,12 @@ https://www.fhl.mom/register?aff=86L574B4T2N9  （包含codex和GPT image 2模�
 
 功能请求/功能更新/视频教程/联系我，都可以在B站评论或私信：https://space.bilibili.com/78652351
 
+## 画布导入
+
+画布列表页支持导入 `.json` 和 `.zip` 格式的画布文件。点击顶部工具栏的导入按钮，或将文件拖到画布列表区域，即可导入到当前项目。
+
+导入 zip 时会读取 `canvas.json` 和 `resources-manifest.json`，自动恢复资源引用；已存在的同名同大小资源会按哈希复用，避免重复写入。导入后的画布会生成新的 ID，并放置到当前视图附近的空白位置，避免覆盖原有画布。
+
 ----
 
 【新增了version文件，我每次更新都会更新version的版本号，如果你下载version文件，打开项目后，导航栏的GitHub按键就会提示新版本，如果不想查看更新提示，就删除version文件】

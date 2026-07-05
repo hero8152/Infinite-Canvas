@@ -3196,6 +3196,142 @@ def new_canvas(title="未命名画布", icon="layers", kind="classic", project=N
     save_canvas(canvas)
     return canvas
 
+
+def imported_canvas_payload(source, project=None, board_x=None, board_y=None, resource_mapping=None):
+    if not isinstance(source, dict):
+        raise HTTPException(status_code=400, detail="画布文件格式不正确")
+    if not isinstance(source.get("nodes"), list):
+        raise HTTPException(status_code=400, detail="画布 JSON 缺少 nodes")
+    connections = source.get("connections")
+    if not isinstance(connections, list):
+        connections = []
+    timestamp = now_ms()
+    canvas = json.loads(json.dumps(source, ensure_ascii=False))
+    if resource_mapping:
+        canvas = canvas_workflow_replace_strings(canvas, resource_mapping)
+    original_title = str(canvas.get("title") or "导入画布").strip()[:72] or "导入画布"
+    old_id = str(canvas.get("id") or "")
+    canvas["id"] = uuid.uuid4().hex
+    canvas["title"] = f"{original_title}（导入）"[:80]
+    canvas["kind"] = normalize_canvas_kind(canvas.get("kind"))
+    canvas["project"] = str(project or "").strip() or DEFAULT_PROJECT_ID
+    canvas["created_at"] = timestamp
+    canvas["updated_at"] = timestamp
+    canvas["deleted_at"] = 0
+    canvas["pinned"] = False
+    canvas["nodes"] = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
+    canvas["connections"] = connections
+    canvas["viewport"] = canvas.get("viewport") if isinstance(canvas.get("viewport"), dict) else {"x": 0, "y": 0, "scale": 1}
+    canvas["settings"] = canvas.get("settings") if isinstance(canvas.get("settings"), dict) else {}
+    canvas["logs"] = canvas.get("logs") if isinstance(canvas.get("logs"), list) else []
+    if board_x is not None:
+        canvas["board_x"] = float(board_x)
+    else:
+        canvas.pop("board_x", None)
+    if board_y is not None:
+        canvas["board_y"] = float(board_y)
+    else:
+        canvas.pop("board_y", None)
+    canvas["imported_from"] = old_id
+    save_canvas(canvas)
+    return canvas
+
+
+def read_canvas_import_archive(raw: bytes, filename: str):
+    resource_mapping = {}
+    imported_resources = []
+    lower = str(filename or "").lower()
+    if lower.endswith(".zip") or raw[:2] == b"PK":
+        try:
+            with zipfile.ZipFile(BytesIO(raw), "r") as zf:
+                names = zf.namelist()
+                canvas_name = "canvas.json" if "canvas.json" in names else next((n for n in names if n.lower().endswith("/canvas.json")), "")
+                if not canvas_name:
+                    raise HTTPException(status_code=400, detail="压缩包中没有 canvas.json")
+                canvas = json.loads(zf.read(canvas_name).decode("utf-8-sig"))
+                manifest = {}
+                manifest_name = "resources-manifest.json" if "resources-manifest.json" in names else next((n for n in names if n.lower().endswith("/resources-manifest.json")), "")
+                if manifest_name:
+                    try:
+                        manifest = json.loads(zf.read(manifest_name).decode("utf-8-sig"))
+                    except Exception:
+                        manifest = {}
+                resources = manifest.get("resources") if isinstance(manifest, dict) else []
+                if not isinstance(resources, list):
+                    resources = []
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                import_dir = os.path.join(OUTPUT_INPUT_DIR, f"canvas_import_{stamp}_{uuid.uuid4().hex[:6]}")
+                for index, res in enumerate(resources):
+                    if not isinstance(res, dict) or res.get("skipped"):
+                        continue
+                    archive = str(res.get("file") or res.get("archive") or "").replace("\\", "/").lstrip("/")
+                    if not archive or archive not in names:
+                        continue
+                    base = sanitize_export_filename(res.get("name") or os.path.basename(archive), os.path.basename(archive) or f"resource-{index + 1}.bin")
+                    info = zf.getinfo(archive)
+                    with zf.open(archive) as src:
+                        content = src.read()
+                    digest = hashlib.sha256(content).hexdigest()
+                    new_url = find_duplicate_import_asset(base, info.file_size, digest)
+                    reused = bool(new_url)
+                    if not new_url:
+                        os.makedirs(import_dir, exist_ok=True)
+                        target = os.path.join(import_dir, base)
+                        if os.path.exists(target):
+                            stem, ext = os.path.splitext(base)
+                            target = os.path.join(import_dir, f"{stem}_{uuid.uuid4().hex[:6]}{ext}")
+                        with open(target, "wb") as dst:
+                            dst.write(content)
+                        rel = os.path.relpath(target, ASSETS_DIR).replace("\\", "/")
+                        new_url = f"/assets/{rel}"
+                    old_url = str(res.get("url") or "").strip()
+                    if old_url:
+                        resource_mapping[old_url] = new_url
+                    resource_mapping[archive] = new_url
+                    resource_mapping[f"./{archive}"] = new_url
+                    resource_mapping[os.path.basename(archive)] = new_url
+                    imported_resources.append({"from": old_url or archive, "to": new_url, "reused": reused})
+                return canvas, resource_mapping, imported_resources
+        except HTTPException:
+            raise
+        except zipfile.BadZipFile as exc:
+            raise HTTPException(status_code=400, detail="无法读取画布压缩包") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"无法解析画布压缩包：{exc}") from exc
+    try:
+        return json.loads(raw.decode("utf-8-sig")), {}, []
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"无法解析画布 JSON：{exc}") from exc
+
+
+def find_duplicate_import_asset(name: str, size: int, digest: str = ""):
+    safe_name = os.path.basename(str(name or "")).strip()
+    if not safe_name or size < 0:
+        return ""
+    root = os.path.abspath(ASSETS_DIR)
+    if not os.path.isdir(root):
+        return ""
+    for dirpath, _, filenames in os.walk(root):
+        for filename in filenames:
+            if filename != safe_name:
+                continue
+            path = os.path.join(dirpath, filename)
+            try:
+                if os.path.getsize(path) != size:
+                    continue
+                if digest:
+                    h = hashlib.sha256()
+                    with open(path, "rb") as f:
+                        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                            h.update(chunk)
+                    if h.hexdigest() != digest:
+                        continue
+                rel = os.path.relpath(path, ASSETS_DIR).replace("\\", "/")
+                return f"/assets/{rel}"
+            except Exception:
+                continue
+    return ""
+
 def load_canvas(canvas_id):
     path = canvas_path(canvas_id)
     if not os.path.exists(path):
@@ -13825,6 +13961,41 @@ async def trashed_canvases():
 @app.post("/api/canvases")
 async def create_canvas(payload: CanvasCreateRequest):
     return {"canvas": new_canvas(payload.title, payload.icon, payload.kind, payload.project, payload.board_x, payload.board_y)}
+
+
+@app.post("/api/canvases/import")
+async def import_canvas(
+    file: UploadFile = File(...),
+    project: str = Form(""),
+    board_x: str = Form(""),
+    board_y: str = Form(""),
+):
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="文件为空")
+    def maybe_float(value):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except Exception:
+            return None
+    source, resource_mapping, imported_resources = read_canvas_import_archive(raw, file.filename or "")
+    canvas = imported_canvas_payload(
+        source,
+        project=project,
+        board_x=maybe_float(board_x),
+        board_y=maybe_float(board_y),
+        resource_mapping=resource_mapping,
+    )
+    return {
+        "canvas": canvas_record(canvas),
+        "id": canvas.get("id"),
+        "resource_count": sum(1 for item in imported_resources if not item.get("reused")),
+        "reused_resource_count": sum(1 for item in imported_resources if item.get("reused")),
+        "resource_map": resource_mapping,
+    }
 
 @app.get("/api/canvases/{canvas_id}/meta")
 async def get_canvas_meta(canvas_id: str):

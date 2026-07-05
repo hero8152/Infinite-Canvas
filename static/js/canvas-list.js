@@ -58,6 +58,13 @@ const newProjectInput = document.getElementById('newProjectInput');
 const newProjectConfirm = document.getElementById('newProjectConfirm');
 const newProjectCancel = document.getElementById('newProjectCancel');
 const newCanvasBtn = document.getElementById('newCanvasBtn');
+let importCanvasBtn = document.getElementById('importCanvasBtn');
+const importCanvasInput = document.getElementById('importCanvasInput');
+const importProgress = document.getElementById('importProgress');
+const importProgressTitle = document.getElementById('importProgressTitle');
+const importProgressSub = document.getElementById('importProgressSub');
+const importProgressPct = document.getElementById('importProgressPct');
+const importProgressBar = document.getElementById('importProgressBar');
 const boardRefreshBtn = document.getElementById('boardRefresh');
 const boardResetViewBtn = document.getElementById('boardResetView');
 const pasteCanvasBtn = document.getElementById('pasteCanvasBtn');
@@ -72,6 +79,7 @@ let currentProjectId = rememberedProjectId();
 let pendingDeleteProjectId = null;
 let statusTimer = null;
 let clipboardCanvasId = null;   // 剪切的画布（切到别的项目后粘贴）
+let importInFlight = false;
 
 // board viewport (mirrors smart-canvas math)
 const viewport = { x: 0, y: 0, scale: 1 };
@@ -85,6 +93,44 @@ function setStatus(text){
     statusEl.classList.add('show');
     clearTimeout(statusTimer);
     statusTimer = setTimeout(() => statusEl.classList.remove('show'), 2200);
+}
+
+
+function ensureImportCanvasButton(){
+    if(importCanvasBtn && document.body.contains(importCanvasBtn)) return importCanvasBtn;
+    const bar = document.querySelector('.ws-topbar-right');
+    if(!bar) return null;
+    importCanvasBtn = document.createElement('button');
+    importCanvasBtn.id = 'importCanvasBtn';
+    importCanvasBtn.className = 'ws-icon-btn';
+    importCanvasBtn.type = 'button';
+    importCanvasBtn.title = L('导入画布','Import canvas');
+    importCanvasBtn.setAttribute('aria-label', L('导入画布','Import canvas'));
+    importCanvasBtn.innerHTML = '<i data-lucide="upload" class="w-4 h-4"></i>';
+    bar.insertBefore(importCanvasBtn, boardResetViewBtn || bar.firstChild);
+    refreshIcons();
+    return importCanvasBtn;
+}
+
+function isCanvasImportFile(file){
+    if(!file) return false;
+    const name = String(file.name || '').toLowerCase();
+    const type = String(file.type || '').toLowerCase();
+    return name.endsWith('.json') || name.endsWith('.zip') || type.includes('json') || type.includes('zip');
+}
+
+function canvasImportFileFromTransfer(dataTransfer){
+    const files = Array.from(dataTransfer?.files || []);
+    const file = files.find(isCanvasImportFile);
+    if(file) return file;
+    for(const item of Array.from(dataTransfer?.items || [])){
+        if(item.kind && item.kind !== 'file') continue;
+        const maybe = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
+        if(isCanvasImportFile(maybe)) return maybe;
+        const type = String(item.type || '').toLowerCase();
+        if(type.includes('json') || type.includes('zip')) return {name:type.includes('zip') ? 'canvas.zip' : 'canvas.json', type};
+    }
+    return null;
 }
 
 /* ===== Viewport math (mirrors smart-canvas.js) ===== */
@@ -106,6 +152,40 @@ function boardCenterWorld(){
         y: (board.clientHeight / 2 - viewport.y) / viewport.scale
     };
 }
+
+function rectsOverlap(a, b, gap = 18){
+    return !(a.x + a.w + gap <= b.x || b.x + b.w + gap <= a.x || a.y + a.h + gap <= b.y || b.y + b.h + gap <= a.y);
+}
+
+function findBlankBoardPosition(){
+    const CARD_W = 248, CARD_H = 150, STEP_X = 276, STEP_Y = 176;
+    const center = boardCenterWorld();
+    const existing = canvasesInProject(currentProjectId)
+        .filter(c => c.board_x != null && c.board_y != null)
+        .map(c => ({ x: Number(c.board_x) || 0, y: Number(c.board_y) || 0, w: CARD_W, h: CARD_H }));
+    const baseX = Math.round((center.x - CARD_W / 2) / STEP_X) * STEP_X;
+    const baseY = Math.round((center.y - CARD_H / 2) / STEP_Y) * STEP_Y;
+    const offsets = [[0,0], [1,0], [0,1], [1,1], [-1,0], [0,-1], [2,0], [0,2], [2,1], [1,2], [-1,1], [1,-1]];
+    for(let ring = 0; ring <= 12; ring++){
+        const ringOffsets = ring === 0 ? offsets : [];
+        if(ring > 0){
+            for(let dx = -ring; dx <= ring; dx++){
+                ringOffsets.push([dx, -ring], [dx, ring]);
+            }
+            for(let dy = -ring + 1; dy <= ring - 1; dy++){
+                ringOffsets.push([-ring, dy], [ring, dy]);
+            }
+        }
+        for(const [dx, dy] of ringOffsets){
+            const candidate = { x: baseX + dx * STEP_X, y: baseY + dy * STEP_Y, w: CARD_W, h: CARD_H };
+            if(existing.every(rect => !rectsOverlap(candidate, rect))){
+                return { x: candidate.x, y: candidate.y };
+            }
+        }
+    }
+    return { x: baseX + STEP_X, y: baseY + STEP_Y };
+}
+
 function resetView(){
     const cards = Array.from(boardWorld.querySelectorAll('.ws-card'));
     if(!cards.length){
@@ -545,6 +625,108 @@ async function createCanvasOnBoard(title, kind, worldPt){
             renderProjects();
         }
     } catch(e){ console.error(e); setStatus(L('创建失败','Create failed')); }
+}
+
+
+function setImportProgress(percent, subText, state){
+    if(!importProgress) return;
+    const value = Math.max(0, Math.min(100, Number(percent) || 0));
+    importProgress.classList.add('open');
+    importProgress.classList.toggle('done', state === 'done');
+    importProgress.classList.toggle('failed', state === 'failed');
+    if(importProgressTitle) importProgressTitle.textContent = state === 'failed' ? L('导入失败','Import failed') : L('导入画布','Import canvas');
+    if(importProgressSub && subText) importProgressSub.textContent = subText;
+    if(importProgressPct) importProgressPct.textContent = `${Math.round(value)}%`;
+    if(importProgressBar) importProgressBar.style.width = `${value}%`;
+}
+
+function closeImportProgress(delay = 650){
+    if(!importProgress) return;
+    window.setTimeout(() => {
+        importProgress.classList.remove('open', 'done', 'failed');
+        if(importProgressSub) importProgressSub.textContent = L('准备上传...','Preparing upload...');
+        if(importProgressPct) importProgressPct.textContent = '0%';
+        if(importProgressBar) importProgressBar.style.width = '0%';
+    }, delay);
+}
+
+function uploadCanvasImport(form, onProgress){
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/canvases/import');
+        xhr.onloadstart = () => onProgress?.(4, L('准备上传...','Preparing upload...'));
+        xhr.upload.onprogress = e => {
+            if(e.lengthComputable && e.total > 0){
+                const pct = Math.min(88, Math.max(8, (e.loaded / e.total) * 88));
+                onProgress?.(pct, L('正在上传画布文件...','Uploading canvas file...'));
+            } else {
+                onProgress?.(35, L('正在上传画布文件...','Uploading canvas file...'));
+            }
+        };
+        xhr.upload.onload = () => onProgress?.(92, L('正在解析画布和资源...','Parsing canvas and assets...'));
+        xhr.onerror = () => reject(new Error(L('网络错误，导入失败','Network error, import failed')));
+        xhr.onload = () => {
+            let data = {};
+            try { data = xhr.responseText ? JSON.parse(xhr.responseText) : {}; }
+            catch(e){ return reject(new Error(L('导入响应解析失败','Import response parse failed'))); }
+            if(xhr.status < 200 || xhr.status >= 300){
+                reject(new Error(data.detail || data.error || L('导入失败','Import failed')));
+                return;
+            }
+            resolve(data);
+        };
+        xhr.send(form);
+    });
+}
+
+async function importCanvasFile(file){
+    if(!file) return;
+    if(importInFlight){
+        setStatus(L('已有导入任务正在进行','Import already in progress'));
+        return;
+    }
+    importInFlight = true;
+    if(importCanvasBtn) importCanvasBtn.disabled = true;
+    closeCreateCard();
+    closeCardMenu();
+    const worldPt = findBlankBoardPosition();
+    const form = new FormData();
+    form.append('file', file);
+    form.append('project', currentProjectId || 'default');
+    form.append('board_x', String(Math.round(worldPt.x)));
+    form.append('board_y', String(Math.round(worldPt.y)));
+    setImportProgress(4, L('准备上传...','Preparing upload...'));
+    setStatus(L('正在导入画布...','Importing canvas...'));
+    try {
+        const data = await uploadCanvasImport(form, setImportProgress);
+        const nc = data.canvas;
+        if(nc){
+            if(nc.project == null) nc.project = currentProjectId;
+            if(nc.board_x == null) nc.board_x = Math.round(worldPt.x);
+            if(nc.board_y == null) nc.board_y = Math.round(worldPt.y);
+            canvases.unshift(nc);
+            renderBoard();
+            renderProjects();
+        } else {
+            await loadAll();
+        }
+        const count = Number(data.resource_count || 0);
+        const reused = Number(data.reused_resource_count || 0);
+        const doneText = reused
+            ? L(`已导入画布，新增 ${count} 个资源，复用 ${reused} 个资源`, `Imported canvas, added ${count} assets, reused ${reused}`)
+            : (count ? L(`已导入画布和 ${count} 个资源`, `Imported canvas and ${count} assets`) : L('已导入画布','Imported canvas'));
+        setImportProgress(100, doneText, 'done');
+        setStatus(doneText);
+        closeImportProgress(800);
+    } catch(e){
+        console.error(e);
+        setImportProgress(100, e.message || L('导入失败','Import failed'), 'failed');
+        setStatus(e.message || L('导入失败','Import failed'));
+        closeImportProgress(1400);
+    } finally {
+        importInFlight = false;
+        if(importCanvasBtn) importCanvasBtn.disabled = false;
+    }
 }
 
 /* ===== Card context menu (rename / delete / move) ===== */
@@ -990,6 +1172,46 @@ board.addEventListener('dblclick', e => {
 });
 
 newCanvasBtn.addEventListener('click', () => openCreateCard(boardCenterWorld()));
+
+ensureImportCanvasButton();
+document.addEventListener('click', e => {
+    if(e.target.closest?.('#importCanvasBtn')){
+        e.preventDefault();
+        ensureImportCanvasButton();
+        importCanvasInput?.click();
+    }
+});
+importCanvasInput?.addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    importCanvasFile(file);
+});
+board.addEventListener('dragenter', e => {
+    if(canvasImportFileFromTransfer(e.dataTransfer)){
+        e.preventDefault();
+        board.classList.add('import-dragging');
+    }
+});
+board.addEventListener('dragover', e => {
+    if(canvasImportFileFromTransfer(e.dataTransfer)){
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        board.classList.add('import-dragging');
+    }
+});
+board.addEventListener('dragleave', e => {
+    if(e.target === board || !board.contains(e.relatedTarget)){
+        board.classList.remove('import-dragging');
+    }
+});
+board.addEventListener('drop', e => {
+    const file = canvasImportFileFromTransfer(e.dataTransfer);
+    if(!file) return;
+    e.preventDefault();
+    e.stopPropagation();
+    board.classList.remove('import-dragging');
+    importCanvasFile(file);
+});
 emptyCreateCanvasBtn?.addEventListener('mousedown', e => e.stopPropagation());
 emptyCreateCanvasBtn?.addEventListener('click', e => {
     e.stopPropagation();
