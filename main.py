@@ -7464,7 +7464,7 @@ async def volcengine_video_reference_content_items(value, max_frames=4, max_size
     text = str(value or "").strip()
     if not text:
         return []
-    if is_private_asset_url(text):
+    if is_private_asset_url(text) or text.startswith("http://") or text.startswith("https://"):
         return [{
             "type": "video_url",
             "video_url": {"url": text},
@@ -7480,6 +7480,17 @@ async def volcengine_video_reference_content_items(value, max_frames=4, max_size
         for frame_url in frame_urls
         if frame_url
     ]
+
+async def volcengine_video_reference_url(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if is_private_asset_url(text) or text.startswith("http://") or text.startswith("https://"):
+        return text
+    if text.startswith("/output/") or text.startswith("/assets/"):
+        uploaded = await upload_local_video_to_cloud(text)
+        return str(uploaded.get("url") or "").strip()
+    return text
 
 async def video_reference_to_frame_data_urls(value, max_frames=6, max_size=768):
     if not isinstance(value, str) or not value:
@@ -13762,7 +13773,11 @@ async def canvas_video(payload: CanvasVideoRequest):
                         text_url = str(url or "").strip()
                         if not text_url:
                             continue
-                        media_url = volcengine_media_reference_url(text_url, max_image_size=1536 if looks_like_image_media_url(text_url) else None)
+                        media_url = (
+                            volcengine_media_reference_url(text_url, max_image_size=1536)
+                            if looks_like_image_media_url(text_url)
+                            else await volcengine_video_reference_url(text_url)
+                        )
                         if not media_url:
                             continue
                         if media_url in image_like_urls or looks_like_image_media_url(media_url):
