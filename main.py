@@ -7481,7 +7481,7 @@ async def volcengine_video_reference_content_items(value, max_frames=4, max_size
         if frame_url
     ]
 
-async def volcengine_video_reference_url(value):
+async def volcengine_public_media_reference_url(value):
     text = str(value or "").strip()
     if not text:
         return ""
@@ -8252,20 +8252,20 @@ def volcengine_public_asset_url(url: str) -> str:
         return public
     return "ERR:火山要求素材是公网可访问的 http/https URL；本地画布文件需配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL 暴露为公网地址。"
 
-def local_media_path_for_cloud_upload(ref_url: str, allowed_prefixes=("image/", "video/")) -> str:
+def local_media_path_for_cloud_upload(ref_url: str, allowed_prefixes=("image/", "video/", "audio/")) -> str:
     ref_url = str(ref_url or "").strip()
     if not ref_url:
         raise HTTPException(status_code=400, detail="没有可上传的媒体文件")
     if ref_url.startswith("http://") or ref_url.startswith("https://"):
         return ""
     if not (ref_url.startswith("/output/") or ref_url.startswith("/assets/")):
-        raise HTTPException(status_code=400, detail="云端上传只支持画布里的本地图片或视频文件")
+        raise HTTPException(status_code=400, detail="云端上传只支持画布里的本地图片、视频或音频文件")
     path = output_file_from_url(ref_url)
     if not path:
         raise HTTPException(status_code=404, detail="本地媒体文件不存在或已被删除")
     ct = content_type_for_path(path)
     if not any(ct.startswith(prefix) for prefix in allowed_prefixes):
-        raise HTTPException(status_code=400, detail="请选择图片或视频文件再上传云端")
+        raise HTTPException(status_code=400, detail="请选择图片、视频或音频文件再上传云端")
     max_bytes = int(os.getenv("TEMP_SH_MAX_BYTES", str(4 * 1024 * 1024 * 1024)))
     size = os.path.getsize(path)
     if size > max_bytes:
@@ -13740,6 +13740,12 @@ async def canvas_video(payload: CanvasVideoRequest):
                     image_like_urls = set()
                     frame_roles_used = {"first_frame": False, "last_frame": False}
                     volc_video_count = 0
+                    volc_audio_count = 0
+                    reference_media_mode = bool(
+                        payload.multimodal
+                        or any(str(url or "").strip() for url in (payload.videos or []))
+                        or any(str(url or "").strip() for url in (payload.audios or []))
+                    )
 
                     def append_volcengine_image(url: str, role: str):
                         if role in {"first_frame", "last_frame"}:
@@ -13761,11 +13767,10 @@ async def canvas_video(payload: CanvasVideoRequest):
                         if not url:
                             continue
                         role = volcengine_content_role(ref.role, "image")
-                        if role in {"first_frame", "last_frame"}:
-                            append_volcengine_image(url, role)
-                        elif payload.multimodal:
-                            # 智能多帧/多参模式：多张图作为参考图提交，不能全部伪装成首帧。
+                        if reference_media_mode:
                             append_volcengine_image(url, "reference_image")
+                        elif role in {"first_frame", "last_frame"}:
+                            append_volcengine_image(url, role)
                         elif not frame_roles_used["first_frame"]:
                             # 普通图生视频没有显式 role 时，只取第一张作为首帧。
                             append_volcengine_image(url, "first_frame")
@@ -13776,16 +13781,17 @@ async def canvas_video(payload: CanvasVideoRequest):
                         media_url = (
                             volcengine_media_reference_url(text_url, max_image_size=1536)
                             if looks_like_image_media_url(text_url)
-                            else await volcengine_video_reference_url(text_url)
+                            else await volcengine_public_media_reference_url(text_url)
                         )
                         if not media_url:
                             continue
                         if media_url in image_like_urls or looks_like_image_media_url(media_url):
-                            append_volcengine_image(media_url, "reference_image" if payload.multimodal else "first_frame")
+                            append_volcengine_image(media_url, "reference_image" if reference_media_mode else "first_frame")
                             continue
                         video_items = await volcengine_video_reference_content_items(media_url)
                         body["content"].extend(video_items)
-                        volc_video_count += 1
+                        if video_items:
+                            volc_video_count += 1
                     for url in (payload.audios or [])[:3]:
                         duration = probe_local_audio_duration_seconds(url)
                         if duration is not None and (duration < 1.8 or duration > 15.2):
@@ -13793,7 +13799,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                                 status_code=400,
                                 detail=f"参考音频时长 {duration:.2f} 秒超出范围：方舟 Seedance 参考音频要求在 1.8 ~ 15.2 秒之间，请裁剪后再插入。"
                             )
-                        audio_url = volcengine_media_reference_url(url, max_image_size=None)
+                        audio_url = await volcengine_public_media_reference_url(url)
                         if not audio_url:
                             continue
                         body["content"].append({
@@ -13801,9 +13807,10 @@ async def canvas_video(payload: CanvasVideoRequest):
                             "audio_url": {"url": audio_url},
                             "role": volcengine_content_role("", "audio"),
                         })
+                        volc_audio_count += 1
                     if payload.trusted_asset and body["content"] and body["content"][0].get("type") == "text":
                         body["content"][0]["text"] = apply_trusted_asset_prompt_index(
-                            body["content"][0].get("text") or "", len(image_like_urls), volc_video_count, 0
+                            body["content"][0].get("text") or "", len(image_like_urls), volc_video_count, volc_audio_count
                         )
                     if payload.seed is not None:
                         body["seed"] = payload.seed
