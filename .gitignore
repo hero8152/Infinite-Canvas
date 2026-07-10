@@ -21,6 +21,13 @@ venv/
 .package-cache/
 dist/
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+static/app/
+
 # 操作系统
 .DS_Store
 Thumbs.db

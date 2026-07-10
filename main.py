@@ -26,7 +26,7 @@ import httpx
 from PIL import Image, ImageOps
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from app_config import (
@@ -190,6 +190,9 @@ ASSET_LIBRARY_LOCK = Lock()
 PROMPT_LIBRARY_FILE = os.path.join(DATA_DIR, "prompt_libraries.json")
 PROMPT_LIBRARY_LOCK = Lock()
 PROMPT_TEMPLATE_MARKDOWN_FILE = os.path.join(STATIC_DIR, "system-prompts", "infinite-canvas-prompt-templates.md")
+FRONTEND_BUILD_DIR = os.path.join(STATIC_DIR, "app")
+FRONTEND_ASSETS_DIR = os.path.join(FRONTEND_BUILD_DIR, "assets")
+FRONTEND_INDEX_FILE = os.path.join(FRONTEND_BUILD_DIR, "index.html")
 API_PROVIDERS_FILE = os.path.join(DATA_DIR, "api_providers.json")
 STATIC_RUNNINGHUB_DIR = os.path.join(STATIC_DIR, "runninghub")
 STATIC_RUNNINGHUB_THUMBNAIL_DIR = os.path.join(STATIC_RUNNINGHUB_DIR, "thumbnails")
@@ -263,6 +266,8 @@ os.makedirs(LOCAL_UPLOAD_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
 app.mount("/assets", StaticFiles(directory=ASSET_ROOT_DIR), name="assets")
+if os.path.isdir(FRONTEND_ASSETS_DIR):
+    app.mount("/app/assets", StaticFiles(directory=FRONTEND_ASSETS_DIR), name="app-assets")
 
 # --- Pydantic 模型 ---
 
@@ -6724,12 +6729,42 @@ def upstream_message_from_record(item):
 
 # --- 路由接口 ---
 
-@app.get("/")
-async def index():
+def frontend_index_response():
+    if not os.path.exists(FRONTEND_INDEX_FILE):
+        return Response(
+            "<!doctype html><html><head><title>Feebee Studios</title></head>"
+            "<body><h1>Frontend build missing</h1>"
+            "<p>Run <code>npm --prefix frontend run build</code> to generate the Quiet Creative OS shell.</p>"
+            "</body></html>",
+            status_code=503,
+            media_type="text/html",
+            headers={"Cache-Control": "no-store"},
+        )
     return FileResponse(
-        os.path.join(STATIC_DIR, "index.html"),
+        FRONTEND_INDEX_FILE,
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.get("/")
+async def index():
+    return frontend_index_response()
+
+
+@app.get("/app")
+async def app_index():
+    return frontend_index_response()
+
+
+@app.get("/app/{path:path}")
+async def app_fallback(path: str):
+    return frontend_index_response()
+
+
+@app.get("/legacy")
+@app.get("/legacy/")
+async def legacy_index():
+    return RedirectResponse(url="/app", status_code=302)
 
 @app.get("/api/view")
 def view_image(filename: str, type: str = "input", subfolder: str = ""):

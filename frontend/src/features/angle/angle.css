@@ -1,0 +1,414 @@
+.qc-angle-workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--qc-surface);
+}
+
+.qc-angle-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--qc-space-4);
+  padding: var(--qc-space-4);
+  border-right: 1px solid var(--qc-border);
+  background: color-mix(in srgb, var(--qc-surface) 90%, var(--qc-bg));
+  overflow: auto;
+}
+
+.qc-angle-panel__header,
+.qc-angle-preview__head,
+.qc-angle-history__head,
+.qc-angle-lens,
+.qc-angle-card__actions {
+  display: flex;
+  align-items: center;
+}
+
+.qc-angle-panel__header,
+.qc-angle-preview__head,
+.qc-angle-history__head {
+  justify-content: space-between;
+  gap: var(--qc-space-3);
+}
+
+.qc-angle-panel h2,
+.qc-angle-preview h3,
+.qc-angle-history h3 {
+  margin: 0;
+  color: var(--qc-text);
+}
+
+.qc-angle-panel h2 {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.qc-angle-preview h3,
+.qc-angle-history h3 {
+  font-size: 15px;
+}
+
+.qc-angle-panel__header span,
+.qc-angle-preview__head span,
+.qc-angle-history__head span,
+.qc-angle-upload small,
+.qc-angle-lens span,
+.qc-angle-field span,
+.qc-angle-command,
+.qc-angle-card span,
+.qc-angle-slider span,
+.qc-angle-slider small {
+  color: var(--qc-text-muted);
+  font-size: 12px;
+}
+
+.qc-angle-engine {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--qc-space-2);
+}
+
+.qc-angle-engine button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--qc-space-2);
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--qc-border);
+  border-radius: var(--qc-radius-md);
+  background: var(--qc-surface-2);
+  color: var(--qc-text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.qc-angle-engine button.is-active {
+  border-color: color-mix(in srgb, var(--qc-accent) 48%, var(--qc-border));
+  background: var(--qc-accent-soft);
+  color: var(--qc-text);
+}
+
+.qc-angle-upload {
+  display: grid;
+  place-items: center;
+  gap: var(--qc-space-2);
+  min-height: 190px;
+  padding: var(--qc-space-4);
+  border: 1px dashed var(--qc-border-strong);
+  border-radius: var(--qc-radius-md);
+  background: var(--qc-surface-2);
+  color: var(--qc-text-muted);
+  cursor: pointer;
+  text-align: center;
+}
+
+.qc-angle-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.qc-angle-upload img {
+  width: 100%;
+  max-height: 210px;
+  border: 1px solid var(--qc-border);
+  border-radius: var(--qc-radius-sm);
+  object-fit: cover;
+}
+
+.qc-angle-upload span {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--qc-text);
+  font-size: 13px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qc-angle-controls {
+  display: grid;
+  gap: var(--qc-space-3);
+}
+
+.qc-angle-slider {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) 68px 24px;
+  align-items: center;
+  gap: var(--qc-space-2);
+  min-width: 0;
+}
+
+.qc-angle-slider input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--qc-accent);
+}
+
+.qc-angle-slider input[type="number"],
+.qc-angle-field textarea {
+  min-width: 0;
+  border: 1px solid var(--qc-border);
+  border-radius: var(--qc-radius-md);
+  background: var(--qc-surface-2);
+  color: var(--qc-text);
+  outline: 0;
+}
+
+.qc-angle-slider input[type="number"] {
+  height: 34px;
+  padding: 0 var(--qc-space-2);
+}
+
+.qc-angle-lens {
+  justify-content: space-between;
+  gap: var(--qc-space-2);
+  min-width: 0;
+  padding: var(--qc-space-2);
+  border: 1px solid var(--qc-border);
+  border-radius: var(--qc-radius-md);
+  background: var(--qc-surface-2);
+}
+
+.qc-angle-lens strong {
+  min-width: 0;
+  color: var(--qc-text);
+  font-size: 13px;
+}
+
+.qc-angle-field {
+  display: grid;
+  gap: var(--qc-space-2);
+  min-width: 0;
+}
+
+.qc-angle-field textarea {
+  min-height: 118px;
+  max-height: 220px;
+  padding: var(--qc-space-3);
+  resize: vertical;
+}
+
+.qc-angle-command {
+  padding: var(--qc-space-2);
+  border: 1px solid var(--qc-border);
+  border-radius: var(--qc-radius-md);
+  background: var(--qc-surface-2);
+}
+
+.qc-angle-error {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--qc-space-2);
+  padding: var(--qc-space-3);
+  border: 1px solid color-mix(in srgb, #c2410c 42%, var(--qc-border));
+  border-radius: var(--qc-radius-md);
+  background: color-mix(in srgb, #f97316 10%, var(--qc-surface));
+  color: var(--qc-text);
+  font-size: 12px;
+}
+
+.qc-angle-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--qc-space-2);
+}
+
+.qc-angle-main {
+  display: grid;
+  grid-template-rows: minmax(280px, 52%) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.qc-angle-preview,
+.qc-angle-history {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--qc-space-4);
+}
+
+.qc-angle-preview {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--qc-space-3);
+  border-bottom: 1px solid var(--qc-border);
+}
+
+.qc-angle-preview__head a,
+.qc-angle-card__actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--qc-space-1);
+  color: var(--qc-text-muted);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.qc-angle-preview__stage {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  border: 1px solid var(--qc-border);
+  border-radius: var(--qc-radius-md);
+  background:
+    linear-gradient(var(--qc-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--qc-grid-line) 1px, transparent 1px),
+    color-mix(in srgb, var(--qc-bg) 88%, var(--qc-surface));
+  background-size: 44px 44px;
+  overflow: hidden;
+}
+
+.qc-angle-preview__stage > img,
+.qc-angle-source-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.qc-angle-source-preview {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+}
+
+.qc-angle-source-preview span {
+  position: absolute;
+  left: var(--qc-space-3);
+  bottom: var(--qc-space-3);
+  padding: var(--qc-space-1) var(--qc-space-2);
+  border: 1px solid var(--qc-border);
+  border-radius: var(--qc-radius-sm);
+  background: color-mix(in srgb, var(--qc-surface) 88%, transparent);
+  color: var(--qc-text-muted);
+  font-size: 12px;
+}
+
+.qc-angle-empty,
+.qc-angle-history-empty {
+  display: grid;
+  place-items: center;
+  gap: var(--qc-space-2);
+  padding: var(--qc-space-5);
+  color: var(--qc-text-muted);
+  text-align: center;
+}
+
+.qc-angle-empty strong {
+  color: var(--qc-text);
+  font-size: 16px;
+}
+
+.qc-angle-history {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--qc-space-3);
+  overflow: hidden;
+}
+
+.qc-angle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--qc-space-3);
+  min-height: 0;
+  overflow: auto;
+}
+
+.qc-angle-card {
+  display: grid;
+  gap: var(--qc-space-2);
+  min-width: 0;
+  padding: var(--qc-space-2);
+  border: 1px solid var(--qc-border);
+  border-radius: var(--qc-radius-md);
+  background: var(--qc-surface-2);
+}
+
+.qc-angle-card > button {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  width: 100%;
+  border: 0;
+  border-radius: var(--qc-radius-sm);
+  background: var(--qc-surface);
+  color: var(--qc-text-muted);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.qc-angle-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.qc-angle-card strong,
+.qc-angle-card span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qc-angle-card strong {
+  color: var(--qc-text);
+  font-size: 13px;
+}
+
+.qc-angle-card__actions {
+  justify-content: flex-end;
+  gap: var(--qc-space-1);
+}
+
+@media (max-width: 1120px) {
+  .qc-angle-workspace {
+    grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  }
+
+  .qc-angle-slider {
+    grid-template-columns: 1fr 68px 24px;
+  }
+
+  .qc-angle-slider span {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 820px) {
+  .qc-angle-workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(360px, 48dvh) minmax(0, 1fr);
+  }
+
+  .qc-angle-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--qc-border);
+  }
+
+  .qc-angle-main {
+    grid-template-rows: minmax(240px, 46%) minmax(0, 1fr);
+  }
+
+  .qc-angle-preview,
+  .qc-angle-history {
+    padding: var(--qc-space-3);
+  }
+
+  .qc-angle-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
