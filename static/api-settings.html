@@ -411,6 +411,49 @@
         </div>
     </div>
 
+    <div id="jimengLogoutOverlay" class="picker-overlay jimeng-login-overlay">
+        <div class="picker-modal jimeng-login-modal">
+            <div class="picker-head">
+                <div>
+                    <div class="picker-title">即梦 CLI 登出</div>
+                    <div class="picker-count">将执行 dreamina logout，退出当前即梦 CLI 登录态。</div>
+                </div>
+                <button class="picker-close" type="button" onclick="closeJimengLogoutModal()"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            <div class="jimeng-login-body">
+                <div id="jimengLogoutStatus" class="jimeng-login-status">确认要登出当前即梦账号吗？</div>
+                <pre id="jimengLogoutOutput" class="jimeng-login-output">命令：dreamina logout</pre>
+            </div>
+            <div class="picker-foot">
+                <button class="action-btn" type="button" onclick="closeJimengLogoutModal()">关闭</button>
+                <button id="jimengLogoutConfirmBtn" class="action-btn save-btn" type="button" onclick="performJimengLogout()">确认登出</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="jimengInstallOverlay" class="picker-overlay jimeng-login-overlay">
+        <div class="picker-modal jimeng-login-modal">
+            <div class="picker-head">
+                <div>
+                    <div class="picker-title">安装即梦 CLI</div>
+                    <div id="jimengInstallSubtitle" class="picker-count">未检测到本机 dreamina CLI，可下载官方原生版本。</div>
+                </div>
+                <button class="picker-close" type="button" onclick="closeJimengInstallModal()"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            <div class="jimeng-login-body">
+                <div id="jimengInstallStatus" class="jimeng-login-status">即梦 CLI 未安装。</div>
+                <div class="jimeng-install-detail">
+                    将使用官方 CLI 下载源安装到本地托管目录，并写入当前 API 环境配置。安装完成后请点击“登录即梦”完成授权。
+                </div>
+                <pre id="jimengInstallOutput" class="jimeng-login-output"></pre>
+            </div>
+            <div class="picker-foot">
+                <button class="action-btn" type="button" onclick="closeJimengInstallModal()">稍后处理</button>
+                <button id="jimengInstallStartBtn" class="action-btn save-btn" type="button" onclick="startJimengInstall()">下载并安装</button>
+            </div>
+        </div>
+    </div>
+
     <div id="modelPickerOverlay" class="picker-overlay">
         <div class="picker-modal">
             <div class="picker-head">

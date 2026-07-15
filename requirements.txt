@@ -1,6 +1,7 @@
 fastapi
-uvicorn
+uvicorn[standard]
 requests
+certifi
 pydantic
 python-multipart
 httpx
