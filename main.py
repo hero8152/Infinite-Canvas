@@ -18,6 +18,7 @@ import shutil
 import glob
 import asyncio
 import logging
+import platform
 import requests
 import zipfile
 import mimetypes
@@ -256,17 +257,19 @@ LOAD_LOCK = Lock()
 RUNNINGHUB_WORKFLOW_LOCK = Lock()
 NEXT_TASK_ID = 1
 UPDATE_LOCK = Lock()
-JIMENG_LOGIN_SESSION = {
-    "proc": None,
-    "stdout": "",
-    "stderr": "",
-    "started_at": 0.0,
-}
+JIMENG_LOGIN_LOCK = Lock()
+JIMENG_LOGIN_SESSIONS = {}
+JIMENG_INSTALL_LOCK = Lock()
+JIMENG_INSTALL_SESSIONS = {}
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
 SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
+JIMENG_INSTALL_SCRIPT_URL = "https://jimeng.jianying.com/cli"
+JIMENG_DOWNLOAD_BASE = "https://lf3-static.bytednsdoc.com/obj/eden-cn/psj_hupthlyk/ljhwZthlaukjlkulzlp/dreamina_cli_beta"
+JIMENG_SKILL_URL = f"{JIMENG_DOWNLOAD_BASE}/SKILL.md"
+JIMENG_VERSION_URL = "https://lf3-static.bytednsdoc.com/obj/eden-cn/psj_hupthlyk/ljhwZthlaukjlkulzlp/version.json"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
 RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/models_registry.json"
 RUNNINGHUB_LLM_BASE_URL = "https://llm.runninghub.cn/v1"
@@ -5256,17 +5259,46 @@ def jimeng_use_wsl():
     value = str(jimeng_env_value("JIMENG_USE_WSL") or "").strip().lower()
     return value in {"1", "true", "yes", "on", "wsl"}
 
-def jimeng_cli_executable():
-    if jimeng_use_wsl():
-        return shutil.which("wsl.exe") or shutil.which("wsl") or "wsl.exe"
+def jimeng_managed_root():
+    return os.path.join(BASE_DIR, "dreamina-cli")
+
+def jimeng_managed_bin_dir():
+    return os.path.join(jimeng_managed_root(), "bin")
+
+def jimeng_managed_executable_name():
+    return "dreamina.exe" if os.name == "nt" else "dreamina"
+
+def jimeng_managed_executable_path():
+    return os.path.join(jimeng_managed_bin_dir(), jimeng_managed_executable_name())
+
+def jimeng_existing_executable(path):
+    text = str(path or "").strip().strip('"')
+    if not text:
+        return ""
+    return text if os.path.isfile(text) else ""
+
+def jimeng_native_cli_executable():
+    managed = jimeng_existing_executable(jimeng_managed_executable_path())
+    if managed:
+        return managed
     configured = str(
         jimeng_env_value("JIMENG_BIN")
         or jimeng_env_value("DREAMINA_BIN")
         or ""
     ).strip()
+    configured = jimeng_existing_executable(configured)
     if configured:
         return configured
     return shutil.which("dreamina") or shutil.which("dreamina.exe") or shutil.which("dreamina.cmd") or ""
+
+def jimeng_cli_executable():
+    native = jimeng_native_cli_executable()
+    if native:
+        return native
+    if jimeng_use_wsl():
+        return shutil.which("wsl.exe") or shutil.which("wsl") or "wsl.exe"
+    return ""
+
 
 def decode_utf16_auto(raw: bytes) -> str:
     # WSL/Windows interop emits UTF-16 for null-heavy diagnostics, but the
@@ -5411,6 +5443,213 @@ def jimeng_extract_json(text):
                 weight += 10
         return weight
     return max(parsed, key=score)[1] if parsed else {"text": text}
+
+def jimeng_platform_download_file():
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    is_arm64 = machine in {"arm64", "aarch64"}
+    is_amd64 = machine in {"x86_64", "amd64", "x64"}
+    if system == "windows" and is_amd64:
+        return "dreamina_cli_windows_amd64.exe"
+    if system == "darwin":
+        if is_arm64:
+            return "dreamina_cli_darwin_arm64"
+        if is_amd64:
+            return "dreamina_cli_darwin_amd64"
+    if system == "linux":
+        if is_arm64:
+            return "dreamina_cli_linux_arm64"
+        if is_amd64:
+            return "dreamina_cli_linux_amd64"
+    raise RuntimeError(f"暂不支持的系统或架构：{platform.system()} {platform.machine()}")
+
+def jimeng_download_file(url, target_path):
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    tmp_path = f"{target_path}.download"
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, open(tmp_path, "wb") as handle:
+            shutil.copyfileobj(response, handle)
+        os.replace(tmp_path, target_path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+def jimeng_install_log(session_id, message):
+    if not session_id:
+        return
+    with JIMENG_INSTALL_LOCK:
+        session = JIMENG_INSTALL_SESSIONS.get(session_id)
+        if session:
+            session.setdefault("output", []).append(str(message))
+
+def install_jimeng_native_cli(session_id=""):
+    download_file = jimeng_platform_download_file()
+    binary_url = f"{JIMENG_DOWNLOAD_BASE}/{download_file}"
+    target_path = jimeng_managed_executable_path()
+    skill_dir = os.path.join(os.path.expanduser("~"), ".dreamina_cli", "dreamina")
+    version_dir = os.path.join(os.path.expanduser("~"), ".dreamina_cli")
+    skill_path = os.path.join(skill_dir, "SKILL.md")
+    version_path = os.path.join(version_dir, "version.json")
+
+    jimeng_install_log(session_id, f"官方安装入口：{JIMENG_INSTALL_SCRIPT_URL}")
+    jimeng_install_log(session_id, f"下载 CLI：{binary_url}")
+    jimeng_download_file(binary_url, target_path)
+    if os.name != "nt":
+        os.chmod(target_path, 0o755)
+
+    jimeng_install_log(session_id, f"下载 Dreamina skill：{JIMENG_SKILL_URL}")
+    jimeng_download_file(JIMENG_SKILL_URL, skill_path)
+    jimeng_install_log(session_id, f"下载版本信息：{JIMENG_VERSION_URL}")
+    jimeng_download_file(JIMENG_VERSION_URL, version_path)
+
+    update_env_values({
+        "JIMENG_BIN": target_path,
+        "DREAMINA_BIN": target_path,
+        "JIMENG_USE_WSL": "",
+    })
+    return {
+        "path": target_path,
+        "skill_path": skill_path,
+        "version_path": version_path,
+        "download_url": binary_url,
+    }
+
+def jimeng_install_public_state(session):
+    output = "\n".join(session.get("output") or [])
+    return {
+        "session_id": session.get("id"),
+        "status": session.get("status") or "running",
+        "message": session.get("message") or "",
+        "output": output[-4000:],
+        "result": session.get("result") or {},
+    }
+
+async def jimeng_install_watch(session_id):
+    try:
+        result = await asyncio.to_thread(install_jimeng_native_cli, session_id)
+        with JIMENG_INSTALL_LOCK:
+            session = JIMENG_INSTALL_SESSIONS.get(session_id)
+            if session:
+                session["status"] = "success"
+                session["message"] = "即梦 CLI 安装完成"
+                session["result"] = result
+                session.setdefault("output", []).append(f"安装完成：{result.get('path')}")
+    except Exception as exc:
+        with JIMENG_INSTALL_LOCK:
+            session = JIMENG_INSTALL_SESSIONS.get(session_id)
+            if session:
+                session["status"] = "failed"
+                session["message"] = str(exc)
+                session.setdefault("output", []).append(f"安装失败：{exc}")
+
+def jimeng_login_command():
+    exe = jimeng_cli_executable()
+    if not exe:
+        raise HTTPException(status_code=400, detail="未找到 dreamina CLI。请先安装：curl -fsSL https://jimeng.jianying.com/cli | bash")
+    if jimeng_use_wsl():
+        shell_line = (
+            ". ~/.profile >/dev/null 2>&1 || true; . ~/.bashrc >/dev/null 2>&1 || true; "
+            "DREAMINA_BIN=$(command -v dreamina || find \"$HOME\" -maxdepth 4 -type f -name dreamina 2>/dev/null | head -n 1); "
+            "if [ -z \"$DREAMINA_BIN\" ]; then echo 'dreamina CLI not found in WSL' >&2; exit 127; fi; "
+            "\"$DREAMINA_BIN\" login"
+        )
+        return [exe, *jimeng_wsl_base_args(exe), "-e", "sh", "-lc", shell_line]
+    return [exe, "login"]
+
+def jimeng_login_parse_output(text):
+    text = str(text or "")
+    lines = [line.strip() for line in text.replace("\r", "\n").splitlines() if line.strip()]
+    data = {"verification_url": "", "user_code": "", "device_code": "", "expires_at": ""}
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if "verification_uri" in low:
+            value = ""
+            if line.startswith("verification_uri:"):
+                value = line.split(":", 1)[1].strip()
+            elif line.startswith("verification_uri="):
+                value = line.split("=", 1)[1].strip()
+            else:
+                match = re.search(r"https?://\S+", line)
+                value = match.group(0) if match else ""
+            if value.startswith("http"):
+                if value.endswith("?") and i + 1 < len(lines) and lines[i + 1].startswith("verification_uri="):
+                    value = value + lines[i + 1]
+                data["verification_url"] = value
+        for key in ("user_code", "device_code", "expires_at"):
+            if low.startswith(f"{key}:"):
+                data[key] = line.split(":", 1)[1].strip()
+    return data
+
+def jimeng_login_public_state(session):
+    output = "\n".join(session.get("output") or [])
+    parsed = jimeng_login_parse_output(output)
+    status = session.get("status") or "starting"
+    return {
+        "session_id": session.get("id"),
+        "status": status,
+        "verification_url": parsed.get("verification_url") or session.get("verification_url") or "",
+        "user_code": parsed.get("user_code") or "",
+        "device_code": parsed.get("device_code") or "",
+        "expires_at": parsed.get("expires_at") or "",
+        "message": session.get("message") or "",
+        "output": output[-4000:],
+        "returncode": session.get("returncode"),
+    }
+
+def jimeng_login_mark_output(session_id, text):
+    if not text:
+        return
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+        if not session:
+            return
+        session.setdefault("output", []).append(text.strip())
+        output = "\n".join(session.get("output") or [])
+        parsed = jimeng_login_parse_output(output)
+        if parsed.get("verification_url"):
+            session["verification_url"] = parsed["verification_url"]
+            if session.get("status") == "starting":
+                session["status"] = "waiting"
+                session["message"] = "已获取登录地址，等待扫码确认"
+            event = session.get("ready_event")
+            if event:
+                event.set()
+        if "oauth 登录成功" in output.lower() or "当前登录账户信息" in output:
+            session["status"] = "success"
+            session["message"] = "OAuth 登录成功"
+            event = session.get("ready_event")
+            if event:
+                event.set()
+
+async def jimeng_login_read_stream(session_id, stream):
+    while True:
+        data = await stream.readline()
+        if not data:
+            break
+        text = decode_wsl_output(data) if jimeng_use_wsl() else data.decode("utf-8", errors="replace")
+        jimeng_login_mark_output(session_id, text)
+
+async def jimeng_login_watch_process(session_id):
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+        proc = session.get("proc") if session else None
+    if not proc:
+        return
+    returncode = await proc.wait()
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+        if not session:
+            return
+        session["returncode"] = returncode
+        if session.get("status") not in {"success", "canceled"}:
+            session["status"] = "failed" if returncode else "finished"
+            session["message"] = "登录进程已结束" if returncode == 0 else f"登录进程退出：{returncode}"
+        event = session.get("ready_event")
+        if event:
+            event.set()
 
 async def run_jimeng_cli(args, timeout=120, raw_text=False):
     exe = jimeng_cli_executable()
@@ -12016,28 +12255,55 @@ async def gemini_cli_help(payload: GeminiCliHelpRequest):
 @app.get("/api/jimeng/status")
 async def jimeng_status():
     exe = jimeng_cli_executable()
+    min_version_str = ".".join(str(part) for part in JIMENG_MIN_CLI_VERSION)
     if not exe:
-        return {"installed": False, "logged_in": False, "message": "未找到 dreamina CLI"}
+        return {
+            "installed": False,
+            "logged_in": False,
+            "install_supported": True,
+            "message": "未找到 dreamina CLI",
+            "managed_path": jimeng_managed_executable_path(),
+            "min_version": min_version_str,
+        }
     version, version_text = await jimeng_cli_version()
     version_str = ".".join(str(part) for part in version) if version else None
     version_ok = version >= JIMENG_MIN_CLI_VERSION if version else None
-    min_version_str = ".".join(str(part) for part in JIMENG_MIN_CLI_VERSION)
     try:
         raw = await run_jimeng_cli(["user_credit"], timeout=30)
         return {
             "installed": True,
             "logged_in": True,
+            "install_supported": True,
+            "path": exe,
             "raw": raw,
             "cli_version": version_str,
+            "cli_version_text": version_text,
             "version_ok": version_ok,
             "min_version": min_version_str,
         }
     except HTTPException as exc:
+        detail = str(exc.detail)
+        lower_detail = detail.lower()
+        if jimeng_use_wsl() and ("dreamina cli not found in wsl" in lower_detail or "未找到即梦 cli：wsl" in lower_detail):
+            return {
+                "installed": False,
+                "logged_in": False,
+                "install_supported": True,
+                "message": "WSL 内未找到 dreamina CLI，可安装官方原生 CLI",
+                "managed_path": jimeng_managed_executable_path(),
+                "cli_version": version_str,
+                "cli_version_text": version_text,
+                "version_ok": version_ok,
+                "min_version": min_version_str,
+            }
         return {
             "installed": True,
             "logged_in": False,
-            "message": str(exc.detail),
+            "install_supported": True,
+            "path": exe,
+            "message": detail,
             "cli_version": version_str,
+            "cli_version_text": version_text,
             "version_ok": version_ok,
             "min_version": min_version_str,
         }
@@ -12050,22 +12316,59 @@ async def jimeng_credit():
 @app.post("/api/jimeng/logout")
 async def jimeng_logout():
     raw = await run_jimeng_cli(["logout"], timeout=30)
-    return {"success": True, "raw": raw}
+    return {"ok": True, "success": True, "message": "即梦 CLI 已登出", "raw": raw}
+
+@app.post("/api/jimeng/install/start")
+async def jimeng_install_start():
+    exe = jimeng_native_cli_executable()
+    if exe:
+        return {
+            "session_id": "",
+            "status": "success",
+            "message": "即梦 CLI 已安装",
+            "result": {"path": exe},
+            "output": "",
+        }
+    with JIMENG_INSTALL_LOCK:
+        active = next((item for item in JIMENG_INSTALL_SESSIONS.values() if item.get("status") == "running"), None)
+        if active:
+            return jimeng_install_public_state(active)
+        session_id = uuid.uuid4().hex[:12]
+        session = {
+            "id": session_id,
+            "status": "running",
+            "message": "正在下载并安装即梦 CLI",
+            "output": [],
+            "result": {},
+        }
+        JIMENG_INSTALL_SESSIONS[session_id] = session
+    asyncio.create_task(jimeng_install_watch(session_id))
+    return jimeng_install_public_state(session)
+
+@app.get("/api/jimeng/install/{session_id}/status")
+async def jimeng_install_status(session_id: str):
+    with JIMENG_INSTALL_LOCK:
+        session = JIMENG_INSTALL_SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="安装会话不存在或已结束")
+    return jimeng_install_public_state(session)
 
 @app.post("/api/jimeng/login/start")
 async def jimeng_login_start():
-    old_proc = JIMENG_LOGIN_SESSION.get("proc")
-    if old_proc and getattr(old_proc, "returncode", None) is None:
-        try:
-            old_proc.terminate()
-        except Exception:
-            pass
-    exe = jimeng_cli_executable()
-    if not exe:
-        raise HTTPException(status_code=400, detail="未找到 dreamina CLI")
-    JIMENG_LOGIN_SESSION.update({"proc": None, "stdout": "", "stderr": "", "started_at": time.time()})
-    args = ["login", "--headless"]
-    command = jimeng_command(args, exe)
+    with JIMENG_LOGIN_LOCK:
+        active = next((item for item in JIMENG_LOGIN_SESSIONS.values() if item.get("status") in {"starting", "waiting"}), None)
+    if active:
+        state = jimeng_login_public_state(active)
+        if not state.get("verification_url") and active.get("ready_event"):
+            try:
+                await asyncio.wait_for(active["ready_event"].wait(), timeout=10)
+            except asyncio.TimeoutError:
+                pass
+            state = jimeng_login_public_state(active)
+        return state
+    command = jimeng_login_command()
+    session_id = uuid.uuid4().hex[:12]
+    ready_event = asyncio.Event()
     try:
         proc = await asyncio.create_subprocess_exec(
             *command,
@@ -12074,53 +12377,57 @@ async def jimeng_login_start():
             stderr=asyncio.subprocess.PIPE,
         )
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=400, detail=f"未找到即梦 CLI：{exe}") from exc
-    JIMENG_LOGIN_SESSION["proc"] = proc
-    asyncio.create_task(jimeng_login_reader(proc))
-    await asyncio.sleep(2)
-    text = jimeng_login_text()
-    if proc.returncode not in (None, 0) and ("unknown" in text.lower() or "no such option" in text.lower()):
-        # 旧版 CLI 可能没有 --headless，退回 debug 输出。
-        JIMENG_LOGIN_SESSION.update({"proc": None, "stdout": "", "stderr": "", "started_at": time.time()})
-        proc = await asyncio.create_subprocess_exec(
-            *jimeng_command(["login", "--debug"], exe),
-            cwd=BASE_DIR,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        JIMENG_LOGIN_SESSION["proc"] = proc
-        asyncio.create_task(jimeng_login_reader(proc))
-        await asyncio.sleep(2)
-        text = jimeng_login_text()
-    return {
-        "success": True,
-        "running": JIMENG_LOGIN_SESSION.get("proc") is not None and JIMENG_LOGIN_SESSION["proc"].returncode is None,
-        "text": text,
-        "qr_url": jimeng_login_qr_from_text(text),
-        "started_at": JIMENG_LOGIN_SESSION.get("started_at") or 0,
+        raise HTTPException(status_code=400, detail=f"未找到即梦 CLI：{command[0]}") from exc
+    session = {
+        "id": session_id,
+        "proc": proc,
+        "status": "starting",
+        "message": "正在启动 dreamina login",
+        "output": [],
+        "ready_event": ready_event,
+        "returncode": None,
     }
+    with JIMENG_LOGIN_LOCK:
+        JIMENG_LOGIN_SESSIONS[session_id] = session
+    asyncio.create_task(jimeng_login_read_stream(session_id, proc.stdout))
+    asyncio.create_task(jimeng_login_read_stream(session_id, proc.stderr))
+    asyncio.create_task(jimeng_login_watch_process(session_id))
+    try:
+        await asyncio.wait_for(ready_event.wait(), timeout=15)
+    except asyncio.TimeoutError:
+        pass
+    state = jimeng_login_public_state(session)
+    if not state.get("verification_url") and state.get("status") not in {"success", "finished"}:
+        state["message"] = state.get("message") or "已启动登录进程，仍在等待 CLI 输出登录地址"
+    return state
 
-@app.get("/api/jimeng/login/status")
-async def jimeng_login_status():
-    proc = JIMENG_LOGIN_SESSION.get("proc")
-    text = jimeng_login_text()
-    running = proc is not None and getattr(proc, "returncode", None) is None
-    logged_in = False
-    credit_raw = None
-    if not running:
+@app.get("/api/jimeng/login/{session_id}/status")
+async def jimeng_login_status(session_id: str):
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="登录会话不存在或已结束")
+    return jimeng_login_public_state(session)
+
+@app.post("/api/jimeng/login/{session_id}/cancel")
+async def jimeng_login_cancel(session_id: str):
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+        proc = session.get("proc") if session else None
+        if session and session.get("status") not in {"success", "finished", "failed"}:
+            session["status"] = "canceled"
+            session["message"] = "用户已关闭登录弹框"
+    if proc and proc.returncode is None:
         try:
-            credit_raw = await run_jimeng_cli(["user_credit"], timeout=20)
-            logged_in = True
-        except HTTPException:
-            logged_in = False
-    return {
-        "success": True,
-        "running": running,
-        "logged_in": logged_in,
-        "text": text,
-        "qr_url": jimeng_login_qr_from_text(text),
-        "raw": credit_raw,
-    }
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    return {"ok": True}
 
 @app.post("/api/jimeng/help")
 async def jimeng_help(payload: JimengHelpRequest):
@@ -12512,6 +12819,9 @@ async def test_provider_connection(payload: TestConnectionPayload):
         status = await jimeng_status()
         return {
             "ok": bool(status.get("installed") and status.get("logged_in")),
+            "installed": bool(status.get("installed")),
+            "logged_in": bool(status.get("logged_in")),
+            "install_supported": bool(status.get("install_supported")),
             "status": 200 if status.get("logged_in") else 0,
             "message": status.get("message") or "即梦 CLI 已登录",
             "model_count": len(JIMENG_DEFAULT_IMAGE_MODELS) + len(JIMENG_DEFAULT_VIDEO_MODELS),
