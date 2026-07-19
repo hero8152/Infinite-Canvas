@@ -30,6 +30,7 @@ import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple
 from threading import Lock, Thread
 import httpx
+from tudou_async_image_client import TudouAsyncImageClient, extract_image_items as extract_tudou_image_items
 from PIL import Image, ImageOps
 from io import BytesIO
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
@@ -601,6 +602,9 @@ COMFYUI_DOWNLOAD_TIMEOUT = float(os.getenv("COMFYUI_DOWNLOAD_TIMEOUT", "120"))
 APIMART_IMAGE_TASK_TIMEOUT = float(os.getenv("APIMART_IMAGE_TASK_TIMEOUT", "1800"))
 APIMART_IMAGE_POLL_INTERVAL = float(os.getenv("APIMART_IMAGE_POLL_INTERVAL", "5"))
 APIMART_IMAGE_INITIAL_POLL_DELAY = float(os.getenv("APIMART_IMAGE_INITIAL_POLL_DELAY", "10"))
+TUDOU_IMAGE_TASK_TIMEOUT = float(os.getenv("TUDOU_IMAGE_TASK_TIMEOUT", "1800"))
+TUDOU_IMAGE_POLL_INTERVAL = float(os.getenv("TUDOU_IMAGE_POLL_INTERVAL", "5"))
+TUDOU_IMAGE_INITIAL_POLL_DELAY = float(os.getenv("TUDOU_IMAGE_INITIAL_POLL_DELAY", "10"))
 VIDEO_POLL_TIMEOUT = float(os.getenv("VIDEO_POLL_TIMEOUT", "1800"))
 ONLINE_IMAGE_PROMPT_MAX_LENGTH = int(os.getenv("ONLINE_IMAGE_PROMPT_MAX_LENGTH", "20000"))
 VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "4000"))
@@ -836,6 +840,22 @@ def default_api_providers():
             "volcengine_project_name": VOLCENGINE_DEFAULT_PROJECT_NAME,
             "volcengine_region": VOLCENGINE_DEFAULT_REGION,
         },
+        {
+            "id": "tudou",
+            "name": "Tudou GPT-Image-2",
+            "base_url": "https://api.ai-tudou.net",
+            "protocol": "openai",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": ["gpt-image-2-all"],
+            "chat_models": [],
+            "video_models": [],
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
     ]
 
 def merge_default_api_providers(providers, inject_missing=True):
@@ -900,6 +920,17 @@ def merge_default_api_providers(providers, inject_missing=True):
             current["volcengine_project_name"] = str(current.get("volcengine_project_name") or VOLCENGINE_DEFAULT_PROJECT_NAME).strip() or VOLCENGINE_DEFAULT_PROJECT_NAME
             current["volcengine_region"] = str(current.get("volcengine_region") or VOLCENGINE_DEFAULT_REGION).strip() or VOLCENGINE_DEFAULT_REGION
     # 即梦 CLI 不再是强制保留的默认平台：仅在用户已添加了即梦协议的平台时，规范化其默认模型/地址。
+    tudou_default = next((d for d in default_api_providers() if d["id"] == "tudou"), None)
+    if tudou_default:
+        current = next((item for item in merged if item.get("id") == "tudou"), None)
+        if not current:
+            if inject_missing:
+                merged.append(tudou_default)
+        else:
+            current["base_url"] = current.get("base_url") or tudou_default["base_url"]
+            current["protocol"] = current.get("protocol") or "openai"
+            current["image_request_mode"] = current.get("image_request_mode") or "openai"
+            current["image_models"] = model_list_from_values([*(current.get("image_models") or []), "gpt-image-2-all"])
     for current in merged:
         if not is_jimeng_provider(current):
             continue
@@ -2496,6 +2527,8 @@ class OnlineImageRequest(BaseModel):
     provider_id: str = "comfly"
     model: str = ""
     size: str = "1024x1024"
+    aspect_ratio: str = ""
+    resolution: str = ""
     quality: str = "auto"
     n: int = 1
     reference_images: List[AIReference] = []
@@ -4339,6 +4372,17 @@ def is_fhl_provider(provider):
         host = ""
     return host in {"www.fhl.mom", "fhl.mom"} or name in {"fhl", "fhl-image"}
 
+def is_tudou_provider(provider):
+    base_url = str((provider or {}).get("base_url") or "").strip().lower()
+    try:
+        host = urllib.parse.urlsplit(base_url).netloc.lower()
+    except Exception:
+        host = ""
+    return host.endswith("ai-tudou.net") or "api.ai-tudou." in base_url
+
+def is_tudou_gpt_image_2_async(provider, model=""):
+    return is_tudou_provider(provider) and str(model or "").strip().lower() == "gpt-image-2-all"
+
 def detect_image_request_mode(base_url="", models=None):
     base = str(base_url or "").strip().lower()
     if "apihub.agnes-ai.com" in base:
@@ -6119,6 +6163,8 @@ def image_task_url_for_provider(provider, task_id):
     # 提交走 /v1/videos，轮询必须走 /v1/videos/{id}；否则 protocol=apimart 的平台会错走 /v1/tasks/{id}
     if normalize_image_request_mode((provider or {}).get("image_request_mode")) == "openai-video-proxy":
         return f"{base_url}/videos/{task_id}" if base_url.endswith("/v1") else f"{base_url}/v1/videos/{task_id}"
+    if is_tudou_provider(provider):
+        return f"{base_url}/tasks/{task_id}" if base_url.endswith("/v1") else f"{base_url}/v1/tasks/{task_id}"
     if is_apimart_provider(provider):
         return f"{base_url}/tasks/{task_id}" if base_url.endswith("/v1") else f"{base_url}/v1/tasks/{task_id}"
     return f"{base_url}/images/tasks/{task_id}" if base_url.endswith("/v1") else f"{base_url}/v1/images/tasks/{task_id}"
@@ -6172,9 +6218,10 @@ async def fetch_image_task_payload(client, task_id, provider=None):
 
 async def wait_for_image_task(client, task_id, provider=None):
     is_apimart = is_apimart_provider(provider)
-    timeout = APIMART_IMAGE_TASK_TIMEOUT if is_apimart else IMAGE_TASK_TIMEOUT
-    interval = APIMART_IMAGE_POLL_INTERVAL if is_apimart else IMAGE_POLL_INTERVAL
-    initial_delay = APIMART_IMAGE_INITIAL_POLL_DELAY if is_apimart else 0
+    is_tudou = is_tudou_provider(provider)
+    timeout = APIMART_IMAGE_TASK_TIMEOUT if is_apimart else TUDOU_IMAGE_TASK_TIMEOUT if is_tudou else IMAGE_TASK_TIMEOUT
+    interval = APIMART_IMAGE_POLL_INTERVAL if is_apimart else TUDOU_IMAGE_POLL_INTERVAL if is_tudou else IMAGE_POLL_INTERVAL
+    initial_delay = APIMART_IMAGE_INITIAL_POLL_DELAY if is_apimart else TUDOU_IMAGE_INITIAL_POLL_DELAY if is_tudou else 0
     deadline = time.monotonic() + timeout
     last_payload = {}
     while time.monotonic() < deadline:
@@ -10479,7 +10526,174 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {"videos": local_urls, "task_id": task_id, "raw": result}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly"):
+TUDOU_SIZE_RESOLUTION_TABLE = {
+    ("1:1", "1k"): "1024x1024",
+    ("1:1", "2k"): "2048x2048",
+    ("1:1", "4k"): "2880x2880",
+    ("3:2", "1k"): "1536x1024",
+    ("3:2", "2k"): "2048x1360",
+    ("3:2", "4k"): "3520x2336",
+    ("2:3", "1k"): "1024x1536",
+    ("2:3", "2k"): "1360x2048",
+    ("2:3", "4k"): "2336x3520",
+    ("4:3", "1k"): "1024x768",
+    ("4:3", "2k"): "2048x1536",
+    ("4:3", "4k"): "3312x2480",
+    ("3:4", "1k"): "768x1024",
+    ("3:4", "2k"): "1536x2048",
+    ("3:4", "4k"): "2480x3312",
+    ("5:4", "1k"): "1280x1024",
+    ("5:4", "2k"): "2560x2048",
+    ("5:4", "4k"): "3216x2576",
+    ("4:5", "1k"): "1024x1280",
+    ("4:5", "2k"): "2048x2560",
+    ("4:5", "4k"): "2576x3216",
+    ("16:9", "1k"): "1536x864",
+    ("16:9", "2k"): "2048x1152",
+    ("16:9", "4k"): "3840x2160",
+    ("9:16", "1k"): "864x1536",
+    ("9:16", "2k"): "1152x2048",
+    ("9:16", "4k"): "2160x3840",
+    ("2:1", "1k"): "2048x1024",
+    ("2:1", "2k"): "2688x1344",
+    ("2:1", "4k"): "3840x1920",
+    ("1:2", "1k"): "1024x2048",
+    ("1:2", "2k"): "1344x2688",
+    ("1:2", "4k"): "1920x3840",
+    ("3:1", "1k"): "1881x836",
+    ("3:1", "2k"): "3072x1024",
+    ("3:1", "4k"): "3840x1280",
+    ("1:3", "1k"): "887x1774",
+    ("1:3", "2k"): "1024x3072",
+    ("1:3", "4k"): "1280x3840",
+    ("21:9", "1k"): "2016x864",
+    ("21:9", "2k"): "2688x1152",
+    ("21:9", "4k"): "3840x1648",
+    ("9:21", "1k"): "864x2016",
+    ("9:21", "2k"): "1152x2688",
+    ("9:21", "4k"): "1648x3840",
+}
+TUDOU_PIXEL_TO_SIZE_RESOLUTION = {value: key for key, value in TUDOU_SIZE_RESOLUTION_TABLE.items()}
+
+def tudou_simplify_ratio(width, height):
+    try:
+        width = int(width)
+        height = int(height)
+        divisor = math.gcd(width, height)
+        if divisor <= 0:
+            return "1:1"
+        return f"{width // divisor}:{height // divisor}"
+    except Exception:
+        return "1:1"
+
+def tudou_size_resolution(size, aspect_ratio="", resolution=""):
+    size_text = str(size or "").strip().lower().replace("*", "x")
+    aspect = str(aspect_ratio or "").strip().lower()
+    res = str(resolution or "").strip().lower()
+    if aspect in {"square", "auto"}:
+        aspect = "1:1"
+    if res not in {"1k", "2k", "4k"}:
+        res = ""
+    if re.match(r"^\d+\s*:\s*\d+$", size_text):
+        return re.sub(r"\s+", "", size_text), res or "1k"
+    if aspect and re.match(r"^\d+\s*:\s*\d+$", aspect):
+        return re.sub(r"\s+", "", aspect), res or "1k"
+    mapped = TUDOU_PIXEL_TO_SIZE_RESOLUTION.get(size_text)
+    if mapped:
+        return mapped
+    match = re.match(r"^\s*(\d{2,5})\s*x\s*(\d{2,5})\s*$", size_text)
+    if not match:
+        return "1:1", res or "1k"
+    width, height = int(match.group(1)), int(match.group(2))
+    long_side = max(width, height)
+    if not res:
+        if long_side > 2688:
+            res = "4k"
+        elif long_side > 1536:
+            res = "2k"
+        else:
+            res = "1k"
+    return tudou_simplify_ratio(width, height), res
+
+def tudou_reference_image_value(ref):
+    if not isinstance(ref, dict):
+        return ""
+    value = str(ref.get("url") or "").strip()
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://", "data:image/")):
+        return value
+    public_url = local_asset_public_url(value)
+    if public_url:
+        return public_url
+    return reference_to_data_url(ref, max_size=1536)
+
+async def generate_tudou_async_provider_image(prompt, size, quality, model, reference_images=None, provider=None, aspect_ratio="", resolution=""):
+    provider = provider or {}
+    api_key = provider_env_key_value(provider.get("id") or "") or os.getenv(provider_key_env(provider.get("id") or "custom-api"), "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider.get('id') or 'Tudou API'} 未配置 API Key")
+    tudou_size, tudou_resolution = tudou_size_resolution(size, aspect_ratio, resolution)
+    tudou_quality = str(quality or "").strip().lower()
+    if tudou_quality not in {"low", "medium", "high"}:
+        tudou_quality = "medium"
+    images = []
+    for ref in (reference_images or []):
+        value = tudou_reference_image_value(ref)
+        if value:
+            images.append(value)
+    client = TudouAsyncImageClient(
+        api_key=api_key,
+        base_url=provider.get("base_url") or "https://api.ai-tudou.net",
+        timeout=60.0,
+        poll_interval=max(5.0, float(IMAGE_POLL_INTERVAL or 5.0)),
+    )
+    try:
+        submitted = await client.submit(
+            model="gpt-image-2-all",
+            prompt=prompt,
+            size=tudou_size,
+            resolution=tudou_resolution,
+            quality=tudou_quality,
+            images=images,
+        )
+    except httpx.HTTPStatusError:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"提交土豆异步生图失败：{exc}") from exc
+    task_id = submitted.get("task_id") or extract_task_id(submitted)
+    if not task_id:
+        raise HTTPException(status_code=502, detail=f"土豆异步生图未返回 task_id：{submitted}")
+    try:
+        timeout = httpx.Timeout(connect=20.0, read=60.0, write=60.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http_client:
+            result = await wait_for_image_task(http_client, task_id, provider)
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            setattr(exc, "upstream_task_id", task_id)
+            raise
+        error = HTTPException(status_code=502, detail=f"查询土豆异步生图失败：{exc}")
+        setattr(error, "upstream_task_id", task_id)
+        raise error from exc
+    image_items = extract_tudou_image_items(result)
+    if not image_items:
+        try:
+            image_items = extract_images(result)
+        except HTTPException:
+            image_items = []
+    if not image_items:
+        raise HTTPException(status_code=502, detail=f"土豆异步生图未返回图片：{result}")
+    result["_tudou_submitted"] = submitted
+    result["_tudou_request"] = {
+        "model": "gpt-image-2-all",
+        "size": tudou_size,
+        "resolution": tudou_resolution,
+        "quality": tudou_quality,
+        "image_count": len(images),
+    }
+    return image_items[0], result
+
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", aspect_ratio="", resolution=""):
     provider = get_api_provider(provider_id)
     if provider["id"] == "modelscope":
         return await generate_modelscope_provider_image(prompt, size, model, reference_images, provider)
@@ -10495,6 +10709,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
         return await generate_volcengine_provider_image(prompt, size, model, reference_images, provider)
+    if is_tudou_gpt_image_2_async(provider, model):
+        return await generate_tudou_async_provider_image(prompt, size, quality, model, reference_images, provider, aspect_ratio, resolution)
     is_gpt2 = is_gpt_image_2_model(model)
     is_apimart = is_apimart_provider(provider)
     # 不对 GPT 尺寸做任何缩小/拦截：用户选什么尺寸就原样发给上游；
@@ -13185,7 +13401,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
     image_refs = image_references(refs)
     count = max(1, min(8, int(payload.n or 1)))
     async def generate_one():
-        image_data, raw_item = await generate_ai_image(payload.prompt, request_size, payload.quality, model, image_refs, provider["id"])
+        image_data, raw_item = await generate_ai_image(payload.prompt, request_size, payload.quality, model, image_refs, provider["id"], payload.aspect_ratio, payload.resolution)
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
@@ -13228,7 +13444,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "provider_name": provider.get("name") or provider["id"],
         "task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
         "request_id": raw.get("id") if isinstance(raw, dict) else None,
-        "params": {"provider_id": provider["id"], "model": model, "size": request_size, "requested_size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs},
+        "params": {"provider_id": provider["id"], "model": model, "size": request_size, "requested_size": payload.size, "aspect_ratio": payload.aspect_ratio, "resolution": payload.resolution, "quality": payload.quality, "n": count, "reference_images": refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
     save_to_history(result)
