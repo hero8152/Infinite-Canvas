@@ -465,10 +465,11 @@ function attachCardDrag(card, c){
 function openCanvas(c){
     const enc = encodeURIComponent(c.id);
     const project = encodeURIComponent(c.project || currentProjectId || 'default');
+    const version = Date.now();
     rememberProjectId(c.project || currentProjectId || 'default');
     window.location.href = (c.kind === 'smart')
-        ? `/static/smart-canvas.html?id=${enc}&project=${project}&v=2026.07.03.4`
-        : `/static/canvas.html?id=${enc}&project=${project}&v=2026.07.03.4`;
+        ? `/static/smart-canvas.html?id=${enc}&project=${project}&v=${version}`
+        : `/static/canvas.html?id=${enc}&project=${project}&v=${version}`;
 }
 
 /* ===== Card create flow ===== */

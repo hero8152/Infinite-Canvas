@@ -272,6 +272,20 @@
                     <button class="crop-ratio-btn" type="button" data-crop-ratio="3:2">3:2</button>
                     <button class="crop-ratio-btn" type="button" data-crop-ratio="2:3">2:3</button>
                 </div>
+                <div id="imageOutpaintTools" class="image-edit-tools crop-ratio-tools">
+                    <span class="image-edit-sub" data-i18n="canvas.outpaintRatio">扩图比例</span>
+                    <button class="crop-ratio-btn active" type="button" data-outpaint-ratio="free" data-i18n="canvas.ratioFree">自由</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="source" data-i18n="canvas.ratioSource">原图</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="1:1">1:1</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="4:3">4:3</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="3:4">3:4</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="16:9">16:9</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="9:16">9:16</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="3:2">3:2</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="2:3">2:3</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="21:9">21:9</button>
+                    <button class="crop-ratio-btn" type="button" data-outpaint-ratio="9:21">9:21</button>
+                </div>
                 <div id="imagePreviewTools" class="image-edit-tools">
                     <span id="previewMetaHint" class="image-edit-sub" style="margin-left:auto"></span>
                     <div id="panoramaControls" class="panorama-controls" style="display:none">
@@ -437,6 +451,7 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
+    <script src="/static/js/outpaint-ratios.js"></script>
     <script src="/static/js/smart-canvas.js?v=2026.07.15.1784105576"></script>
 </body>
 </html>
