@@ -58,6 +58,7 @@ class BananaOutpaintRequestTests(unittest.TestCase):
         with (
             patch.object(APP, "get_api_provider", return_value=provider),
             patch.object(APP, "output_file_from_url", return_value=str(__file__)),
+            patch.object(APP, "api_headers", return_value={}),
             patch.object(APP.httpx, "AsyncClient", FakeAsyncClient),
         ):
             asyncio.run(APP.generate_ai_image(
@@ -130,6 +131,7 @@ class BananaOutpaintRequestTests(unittest.TestCase):
         }
         with (
             patch.object(APP, "get_api_provider", return_value=provider),
+            patch.object(APP, "api_headers", return_value={}),
             patch.object(APP.httpx, "AsyncClient", FakeAsyncClient),
         ):
             asyncio.run(APP.generate_ai_image(
@@ -161,6 +163,7 @@ class BananaOutpaintRequestTests(unittest.TestCase):
         with (
             patch.object(APP, "get_api_provider", return_value=provider),
             patch.object(APP, "output_file_from_url", return_value=str(__file__)),
+            patch.object(APP, "api_headers", return_value={}),
             patch.object(APP.httpx, "AsyncClient", FakeAsyncClient),
         ):
             asyncio.run(APP.generate_ai_image(
