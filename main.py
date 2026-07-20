@@ -9237,6 +9237,40 @@ def gemini_model_name(model):
     value = selected_model(model, "gemini-3-pro-image-preview").strip()
     return value[len("models/"):] if value.startswith("models/") else value
 
+GEMINI_IMAGE_ASPECT_RATIOS = (
+    (1, 1, "1:1"), (1, 4, "1:4"), (1, 8, "1:8"),
+    (2, 3, "2:3"), (3, 2, "3:2"), (3, 4, "3:4"),
+    (4, 1, "4:1"), (4, 3, "4:3"), (4, 5, "4:5"),
+    (5, 4, "5:4"), (8, 1, "8:1"), (9, 16, "9:16"),
+    (16, 9, "16:9"), (21, 9, "21:9"),
+)
+
+def gemini_supported_aspect_ratio(size, fallback="1:1"):
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        match = re.fullmatch(r"\s*(\d+)\s*:\s*(\d+)\s*", str(size or ""))
+        if match:
+            width, height = int(match.group(1)), int(match.group(2))
+    if not width or not height:
+        return fallback
+    ratio = width / height
+    # Compare proportionally rather than by raw decimal distance so portrait
+    # and landscape ratios are treated symmetrically.
+    return min(
+        GEMINI_IMAGE_ASPECT_RATIOS,
+        key=lambda item: abs(math.log(ratio / (item[0] / item[1]))),
+    )[2]
+
+def is_nano_banana_image_model(model):
+    return "banana" in str(model or "").strip().lower()
+
+def banana_image_request_params(size):
+    _, resolution = apimart_size_resolution(size)
+    return {
+        "aspect_ratio": gemini_supported_aspect_ratio(size),
+        "image_size": resolution.upper(),
+    }
+
 def gemini_endpoint_url(provider, model):
     model_name = urllib.parse.quote(gemini_model_name(model), safe="")
     return provider_endpoint_url(provider, "image_generation_endpoint", f"/v1beta/models/{model_name}:generateContent")
@@ -9248,9 +9282,10 @@ def gemini_image_config(size):
         if raw in {"1K", "2K", "4K"}:
             return {"aspectRatio": "1:1", "imageSize": raw}
         if re.fullmatch(r"\d+\s*:\s*\d+", raw):
-            return {"aspectRatio": raw.replace(" ", ""), "imageSize": "1K"}
+            return {"aspectRatio": gemini_supported_aspect_ratio(raw), "imageSize": "1K"}
         return {"aspectRatio": "1:1", "imageSize": "2K"}
-    aspect_ratio, resolution = apimart_size_resolution(size)
+    _, resolution = apimart_size_resolution(size)
+    aspect_ratio = gemini_supported_aspect_ratio(size)
     return {"aspectRatio": aspect_ratio, "imageSize": resolution.upper()}
 
 def gemini_reference_part(ref):
@@ -10516,6 +10551,12 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         response = None
         async def post_openai_edits(edit_files=None):
             data = {"model": model, "prompt": prompt, "size": size}
+            if is_nano_banana_image_model(model):
+                # OpenAI-compatible Banana gateways otherwise infer a ratio
+                # from arbitrary pixel dimensions (for example 3840x1648 ->
+                # 240:103), which Gemini rejects. Send the supported preset
+                # explicitly while retaining size for gateway compatibility.
+                data.update(banana_image_request_params(size))
             if quality:
                 data["quality"] = quality
             return await client.post(
@@ -10674,6 +10715,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     "response_format": "url", "n": 1,
                     "image": image_payload,
                 }
+                if is_nano_banana_image_model(model):
+                    body.update(banana_image_request_params(size))
                 if quality:
                     body["quality"] = quality
                 response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
@@ -10684,6 +10727,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     )
         else:
             body = {"model": model, "prompt": prompt, "size": size, "response_format": "url", "n": 1}
+            if is_nano_banana_image_model(model):
+                body.update(banana_image_request_params(size))
             if quality:
                 body["quality"] = quality
             response = await client.post(
