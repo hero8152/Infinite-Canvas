@@ -70,6 +70,7 @@ class BananaOutpaintRequestTests(unittest.TestCase):
             ))
 
         data = FakeAsyncClient.last_post["data"]
+        self.assertEqual(data["model"], "nano-banana-pro")
         self.assertEqual(data["aspect_ratio"], "21:9")
         self.assertEqual(data["image_size"], "4K")
 
@@ -78,6 +79,70 @@ class BananaOutpaintRequestTests(unittest.TestCase):
         for preset in ("1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "9:21"):
             with self.subTest(preset=preset):
                 self.assertIn(APP.gemini_supported_aspect_ratio(preset), allowed)
+
+    def test_route_uses_base_banana_family_and_size_parameters(self):
+        provider = {
+            "image_models": [
+                "nano-banana-2", "nano-banana-2-2k", "nano-banana-2-4k",
+                "nano-banana-pro", "nano-banana-pro-2k", "nano-banana-pro-4k",
+            ]
+        }
+        cases = (
+            ("nano-banana-pro-4k", "2048x2048", "nano-banana-pro", "2K", "1:1"),
+            ("nano-banana-pro-2k", "4096x2304", "nano-banana-pro", "4K", "16:9"),
+            ("nano-banana-2-2k", "3840x1648", "nano-banana-2", "4K", "21:9"),
+        )
+        for requested, size, expected_model, expected_size, expected_ratio in cases:
+            with self.subTest(requested=requested, size=size):
+                route = APP.route_openai_image_request(provider, requested, size)
+                self.assertEqual(route["model"], expected_model)
+                self.assertEqual(route["params"]["image_size"], expected_size)
+                self.assertEqual(route["params"]["aspect_ratio"], expected_ratio)
+
+    def test_route_falls_back_to_resolution_alias_when_base_is_unavailable(self):
+        provider = {"image_models": ["nano-banana-pro-2k", "nano-banana-pro-4k"]}
+        route = APP.route_openai_image_request(provider, "nano-banana-pro-2k", "4096x2304")
+        self.assertEqual(route["model"], "nano-banana-pro-4k")
+        self.assertEqual(route["params"]["image_size"], "4K")
+
+    def test_openai_gateway_gemini_image_id_receives_image_parameters(self):
+        route = APP.route_openai_image_request({}, "gemini-3-pro-image-preview", "1536x1024")
+        self.assertEqual(route["model"], "gemini-3-pro-image-preview")
+        self.assertEqual(route["params"], {"aspect_ratio": "3:2", "image_size": "1K"})
+
+    def test_unrelated_image_model_is_not_routed(self):
+        route = APP.route_openai_image_request({}, "flux-kontext-pro", "1536x1024")
+        self.assertEqual(route["model"], "flux-kontext-pro")
+        self.assertEqual(route["params"], {})
+
+    def test_text_to_image_request_uses_routed_model_and_parameters(self):
+        provider = {
+            "id": "custom-api",
+            "name": "comfly",
+            "base_url": "https://ai.comfly.org",
+            "protocol": "openai",
+            "image_request_mode": "openai",
+            "api_key": "test-key",
+            "model_protocols": {},
+            "image_models": ["nano-banana-2", "nano-banana-2-2k", "nano-banana-2-4k"],
+        }
+        with (
+            patch.object(APP, "get_api_provider", return_value=provider),
+            patch.object(APP.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            asyncio.run(APP.generate_ai_image(
+                "A panoramic orchard",
+                "4096x2304",
+                "high",
+                "nano-banana-2-2k",
+                [],
+                "custom-api",
+            ))
+
+        body = FakeAsyncClient.last_post["json"]
+        self.assertEqual(body["model"], "nano-banana-2")
+        self.assertEqual(body["aspect_ratio"], "16:9")
+        self.assertEqual(body["image_size"], "4K")
 
     def test_image_2_request_does_not_receive_banana_only_fields(self):
         provider = {
