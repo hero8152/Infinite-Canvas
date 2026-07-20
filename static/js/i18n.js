@@ -1,5 +1,7 @@
 (function(){
-    const VERSION = '2026.07.04.rec-ui.1';
+    // Translation bundles change independently from this loader. A fresh token
+    // prevents an older cached dictionary from leaving new UI keys untranslated.
+    const VERSION = Date.now();
     const scripts = [
         '/static/js/i18n-core.js',
         '/static/js/i18n/common.js',
