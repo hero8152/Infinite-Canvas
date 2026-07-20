@@ -446,6 +446,7 @@ let cropState = null;
 let cropDrag = null;
 let cropAspectPreset = 'free';
 let cropAspectRatio = null;
+let outpaintAspectPreset = 'free';
 let imageEditMode = 'crop';
 let imageEditModeTouched = false;
 let imageResizeScale = 0.5;
@@ -2348,6 +2349,12 @@ document.querySelectorAll('[data-crop-ratio]').forEach(btn => {
     btn.addEventListener('click', event => {
         event.stopPropagation();
         setCropAspectPreset(btn.dataset.cropRatio || 'free');
+    });
+});
+document.querySelectorAll('[data-outpaint-ratio]').forEach(btn => {
+    btn.addEventListener('click', event => {
+        event.stopPropagation();
+        setOutpaintAspectPreset(btn.dataset.outpaintRatio || 'free');
     });
 });
 document.getElementById('outpaintFrame')?.addEventListener('mousedown', event => {
@@ -4514,6 +4521,7 @@ function setImageEditMode(mode, userTouched=false){
     _syncGridCustomCursor();
     document.querySelectorAll('[data-image-edit-mode]').forEach(btn => btn.classList.toggle('active', btn.dataset.imageEditMode === imageEditMode));
     document.getElementById('imageCropTools')?.classList.toggle('active', imageEditMode === 'crop');
+    document.getElementById('imageOutpaintTools')?.classList.toggle('active', imageEditMode === 'outpaint');
     document.getElementById('imageMaskTools').classList.toggle('active', imageEditMode === 'mask');
     document.getElementById('imageBrushTools').classList.toggle('active', imageEditMode === 'brush');
     document.getElementById('imageResizeTools')?.classList.toggle('active', imageEditMode === 'resize');
@@ -5247,6 +5255,28 @@ function resetOutpaintBox(){
     cropState.h = h;
     renderCropBox();
 }
+function syncOutpaintRatioButtons(){
+    document.querySelectorAll('[data-outpaint-ratio]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.outpaintRatio === outpaintAspectPreset);
+    });
+}
+function setOutpaintAspectPreset(preset='free'){
+    outpaintAspectPreset = preset || 'free';
+    syncOutpaintRatioButtons();
+    if(!cropState || imageEditMode !== 'outpaint' || outpaintAspectPreset === 'free') return;
+    if(outpaintAspectPreset === 'source') return resetOutpaintBox();
+    const img = document.getElementById('cropImage');
+    const fit = window.OutpaintRatios?.fitContaining(img?.naturalWidth, img?.naturalHeight, outpaintAspectPreset);
+    if(!img || !fit) return;
+    const scaleX = Math.max(1, Number(img.naturalWidth || 1)) / Math.max(1, Number(img.clientWidth || 1));
+    const scaleY = Math.max(1, Number(img.naturalHeight || 1)) / Math.max(1, Number(img.clientHeight || 1));
+    cropState.w = fit.width / scaleX;
+    cropState.h = fit.height / scaleY;
+    cropState.x = fit.offsetX / scaleX;
+    cropState.y = fit.offsetY / scaleY;
+    clampOutpaint();
+    renderCropBox();
+}
 function cropRatioFromPreset(preset){
     if(!preset || preset === 'free') return null;
     if(preset === 'source'){
@@ -5324,7 +5354,9 @@ function openImageEditor(nodeId, initialMode='crop'){
     imageEditModeTouched = false;
     cropAspectPreset = 'free';
     cropAspectRatio = null;
+    outpaintAspectPreset = 'free';
     syncCropRatioButtons();
+    syncOutpaintRatioButtons();
     editTextItems = [];
     editTextSelectedId = '';
     editTextDrag = null;
@@ -5404,7 +5436,9 @@ function closeImageEditor(){
     imageEditModeTouched = false;
     cropAspectPreset = 'free';
     cropAspectRatio = null;
+    outpaintAspectPreset = 'free';
     syncCropRatioButtons();
+    syncOutpaintRatioButtons();
     document.getElementById('imageEditStage')?.classList.remove('overflowing', 'overflow-x', 'overflow-y');
     const cropCanvasEl = document.getElementById('cropCanvas');
     cropCanvasEl.classList.remove('grid-custom-h', 'grid-custom-v', 'outpaint-mode', 'outpaint-warning', 'dragging-image', 'text-mode', 'resize-mode');
@@ -5430,6 +5464,10 @@ function beginCropDrag(event, mode){
     event.preventDefault();
     event.stopPropagation();
     if(imageEditMode === 'outpaint' && mode === 'move') return;
+    if(imageEditMode === 'outpaint' && String(mode || '').startsWith('outpaint-') && outpaintAspectPreset !== 'free'){
+        outpaintAspectPreset = 'free';
+        syncOutpaintRatioButtons();
+    }
     cropDrag = {mode, sx:event.clientX, sy:event.clientY, start:{...cropState}};
 }
 function resizeOutpaintFromDrag(dx, dy){

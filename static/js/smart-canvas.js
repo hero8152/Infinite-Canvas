@@ -227,6 +227,7 @@ let cropState = null;
 let cropDrag = null;
 let cropAspectPreset = 'free';
 let cropAspectRatio = null;
+let outpaintAspectPreset = 'free';
 let imageEditMode = 'crop';
 let imageEditModeTouched = false;
 let imageResizeScale = 0.5;
@@ -9051,6 +9052,7 @@ function setImageEditMode(mode, userTouched=false){
     document.querySelectorAll('[data-image-edit-mode]').forEach(btn => btn.classList.toggle('active', btn.dataset.imageEditMode === imageEditMode));
     document.getElementById('imagePreviewTools').classList.toggle('active', isPreview && !isVideoPreview);
     document.getElementById('imageCropTools')?.classList.toggle('active', imageEditMode === 'crop');
+    document.getElementById('imageOutpaintTools')?.classList.toggle('active', imageEditMode === 'outpaint');
     document.getElementById('imageMaskTools').classList.toggle('active', imageEditMode === 'mask');
     document.getElementById('imageBrushTools').classList.toggle('active', imageEditMode === 'brush');
     document.getElementById('imageResizeTools')?.classList.toggle('active', imageEditMode === 'resize');
@@ -10693,6 +10695,29 @@ function resetOutpaintBox(){
     clampOutpaint();
     renderCropBox();
 }
+function syncOutpaintRatioButtons(){
+    document.querySelectorAll('[data-outpaint-ratio]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.outpaintRatio === outpaintAspectPreset);
+    });
+}
+function setOutpaintAspectPreset(preset='free'){
+    outpaintAspectPreset = preset || 'free';
+    syncOutpaintRatioButtons();
+    if(!cropState || imageEditMode !== 'outpaint' || outpaintAspectPreset === 'free') return;
+    if(outpaintAspectPreset === 'source') return resetOutpaintBox();
+    const img = document.getElementById('cropImage');
+    const fit = window.OutpaintRatios?.fitContaining(img?.naturalWidth, img?.naturalHeight, outpaintAspectPreset);
+    if(!img || !fit) return;
+    const display = cropImageDisplaySize();
+    const scaleX = Math.max(1, Number(img.naturalWidth || 1)) / Math.max(1, Number(display.w || img.clientWidth || 1));
+    const scaleY = Math.max(1, Number(img.naturalHeight || 1)) / Math.max(1, Number(display.h || img.clientHeight || 1));
+    cropState.w = fit.width / scaleX;
+    cropState.h = fit.height / scaleY;
+    cropState.x = fit.offsetX / scaleX;
+    cropState.y = fit.offsetY / scaleY;
+    clampOutpaint();
+    renderCropBox();
+}
 function cropRatioFromPreset(preset){
     if(!preset || preset === 'free') return null;
     if(preset === 'source'){
@@ -10832,6 +10857,7 @@ function openImageEditor(nodeId, imageIndex=0){
     gridOperationMode = 'split'; gridJoinLayout = null; gridJoinDrag = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinGroupId = '';
     imageEditZoom = 1.0; imageEditBaseW = 0; imageEditBaseH = 0; imageResizeScale = 0.5; imageEditModeTouched = false;
     cropAspectPreset = 'free'; cropAspectRatio = null; syncCropRatioButtons();
+    outpaintAspectPreset = 'free'; syncOutpaintRatioButtons();
     editTextItems = []; editTextSelectedId = ''; editTextDrag = null; editTextDirty = false;
     const toggle = document.getElementById('gridCustomToggle');
     if(toggle){ toggle.classList.add('secondary'); toggle.classList.remove('primary'); }
@@ -10933,6 +10959,7 @@ function closeImageEditor(){
     previewNavState = {nodeId:'', index:0, count:0};
     imageEditZoom = 1.0; imageEditBaseW = 0; imageEditBaseH = 0; imageResizeScale = 0.5; imageEditModeTouched = false;
     cropAspectPreset = 'free'; cropAspectRatio = null; syncCropRatioButtons();
+    outpaintAspectPreset = 'free'; syncOutpaintRatioButtons();
     disposePanoramaPreview();
     previewPanDrag = null; previewCompareDrag = false; imageEditPanDrag = null; resetPreviewTransform();
     document.getElementById('imageEditStage')?.classList.remove('overflow-x', 'overflow-y', 'preview-mode');
@@ -10958,6 +10985,10 @@ function beginCropDrag(event, mode){
     if(!cropState) return;
     event.preventDefault(); event.stopPropagation();
     if(imageEditMode === 'outpaint' && mode === 'move') return;
+    if(imageEditMode === 'outpaint' && String(mode || '').startsWith('outpaint-') && outpaintAspectPreset !== 'free'){
+        outpaintAspectPreset = 'free';
+        syncOutpaintRatioButtons();
+    }
     cropDrag = {mode, sx:event.clientX, sy:event.clientY, start:{...cropState}};
 }
 function resizeOutpaintFromDrag(dx, dy){
@@ -16767,6 +16798,12 @@ document.querySelectorAll('[data-crop-ratio]').forEach(btn => {
     btn.addEventListener('click', event => {
         event.stopPropagation();
         setCropAspectPreset(btn.dataset.cropRatio || 'free');
+    });
+});
+document.querySelectorAll('[data-outpaint-ratio]').forEach(btn => {
+    btn.addEventListener('click', event => {
+        event.stopPropagation();
+        setOutpaintAspectPreset(btn.dataset.outpaintRatio || 'free');
     });
 });
 document.getElementById('outpaintFrame').addEventListener('mousedown', event => {
