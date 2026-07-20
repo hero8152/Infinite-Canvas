@@ -9262,10 +9262,8 @@ def gemini_supported_aspect_ratio(size, fallback="1:1"):
     )[2]
 
 def banana_image_request_params(size):
-    _, resolution = apimart_size_resolution(size)
     return {
         "aspect_ratio": gemini_supported_aspect_ratio(size),
-        "image_size": resolution.upper(),
     }
 
 def image_provider_model_ids(provider):
@@ -9294,16 +9292,17 @@ def route_openai_image_request(provider, model, size):
     if family:
         params = banana_image_request_params(size)
         available = image_provider_model_ids(provider)
-        resolution_alias = f"{family}-{params['image_size'].lower()}"
-        if not available or family in available:
+        _, resolution = apimart_size_resolution(size)
+        target_model = family if resolution == "1k" else f"{family}-{resolution}"
+        if not available or target_model in available:
+            routed_model = target_model
+        elif family in available:
             routed_model = family
-        elif resolution_alias in available:
-            routed_model = resolution_alias
         elif requested_model.lower() not in available:
-            routed_model = family
+            routed_model = target_model
     elif looks_like_gemini_image_model(requested_model):
         # Some OpenAI-compatible gateways expose Gemini image IDs directly.
-        # They still require Gemini's aspect_ratio/image_size contract.
+        # They still require a supported Gemini aspect_ratio.
         params = banana_image_request_params(size)
     return {
         "requested_model": requested_model,
