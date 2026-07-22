@@ -9521,6 +9521,80 @@ def gemini_model_name(model):
     value = selected_model(model, "gemini-3-pro-image-preview").strip()
     return value[len("models/"):] if value.startswith("models/") else value
 
+GEMINI_IMAGE_ASPECT_RATIOS = (
+    (1, 1, "1:1"), (1, 4, "1:4"), (1, 8, "1:8"),
+    (2, 3, "2:3"), (3, 2, "3:2"), (3, 4, "3:4"),
+    (4, 1, "4:1"), (4, 3, "4:3"), (4, 5, "4:5"),
+    (5, 4, "5:4"), (8, 1, "8:1"), (9, 16, "9:16"),
+    (16, 9, "16:9"), (21, 9, "21:9"),
+)
+
+def gemini_supported_aspect_ratio(size, fallback="1:1"):
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        match = re.fullmatch(r"\s*(\d+)\s*:\s*(\d+)\s*", str(size or ""))
+        if match:
+            width, height = int(match.group(1)), int(match.group(2))
+    if not width or not height:
+        return fallback
+    ratio = width / height
+    # Compare proportionally rather than by raw decimal distance so portrait
+    # and landscape ratios are treated symmetrically.
+    return min(
+        GEMINI_IMAGE_ASPECT_RATIOS,
+        key=lambda item: abs(math.log(ratio / (item[0] / item[1]))),
+    )[2]
+
+def banana_image_request_params(size):
+    return {
+        "aspect_ratio": gemini_supported_aspect_ratio(size),
+    }
+
+def image_provider_model_ids(provider):
+    return {
+        str(item or "").strip().lower()
+        for item in ((provider or {}).get("image_models") or [])
+        if str(item or "").strip()
+    }
+
+def banana_model_family(model):
+    value = str(model or "").strip().lower()
+    if value in {"banana", "nano-banana-pro"}:
+        return "nano-banana-pro"
+    match = re.fullmatch(r"(nano-banana-(?:pro|2))(?:-(?:1k|2k|4k))?", value)
+    return match.group(1) if match else ""
+
+def looks_like_gemini_image_model(model):
+    value = str(model or "").strip().lower()
+    return value.startswith("gemini-") and "image" in value
+
+def route_openai_image_request(provider, model, size):
+    requested_model = selected_model(model, IMAGE_MODEL)
+    family = banana_model_family(requested_model)
+    params = {}
+    routed_model = requested_model
+    if family:
+        params = banana_image_request_params(size)
+        available = image_provider_model_ids(provider)
+        _, resolution = apimart_size_resolution(size)
+        target_model = family if resolution == "1k" else f"{family}-{resolution}"
+        if not available or target_model in available:
+            routed_model = target_model
+        elif family in available:
+            routed_model = family
+        elif requested_model.lower() not in available:
+            routed_model = target_model
+    elif looks_like_gemini_image_model(requested_model):
+        # Some OpenAI-compatible gateways expose Gemini image IDs directly.
+        # They still require a supported Gemini aspect_ratio.
+        params = banana_image_request_params(size)
+    return {
+        "requested_model": requested_model,
+        "model": routed_model,
+        "params": params,
+        "family": family or ("gemini-image" if params else ""),
+    }
+
 def gemini_endpoint_url(provider, model):
     model_name = urllib.parse.quote(gemini_model_name(model), safe="")
     return provider_endpoint_url(provider, "image_generation_endpoint", f"/v1beta/models/{model_name}:generateContent")
@@ -9532,9 +9606,10 @@ def gemini_image_config(size):
         if raw in {"1K", "2K", "4K"}:
             return {"aspectRatio": "1:1", "imageSize": raw}
         if re.fullmatch(r"\d+\s*:\s*\d+", raw):
-            return {"aspectRatio": raw.replace(" ", ""), "imageSize": "1K"}
+            return {"aspectRatio": gemini_supported_aspect_ratio(raw), "imageSize": "1K"}
         return {"aspectRatio": "1:1", "imageSize": "2K"}
-    aspect_ratio, resolution = apimart_size_resolution(size)
+    _, resolution = apimart_size_resolution(size)
+    aspect_ratio = gemini_supported_aspect_ratio(size)
     return {"aspectRatio": aspect_ratio, "imageSize": resolution.upper()}
 
 def gemini_reference_part(ref):
@@ -10779,6 +10854,9 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
         return await generate_volcengine_provider_image(prompt, size, model, reference_images, provider)
+    image_route = route_openai_image_request(provider, model, size)
+    model = image_route["model"]
+    routed_image_params = image_route["params"]
     is_gpt2 = is_gpt_image_2_model(model)
     is_apimart = is_apimart_provider(provider)
     # 不对 GPT 尺寸做任何缩小/拦截：用户选什么尺寸就原样发给上游；
@@ -10800,6 +10878,12 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         response = None
         async def post_openai_edits(edit_files=None):
             data = {"model": model, "prompt": prompt, "size": size}
+            if routed_image_params:
+                # OpenAI-compatible Banana gateways otherwise infer a ratio
+                # from arbitrary pixel dimensions (for example 3840x1648 ->
+                # 240:103), which Gemini rejects. Send the supported preset
+                # explicitly while retaining size for gateway compatibility.
+                data.update(routed_image_params)
             if quality:
                 data["quality"] = quality
             return await client.post(
@@ -10958,6 +11042,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     "response_format": "url", "n": 1,
                     "image": image_payload,
                 }
+                if routed_image_params:
+                    body.update(routed_image_params)
                 if quality:
                     body["quality"] = quality
                 response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
@@ -10968,6 +11054,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     )
         else:
             body = {"model": model, "prompt": prompt, "size": size, "response_format": "url", "n": 1}
+            if routed_image_params:
+                body.update(routed_image_params)
             if quality:
                 body["quality"] = quality
             response = await client.post(
