@@ -682,6 +682,11 @@ def reload_env_globals():
 
 CHAT_MODELS = model_list("CHAT_MODELS", CHAT_MODEL, ["gpt-4o-mini", "gemini-3.1-flash-image-preview-2k"])
 IMAGE_MODELS = model_list("IMAGE_MODELS", IMAGE_MODEL, ["nano-banana-pro"])
+ATLASCLOUD_DEFAULT_BASE_URL = "https://api.atlascloud.ai/v1"
+ATLASCLOUD_DEFAULT_CHAT_MODELS = [
+    "qwen/qwen3.5-flash",
+    "deepseek-ai/deepseek-v4-pro",
+]
 VIDEO_MODELS = model_list("VIDEO_MODELS", "veo3-fast", [
     # —— Veo 系列 ——
     "veo2", "veo2-fast", "veo2-pro",
@@ -705,6 +710,8 @@ VIDEO_MODELS = model_list("VIDEO_MODELS", "veo3-fast", [
 def provider_key_env(provider_id):
     if provider_id == "comfly":
         return "COMFLY_API_KEY"
+    if provider_id == "atlascloud":
+        return "ATLASCLOUD_API_KEY"
     if provider_id == "modelscope":
         return "MODELSCOPE_API_KEY"
     if provider_id == "runninghub":
@@ -745,6 +752,8 @@ def provider_env_key_value(provider_id: str) -> str:
     key = os.getenv(env_key, "") or read_api_env_value(env_key)
     if key:
         return key
+    if provider_id == "atlascloud":
+        return os.getenv("ATLAS_CLOUD_API_KEY", "") or read_api_env_value("ATLAS_CLOUD_API_KEY")
     if provider_id == "modelscope":
         return MODELSCOPE_API_KEY or ""
     return ""
@@ -802,6 +811,22 @@ def default_api_providers():
             "video_models": [],
             "ms_loras": MODELSCOPE_DEFAULT_LORAS,
             "ms_defaults_version": MODELSCOPE_DEFAULTS_VERSION,
+        },
+        {
+            "id": "atlascloud",
+            "name": "Atlas Cloud",
+            "base_url": ATLASCLOUD_DEFAULT_BASE_URL,
+            "protocol": "openai",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": [],
+            "chat_models": ATLASCLOUD_DEFAULT_CHAT_MODELS,
+            "video_models": [],
+            "ms_loras": [],
+            "ms_defaults_version": 0,
         },
         {
             "id": "runninghub",
@@ -862,6 +887,23 @@ def merge_default_api_providers(providers, inject_missing=True):
                 current["chat_models"] = chat_models
                 current["ms_loras"] = loras
                 current["ms_defaults_version"] = MODELSCOPE_DEFAULTS_VERSION
+    atlas_default = next((d for d in default_api_providers() if d["id"] == "atlascloud"), None)
+    if atlas_default:
+        current = next((item for item in merged if item.get("id") == "atlascloud"), None)
+        if not current:
+            if inject_missing:
+                merged.append(atlas_default)
+        else:
+            if not current.get("base_url"):
+                current["base_url"] = atlas_default["base_url"]
+            if not current.get("protocol"):
+                current["protocol"] = "openai"
+            current["image_models"] = model_list_from_values(current.get("image_models") or [])
+            current["chat_models"] = model_list_from_values([
+                *ATLASCLOUD_DEFAULT_CHAT_MODELS,
+                *(current.get("chat_models") or []),
+            ])
+            current["video_models"] = model_list_from_values(current.get("video_models") or [])
     rh_default = load_static_runninghub_provider() or next((d for d in default_api_providers() if d["id"] == "runninghub"), None)
     if rh_default:
         current = next((item for item in merged if item.get("id") == "runninghub"), None)
