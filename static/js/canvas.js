@@ -10435,7 +10435,7 @@ function refreshGeneratorInputViews(){
             ltxSyncConnectedImagesToTimeline(gen);
             renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         }
-        if(gen.type === 'video') renderVideoImageInputs(el.querySelector('.video-img-list'), gen, imageInputs);
+        if(gen.type === 'video') renderVideoImageInputs(el.querySelector('.video-img-list'), gen, sources.filter(src => src.refs?.some(ref => ['image','video','audio'].includes(mediaKindForRef(ref)))));
         if(gen.type === 'rh'){
             const media = rhMediaSources(gen);
             if(rhCurrentKind(gen) === 'model') renderPromptPreview(el.querySelector('.rh-prompt-list'), media.sources.filter(src => src.prompt && !src.refs?.length));
