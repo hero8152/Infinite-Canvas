@@ -203,7 +203,7 @@ p {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, .72fr) minmax(72px, .5fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, .72fr) minmax(72px, .5fr);
   gap: 6px;
   align-items: end;
 }

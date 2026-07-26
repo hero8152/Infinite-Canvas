@@ -16,10 +16,10 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/lucide.js?v=2026.06.29.1782696749"></script>
-    <script src="/static/js/theme.js?v=2026.06.29.1782696718"></script>
-    <script src="/static/js/i18n.js?v=2026.06.29.1782699985"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.06.29.1782721928">
+    <script src="/static/vendor/js/lucide.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/theme.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.06.30.1783083505">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -31,8 +31,6 @@
                             <select id="engineSelect" class="engine-select">
                                 <option value="api" data-i18n="smart.engineApi">API生成</option>
                                 <option value="volcengine" data-i18n="smart.engineVolcengine">火山引擎</option>
-                                <option value="modelscope" data-i18n="smart.engineMs">MS生成</option>
-                                <option value="comfy" data-i18n="smart.engineComfy">ComfyUI生成</option>
                                 <option value="runninghub" data-i18n="smart.engineRh">RunningHub</option>
                             </select>
                             <div id="apiKindToggle" class="kind-toggle" style="display:none">
@@ -227,8 +225,11 @@
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>G</kbd></span><span data-i18n="smart.shortcutGroup">合并选中的图片为组</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>G</kbd></span><span data-i18n="smart.shortcutUngroup">释放选中的分组</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>Z</kbd></span><span data-i18n="smart.shortcutUndo">撤销上一步操作</span></div>
+                    <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Z</kbd></span><span data-i18n="smart.shortcutUndoAlt">恢复上一步操作</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>C</kbd></span><span data-i18n="smart.shortcutCopy">复制选中的节点</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>V</kbd></span><span data-i18n="smart.shortcutPaste">粘贴节点或剪贴板图片</span></div>
+                    <div class="shortcut-item"><span class="shortcut-keys"><kbd>Alt</kbd></span><span data-i18n="smart.shortcutAltCopy">按住并拖动复制节点</span></div>
+                    <div class="shortcut-item"><span class="shortcut-keys"><kbd>Alt</kbd><kbd>Shift</kbd></span><span data-i18n="smart.shortcutAltShiftCopy">复制节点并保留连线</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>A</kbd></span><span data-i18n="smart.shortcutAssets">打开/关闭资源库</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Z</kbd></span><span data-i18n="smart.shortcutOverview">缩小画布视图</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>双击</kbd></span><span data-i18n="smart.shortcutCreateMenu">打开快捷菜单</span></div>
@@ -251,6 +252,7 @@
                         <button type="button" data-image-edit-mode="outpaint"><i data-lucide="expand" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeOutpaint">Expand</span></button>
                         <button type="button" data-image-edit-mode="mask"><i data-lucide="brush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeMask">遮罩</span></button>
                         <button type="button" data-image-edit-mode="brush"><i data-lucide="paintbrush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeBrush">画笔</span></button>
+                        <button type="button" data-image-edit-mode="resize"><i data-lucide="minimize-2" class="w-3.5 h-3.5"></i><span>缩放</span></button>
                         <button type="button" data-image-edit-mode="grid"><i data-lucide="grid-3x3" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeGrid">宫格切分</span></button>
                     </div>
                     <button class="preview-icon-btn" type="button" onclick="closeImageEditor()" title="关闭" data-i18n-title="common.close"><i data-lucide="x" class="w-4 h-4"></i></button>
@@ -310,6 +312,11 @@
                     <button id="brushUndoBtn" class="image-edit-btn secondary" type="button" onclick="undoEditDrawing()" title="撤销"><i data-lucide="undo-2" class="w-4 h-4"></i></button>
                     <button id="brushRedoBtn" class="image-edit-btn secondary" type="button" onclick="redoEditDrawing()" title="恢复"><i data-lucide="redo-2" class="w-4 h-4"></i></button>
                     <button class="image-edit-btn secondary" type="button" onclick="clearEditDrawing()"><i data-lucide="eraser" class="w-4 h-4"></i><span data-i18n="canvas.clear">清空</span></button>
+                </div>
+                <div id="imageResizeTools" class="image-edit-tools image-resize-tools">
+                    <label><span>倍数</span> <input id="imageResizeScaleRange" type="range" min="0.05" max="1" step="0.05" value="0.5"></label>
+                    <label><input id="imageResizeScaleInput" type="number" min="0.05" max="1" step="0.05" value="0.5"><span>×</span></label>
+                    <span id="imageResizeResolution" class="image-edit-sub image-resize-resolution">-</span>
                 </div>
                 <div id="imageGridTools" class="image-edit-tools">
                     <div class="grid-operation-toggle">
@@ -396,6 +403,7 @@
                                 <div class="outpaint-handle" data-outpaint-handle="corner"></div>
                             </div>
                             <div id="outpaintResolution" class="outpaint-resolution"></div>
+                            <div id="resizeResolutionOverlay" class="resize-resolution-overlay"></div>
                         </div>
                     </div>
                     <div class="preview-download-overlay">
@@ -426,6 +434,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.06.29.1782721983"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.06.30.1783083505"></script>
 </body>
 </html>

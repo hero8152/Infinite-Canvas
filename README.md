@@ -1,5 +1,9 @@
 # Infinite-Canvas
-Supports comfyui/API calls/modelscope calls
+在线 API 图像、视频与对话创作工作台
+
+## Windows x64 便携版
+
+解压发布 ZIP 后运行 `Canvas.exe`。程序资源位于 `app`，所有设置、数据库、媒体、缓存和日志只写入同级 `data`；升级时先从托盘退出，再替换 `Canvas.exe` 与 `app`，不要删除 `data`。默认监听 3000 端口并允许可信局域网访问，新设备须通过托盘“配对设备”生成的一次性配对码授权。首版不支持自动更新，也不应将端口映射到公网。
 
 配套的chrome采集插件已经上线：https://chromewebstore.google.com/detail/infinite-canvas-%E5%9B%BE%E5%83%8F%E8%A7%86%E9%A2%91%E6%96%87%E5%AD%97%E6%8A%93%E5%8F%96%E5%B7%A5/ajfhnbklbmpfaaookhfakohabnpmlcic?authuser=0&hl=en
 
@@ -27,9 +31,10 @@ https://www.fhl.mom/register?aff=86L574B4T2N9  （包含codex和GPT image 2模�
 3. 火山引擎调用（人脸认证还在修复bug）
 4. Modelscope免费LLM模型和图像模型调用
 5. 即梦CLI调用，可直接调用即梦高级会员的积分，支持文生图/图生图/文生视频/图生视频
-6. 支持调用本地局域网的ComfyUI
-7. 扩展图片/360全景图预览截图/视频帧抽取/循环节点等诸多功能
-8. tools文件夹中，增加了chrome批量采集到素材库的插件，PS直连画布调用所有功能的插件
+6. 扩展图片/360全景图预览截图/视频帧抽取/循环节点等诸多功能
+7. tools文件夹中，增加了chrome批量采集到素材库的插件，PS直连画布调用所有功能的插件
+8. 电商专用工作台：统一高品质生成，支持换衣、动作迁移、道具替换、角度、背景与最多 14 张角色化参考图的全能模式；素材和结果跨标签持久化，支持拖拽上传、全屏划像对比、人工质量验收与正式导出
+9. 作品管理：集中浏览生成作品，支持搜索、类型筛选、收藏、下载，并可随时使用全屏划像对比核对细节
 
 --------
 

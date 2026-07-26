@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电商专用</title>
+    <script>
+        (function(){
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'system';
+                if(theme === 'system') theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                if(theme === 'dark') document.documentElement.classList.add('studio-theme-dark');
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/js/theme.js?v=2026.07.22.1"></script>
+    <script src="/static/js/i18n.js?v=2026.07.22.2"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.22.1">
+    <link rel="stylesheet" href="/static/css/compare-viewer.css?v=2026.07.22.1">
+    <link rel="stylesheet" href="/static/css/ecommerce.css?v=2026.07.22.1">
+</head>
+<body>
+    <main id="ecommercePage" class="ec-page">
+        <header class="ec-topbar">
+            <nav id="operationTabs" class="ec-operation-tabs" aria-label="电商功能">
+                <button class="active" type="button" data-operation="universal"><span>01</span><b data-i18n="ecommerce.universal">全能模式</b></button>
+                <button type="button" data-operation="try_on"><span>02</span><b data-i18n="ecommerce.tryOn">一键换衣</b></button>
+                <button type="button" data-operation="pose_transfer"><span>03</span><b data-i18n="ecommerce.poseTransfer">动作迁移</b></button>
+                <button type="button" data-operation="prop_replace"><span>04</span><b data-i18n="ecommerce.propReplace">道具替换</b></button>
+                <button type="button" data-operation="angle_change"><span>05</span><b data-i18n="ecommerce.angleChange">角度修改</b></button>
+                <button type="button" data-operation="background_change"><span>06</span><b data-i18n="ecommerce.backgroundChange">背景修改</b></button>
+            </nav>
+            <div class="ec-header-actions">
+                <div id="routeSummary" class="ec-route-summary">
+                    <span data-i18n="ecommerce.route">自动路由</span>
+                    <strong>—</strong>
+                </div>
+                <span id="capabilityStatus" class="ec-status" data-i18n="ecommerce.loadingEngines">正在检查可用模型</span>
+                <button id="historyToggle" class="ec-icon-button" type="button" data-i18n-title="ecommerce.history" aria-label="任务历史">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v6h6M12 7v5l3 2"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <section id="ecommerceWorkspace" class="ec-workspace">
+            <aside id="controlPanel" class="ec-control-panel">
+                <div id="controlInputMount">
+                    <section id="inputModule" class="ec-input-module">
+                        <div class="ec-section-head">
+                            <div><span>INPUT</span><h2 data-i18n="ecommerce.inputs">输入素材</h2></div>
+                            <span id="inputProgress">0/2</span>
+                        </div>
+                        <div id="inputSlots" class="ec-input-slots"></div>
+                    </section>
+                </div>
+
+                <div id="operationControls" class="ec-operation-controls"></div>
+
+                <button id="maskToggle" class="ec-secondary-button hidden" type="button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 9-9 4 4-9 9H4v-4ZM14 6l2-2 4 4-2 2"/></svg>
+                    <span data-i18n="ecommerce.refineMask">画笔修正区域</span>
+                </button>
+                <section id="maskEditor" class="ec-mask-editor hidden" aria-label="蒙版编辑器">
+                    <div class="ec-mask-toolbar">
+                        <button class="active" type="button" data-mask-tool="replace" data-i18n="ecommerce.markReplace">替换区域</button>
+                        <button type="button" data-mask-tool="keep" data-i18n="ecommerce.markKeep">保留区域</button>
+                        <label><span data-i18n="ecommerce.brushSize">画笔</span><input id="maskBrushSize" type="range" min="8" max="96" value="36"></label>
+                        <button id="maskReset" type="button" data-i18n="ecommerce.clear">清空</button>
+                    </div>
+                    <div id="maskCanvasWrap" class="ec-mask-canvas-wrap">
+                        <img id="maskBaseImage" alt="">
+                        <canvas id="maskCanvas"></canvas>
+                        <p data-i18n="ecommerce.maskHint">红色表示替换，绿色表示保留</p>
+                    </div>
+                </section>
+
+                <section id="advancedSettings" class="ec-model-panel">
+                    <button id="modelPanelToggle" class="ec-model-panel-toggle" type="button" aria-expanded="true" aria-controls="modelPanelBody">
+                        <span class="ec-model-panel-heading">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M4 12h4M12 12h8M14 5v4M8 15v4M10 10v4"/></svg>
+                            <span><b data-i18n="ecommerce.modelPanel">模型</b><small id="modelPanelSelection">—</small></span>
+                        </span>
+                        <span class="ec-model-panel-actions"><em data-i18n="ecommerce.apiImage">API 生图</em><svg class="ec-model-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></span>
+                    </button>
+                    <div id="modelPanelBody" class="ec-model-panel-body">
+                        <div class="ec-field-grid ec-model-route-grid">
+                            <label><span data-i18n="ecommerce.provider">平台</span><select id="providerSelect"></select></label>
+                            <label><span data-i18n="ecommerce.model">模型</span><select id="modelSelect"></select></label>
+                        </div>
+                        <div class="ec-field-grid ec-parameter-grid">
+                            <label><span data-i18n="ecommerce.aspectRatio">比例</span><select id="ratioSelect">
+                                <option value="source" data-i18n="ecommerce.ratioSource">跟随原图</option>
+                                <option value="1:1">1:1</option>
+                                <option value="2:3">2:3</option>
+                                <option value="3:2">3:2</option>
+                                <option value="3:4">3:4</option>
+                                <option value="4:3">4:3</option>
+                                <option value="4:5">4:5</option>
+                                <option value="9:16">9:16</option>
+                                <option value="16:9">16:9</option>
+                            </select></label>
+                            <label><span data-i18n="ecommerce.resolution">分辨率</span><select id="resolutionSelect">
+                                <option value="auto" data-i18n="ecommerce.autoRecommendedSimple">智能推荐</option>
+                                <option value="1k">1K</option>
+                                <option value="2k">2K</option>
+                                <option value="4k">4K</option>
+                            </select></label>
+                            <label><span data-i18n="ecommerce.quality">质量</span><select id="qualitySelect">
+                                <option value="auto" data-i18n="ecommerce.autoRecommendedSimple">智能推荐</option>
+                                <option value="low" data-i18n="ecommerce.qualityLow">低</option>
+                                <option value="medium" data-i18n="ecommerce.qualityMedium">中</option>
+                                <option value="high" data-i18n="ecommerce.qualityHigh">高</option>
+                            </select></label>
+                            <label><span data-i18n="ecommerce.outputCount">生成数量</span><select id="countSelect">
+                                <option value="0" data-i18n="ecommerce.autoRecommendedSimple">智能推荐</option>
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                            </select></label>
+                        </div>
+                        <p data-i18n="ecommerce.advancedHint">只显示当前已保存、已启用并配置了 API Key 的图像 API；实际路由会记录在任务中。</p>
+                    </div>
+                </section>
+
+                <div id="controlActionMount">
+                    <section id="generateActions" class="ec-generate-actions">
+                        <button id="addUniversalReference" class="ec-add-reference ec-add-reference-action hidden" type="button"></button>
+                        <div id="formError" class="ec-inline-error hidden" role="alert"></div>
+                        <button id="generateButton" class="ec-primary-button" type="button">
+                            <span data-i18n="ecommerce.generate">开始生成</span>
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                        </button>
+                    </section>
+                </div>
+            </aside>
+
+            <section class="ec-result-panel">
+                <div class="ec-section-head ec-result-head">
+                    <div><span>OUTPUT</span><h2 data-i18n="ecommerce.result">结果与对比</h2></div>
+                    <button id="compareReset" class="ec-text-button" type="button" data-i18n="ecommerce.resetCompare">对比复位</button>
+                </div>
+
+                <div class="ec-result-body">
+                    <div id="emptyResult" class="ec-empty-result">
+                        <div class="ec-empty-symbol"><span></span><span></span></div>
+                        <h3 data-i18n="ecommerce.emptyTitle">准备好素材后开始生成</h3>
+                        <p data-i18n="ecommerce.emptyHint">结果会保留为独立版本，原图不会被覆盖</p>
+                    </div>
+
+                    <div id="resultWorkspace" class="hidden">
+                        <div class="ec-result-frame-wrap">
+                            <div class="ec-result-frame">
+                                <div id="resultMeta" class="ec-result-meta" aria-label="生成信息"></div>
+                                <div id="compareStage" class="ec-compare-stage">
+                                    <img id="beforeImage" class="ec-before-image" data-compare-before alt="原图">
+                                    <div id="afterClip" class="ec-after-clip" data-compare-after-clip><img id="afterImage" data-compare-after alt="生成图"></div>
+                                    <button id="compareHandle" class="ec-compare-handle" data-compare-handle type="button" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="原图与生成图对比">
+                                        <span>‹</span><span>›</span>
+                                    </button>
+                                    <span class="ec-compare-label compare-viewer-label before" data-i18n="ecommerce.before">原图</span>
+                                    <span class="ec-compare-label compare-viewer-label after" data-i18n="ecommerce.after">生成图</span>
+                                    <div class="ec-compare-tools compare-viewer-tools" aria-label="缩放工具">
+                                        <button id="zoomOut" type="button" data-compare-zoom-out data-i18n-title="ecommerce.zoomOut" aria-label="缩小">−</button>
+                                        <button id="zoomReset" type="button" data-compare-zoom-label data-i18n-title="ecommerce.zoomReset" aria-label="适合窗口">1×</button>
+                                        <button id="zoomIn" type="button" data-compare-zoom-in data-i18n-title="ecommerce.zoomIn" aria-label="放大">＋</button>
+                                        <button id="compareFullscreen" type="button" data-compare-fullscreen data-i18n-title="ecommerce.fullscreenCompare" aria-label="全屏对比"><span class="compare-viewer-fullscreen-enter">⛶</span><span class="compare-viewer-fullscreen-exit">×</span></button>
+                                    </div>
+                                    <div id="generationOverlay" class="ec-generation-overlay hidden">
+                                        <div class="ec-spinner"></div>
+                                        <strong data-i18n="ecommerce.generating">正在生成</strong>
+                                        <span id="generationTimer">00:00</span>
+                                        <small id="generationMessage"></small>
+                                    </div>
+                                </div>
+                                <div id="candidateList" class="ec-candidate-list" aria-label="生成结果切换"></div>
+                            </div>
+                        </div>
+                        <div class="ec-result-actions">
+                            <button id="downloadPreview" class="ec-secondary-button" type="button" data-i18n="ecommerce.downloadWork">下载作品</button>
+                            <button id="qualityReview" class="ec-secondary-button" type="button" data-i18n="ecommerce.qualityReview">质量验收</button>
+                            <button id="exportFinal" class="ec-primary-button compact" type="button" disabled data-i18n="ecommerce.exportFinal">导出上架成片</button>
+                            <button id="saveAsset" class="ec-secondary-button" type="button" disabled data-i18n="ecommerce.saveAsset">保存到素材库</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="universalDock" class="ec-universal-dock hidden" aria-label="全能模式参考素材">
+                <div id="universalDockInputs" class="ec-universal-dock-inputs"></div>
+                <div id="universalDockActions" class="ec-universal-dock-actions"></div>
+            </section>
+        </section>
+    </main>
+
+    <aside id="taskDrawer" class="ec-drawer" aria-hidden="true">
+        <header><div><small>VERSIONS</small><h2 data-i18n="ecommerce.history">任务历史</h2></div><button id="closeHistory" class="ec-icon-button" type="button" aria-label="关闭">×</button></header>
+        <div id="taskList" class="ec-task-list"></div>
+    </aside>
+    <div id="drawerBackdrop" class="ec-backdrop hidden"></div>
+
+    <dialog id="assetDialog" class="ec-dialog ec-asset-dialog">
+        <form method="dialog" class="ec-dialog-shell">
+            <header><div><small>ASSETS</small><h2 id="assetDialogTitle" data-i18n="ecommerce.chooseAsset">从素材库选择</h2></div><button value="cancel" class="ec-icon-button" aria-label="关闭">×</button></header>
+            <div class="ec-dialog-toolbar"><select id="assetLibrarySelect"></select><select id="assetCategorySelect"></select></div>
+            <div id="assetGrid" class="ec-asset-grid"></div>
+            <div class="ec-dialog-actions"><button id="assetSaveConfirm" class="ec-primary-button compact hidden" type="button" data-i18n="ecommerce.saveHere">保存到此分组</button></div>
+        </form>
+    </dialog>
+
+    <dialog id="qualityDialog" class="ec-dialog ec-quality-dialog">
+        <form id="qualityForm" method="dialog" class="ec-dialog-shell">
+            <header><div><small>QUALITY GATE</small><h2 data-i18n="ecommerce.qualityTitle">上架前人工验收</h2></div><button value="cancel" class="ec-icon-button" aria-label="关闭">×</button></header>
+            <p class="ec-quality-intro" data-i18n="ecommerce.qualityIntro">生成图只有在所有检查项确认后，才会标记为上架成片。</p>
+            <div id="qualityChecks" class="ec-quality-checks"></div>
+            <label class="ec-review-note"><span data-i18n="ecommerce.reviewNote">验收备注（可选）</span><textarea id="qualityNote" maxlength="500"></textarea></label>
+            <div class="ec-dialog-actions"><button value="cancel" class="ec-secondary-button" type="button" id="cancelQuality" data-i18n="ecommerce.cancel">取消</button><button id="approveQuality" class="ec-primary-button compact" type="submit" data-i18n="ecommerce.approve">确认通过</button></div>
+        </form>
+    </dialog>
+
+    <div id="toast" class="ec-toast" role="status"></div>
+    <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+    <script src="/static/js/compare-viewer.js?v=2026.07.22.1"></script>
+    <script src="/static/js/ecommerce.js?v=2026.07.22.3"></script>
+</body>
+</html>

@@ -14,7 +14,8 @@
     <script>
         (function(){
             try {
-                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'system';
+                if(theme === 'system') theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
                 if(theme === 'dark') {
                     document.documentElement.classList.add('studio-theme-dark');
                     document.documentElement.classList.add('theme-dark');
@@ -23,11 +24,11 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.06.29.1782696751"></script>
-    <script src="/static/js/theme.js?v=2026.06.29.1782696718"></script>
-    <script src="/static/js/i18n.js?v=2026.06.29.1782699985"></script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/theme.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
     <style>
-        @import url('/static/vendor/css/fonts.css?v=2026.06.29.1782696732');
+        @import url('/static/vendor/css/fonts.css?v=2026.06.30.1782781876');
 
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -60,8 +61,6 @@
             --divider: rgba(0, 0, 0, 0.1);
             --scrollbar: #d8d8d8;
             --scrollbar-hover: #c0c0c0;
-            --author-name: #000;
-            --social-icon: #ccc;
         }
 
         html.theme-dark,
@@ -80,8 +79,6 @@
             --divider: rgba(255, 255, 255, 0.15);
             --scrollbar: #334155;
             --scrollbar-hover: #475569;
-            --author-name: #e5e9f0;
-            --social-icon: #64748b;
         }
 
         /* 极简滚动条 */
@@ -491,79 +488,6 @@
             font-size: 9px;
         }
 
-        /* 作者组件 */
-        .author-box {
-            width: 100%;
-            height: 60px;
-            flex: 0 0 60px;
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-        }
-
-        .dx-letter {
-            position: absolute;
-            font-size: 14px;
-            font-weight: 800;
-            color: var(--text);
-            /* 只过渡 hover 时真正改的 transform/opacity，避免 all 触发延迟 */
-            transition: transform 0.5s var(--fluid-ease) 0.4s, opacity 0.5s var(--fluid-ease) 0.4s;
-            z-index: 10;
-        }
-
-        .letter-d { transform: translateX(-8px); }
-        .letter-x { transform: translateX(8px); }
-
-        .sidebar:hover .letter-d {
-            transform: translateX(-120px);
-            opacity: 0;
-            transition-delay: 0s;
-        }
-
-        .sidebar:hover .letter-x {
-            transform: translateX(120px);
-            opacity: 0;
-            transition-delay: 0s;
-        }
-
-        .author-content-wrap {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            opacity: 0;
-            transform: scale(0.9);
-            transition: all 0.4s var(--fluid-ease) 0s;
-            pointer-events: none;
-        }
-
-        .sidebar:hover .author-content-wrap {
-            opacity: 1;
-            transform: scale(1);
-            transition-delay: 0.2s;
-            pointer-events: auto;
-        }
-
-        .author-name-lite {
-            font-size: 12px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: var(--author-name);
-        }
-
-        .social-row-lite { display: flex; gap: 12px; }
-
-        .social-icon-lite {
-            color: var(--social-icon);
-            transition: color 0.2s, transform 0.2s;
-        }
-
-        .social-icon-lite:hover {
-            color: var(--text);
-            transform: translateY(-1px);
-        }
-
         .side-actions {
             margin-top:12px;
             margin-bottom:12px;
@@ -722,10 +646,10 @@
             line-height:1;
             white-space:nowrap;
             overflow:hidden;
-            cursor:pointer;
+            cursor:default;
             transition:width 0.3s var(--fluid-ease) 0.5s, color .2s, border-color .2s, background-color .2s;
         }
-        .project-version-badge:hover { color:var(--text); border-color:var(--accent, #6366f1); }
+        .project-version-badge:hover { color:var(--muted); border-color:var(--border); }
         .project-version-badge.checking { opacity:.6; animation:badge-pulse 1s ease-in-out infinite; }
         @keyframes badge-pulse { 0%,100%{opacity:.5;} 50%{opacity:1;} }
 
@@ -838,7 +762,6 @@
             }
             .project-version-badge { width:40px; min-height:16px; font-size:8px; }
             .update-now-btn.show { min-height:22px; width:48px; }
-            .author-box { display:none; }
         }
 
         @media (max-height: 660px) {
@@ -1334,22 +1257,6 @@
             opacity: 1;
             transition-delay: 0.1s;
         }
-        .sidebar.is-pinned .letter-d {
-            transform: translateX(-120px);
-            opacity: 0;
-            transition-delay: 0s;
-        }
-        .sidebar.is-pinned .letter-x {
-            transform: translateX(120px);
-            opacity: 0;
-            transition-delay: 0s;
-        }
-        .sidebar.is-pinned .author-content-wrap {
-            opacity: 1;
-            transform: scale(1);
-            transition-delay: 0.2s;
-            pointer-events: auto;
-        }
         .sidebar.is-pinned .side-pill {
             width: 170px;
             gap: 8px;
@@ -1382,61 +1289,53 @@
             transition-delay: .15s;
         }
 
-        .sidebar.is-collapsing:hover {
+        /* 非展开态禁止 hover 自动展开；侧栏只响应顶部按钮的手动切换。 */
+        .sidebar:not(.is-pinned):hover {
             width: 80px;
         }
-        .sidebar.is-collapsing:hover .logo-ring {
+        .sidebar:not(.is-pinned):hover .logo-ring {
             transform: none;
             border-radius: 12px;
             background: transparent;
         }
-        .sidebar.is-collapsing:hover .nav-item,
-        .sidebar.is-collapsing:hover .nav-fold-toggle {
+        .sidebar:not(.is-pinned):hover .nav-item,
+        .sidebar:not(.is-pinned):hover .nav-fold-toggle {
             width: 48px;
         }
-        .sidebar.is-collapsing:hover .nav-text {
+        .sidebar:not(.is-pinned):hover .nav-text {
             opacity: 0;
         }
-        .sidebar.is-collapsing:hover .letter-d {
-            transform: translateX(-8px);
-            opacity: 1;
-        }
-        .sidebar.is-collapsing:hover .letter-x {
-            transform: translateX(8px);
-            opacity: 1;
-        }
-        .sidebar.is-collapsing:hover .author-content-wrap {
-            opacity: 0;
-            transform: scale(0.9);
-            pointer-events: none;
-        }
-        .sidebar.is-collapsing:hover .side-pill {
-            width: 44px;
-            gap: 0;
-        }
-        .sidebar.is-collapsing:hover .side-pill-text {
+        .sidebar:not(.is-pinned):hover .settings-fold-chevron {
             opacity: 0;
             max-width: 0;
         }
-        .sidebar.is-collapsing:hover .project-version-badge {
+        .sidebar:not(.is-pinned):hover .side-pill {
+            width: 44px;
+            gap: 0;
+        }
+        .sidebar:not(.is-pinned):hover .side-pill-text {
+            opacity: 0;
+            max-width: 0;
+        }
+        .sidebar:not(.is-pinned):hover .project-version-badge {
             width: 44px;
         }
-        .sidebar.is-collapsing:hover .project-version-compact,
-        .sidebar.is-collapsing:hover .update-version-compact {
+        .sidebar:not(.is-pinned):hover .project-version-compact,
+        .sidebar:not(.is-pinned):hover .update-version-compact {
             display: inline;
         }
-        .sidebar.is-collapsing:hover .project-version-full,
-        .sidebar.is-collapsing:hover .update-version-full,
-        .sidebar.is-collapsing:hover .update-action-prefix {
+        .sidebar:not(.is-pinned):hover .project-version-full,
+        .sidebar:not(.is-pinned):hover .update-version-full,
+        .sidebar:not(.is-pinned):hover .update-action-prefix {
             display: none;
         }
-        .sidebar.is-collapsing:hover .update-now-btn {
+        .sidebar:not(.is-pinned):hover .update-now-btn {
             width: 56px;
         }
-        .sidebar.is-collapsing:hover .update-now-btn svg {
+        .sidebar:not(.is-pinned):hover .update-now-btn svg {
             display: none;
         }
-        .sidebar.is-collapsing:hover .update-now-text {
+        .sidebar:not(.is-pinned):hover .update-now-text {
             max-width: 42px;
         }
     </style>
@@ -1446,56 +1345,25 @@
 
     <div class="app-shell">
         <aside class="sidebar" id="studioSidebar">
-            <button class="logo-ring mb-12" id="sidebarLogoToggle" type="button" onclick="toggleSidebarPinned(event)" aria-pressed="false" title="固定导航栏">
+            <button class="logo-ring mb-12" id="sidebarLogoToggle" type="button" onclick="toggleSidebarPinned(event)" aria-pressed="true" title="收起导航栏">
                 <div class="w-1.5 h-1.5 rounded-full transition-colors" id="logo-dot" style="background:var(--text)"></div>
             </button>
 
             <nav>
-                <button class="nav-fold-toggle" id="local-nav-toggle" type="button" onclick="toggleLocalNav()" aria-expanded="true" title="折叠本地功能">
-                    <svg class="nav-fold-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                    <span class="nav-text" data-i18n="nav.localTools">本地功能</span>
-                </button>
-
-                <div class="nav-fold-group" id="local-nav-group">
-                    <div class="nav-item active" onclick="switchUI(this, 'zimage')">
-                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.587-1.587a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                        </svg>
-                        <span class="nav-text" data-i18n="nav.textToImage">文生图</span>
-                    </div>
-                    <div class="nav-item" onclick="switchUI(this, 'enhance')">
-                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                        </svg>
-                        <span class="nav-text" data-i18n="nav.enhance">细节增强</span>
-                    </div>
-                    <div class="nav-item" onclick="switchUI(this, 'klein')">
-                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                        </svg>
-                        <span class="nav-text" data-i18n="nav.imageEdit">图片编辑</span>
-                    </div>
-                    <div class="nav-item" onclick="switchUI(this, 'angle')">
-                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                        </svg>
-                        <span class="nav-text" data-i18n="nav.angle">角度控制</span>
-                    </div>
-                </div>
-
-                <!-- 分隔线 -->
-                <div style="width:32px;height:1px;background:var(--border);margin:8px auto;transition:background 0.3s;"></div>
-
-                <div class="nav-item" onclick="switchUI(this, 'online')">
+                <div class="nav-item active" onclick="switchUI(this, 'online')">
                     <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"></path>
                         <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
                     </svg>
                     <span class="nav-text" data-i18n="nav.online">在线生图</span>
+                </div>
+                <div class="nav-item" onclick="switchUI(this, 'ecommerce')">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M6 8h12l-1 12H7L6 8z"></path>
+                        <path d="M9 8V6a3 3 0 0 1 6 0v2"></path>
+                        <path d="M9.5 12h.01M14.5 12h.01"></path>
+                    </svg>
+                    <span class="nav-text" data-i18n="nav.ecommerce">电商专用</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'gpt-chat')">
                     <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1520,6 +1388,14 @@
                         <path d="M7 16h6"></path>
                     </svg>
                     <span class="nav-text" data-i18n="nav.assetManager">素材库</span>
+                </div>
+                <div class="nav-item" onclick="switchUI(this, 'works')">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                        <path d="m7 15 3-3 3 3 2-2 3 3"></path>
+                        <path d="M8 9h.01"></path>
+                    </svg>
+                    <span class="nav-text" data-i18n="nav.works">作品管理</span>
                 </div>
             </nav>
 
@@ -1568,71 +1444,17 @@
                         </svg>
                         <span class="side-pill-text" data-i18n="common.language">中文</span>
                     </button>
-                    <button class="side-pill" onclick="switchUI(this, 'comfyui-settings')" type="button" title="工作流设置">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
-                            <path d="M14 14h7v7h-7z"></path>
-                            <line x1="10" y1="6.5" x2="14" y2="6.5"></line>
-                            <line x1="6.5" y1="10" x2="6.5" y2="14"></line>
-                        </svg>
-                        <span class="side-pill-text" data-i18n="common.comfyuiSettings">工作流设置</span>
-                    </button>
                 </div>
-                <button id="github-entry-btn" class="side-pill" onclick="openProjectPage()" type="button" title="GitHub">
-                    <svg fill="currentColor" stroke="none" viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.05c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.74.08-.74 1.21.09 1.85 1.25 1.85 1.25 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.45 11.45 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.93.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 12 .5Z"></path>
-                    </svg>
-                    <span class="side-pill-text" data-i18n="common.project">项目主页</span>
-                </button>
-                <button id="update-now-btn" class="update-now-btn" onclick="runProjectUpdate()" type="button" title="一键更新">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
-                        <path d="M21 3v6h-6"></path>
-                    </svg>
-                    <span id="update-now-text" class="update-now-text" data-i18n="update.oneClick">一键更新</span>
-                </button>
-                <div id="project-version-badge" class="project-version-badge" title="点击检测更新" role="button" tabindex="0" onclick="checkForUpdates(true)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();checkForUpdates(true);}">v-</div>
+                <div id="project-version-badge" class="project-version-badge" title="当前版本">v-</div>
             </div>
 
-            <div class="author-box">
-                <span class="dx-letter letter-d">D</span>
-                <span class="dx-letter letter-x">X</span>
-
-                <div class="author-content-wrap">
-                    <div class="author-name-lite">wuli大雄</div>
-                    <div class="social-row-lite">
-                        <a href="https://space.bilibili.com/78652351" target="_blank" class="social-icon-lite">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M17.813 4.653h-.854L15.66 3.053a1.147 1.147 0 00-1.63 0l-1.3 1.6h-1.46L9.97 3.053a1.147 1.147 0 00-1.63 0L7.043 4.653h-.854a3.946 3.946 0 00-3.93 3.934v8.117a3.946 3.946 0 003.93 3.934h11.624a3.946 3.946 0 003.93-3.934V8.587a3.946 3.946 0 00-3.93-3.934zM7.152 13.9a1.465 1.465 0 111.47-1.462 1.465 1.465 0 01-1.47 1.462zm7.696 0a1.465 1.465 0 111.47-1.462 1.465 1.465 0 01-1.47 1.462z" />
-                            </svg>
-                        </a>
-                        <a href="https://www.xiaohongshu.com/user/profile/6433c34c000000001a023538" target="_blank" class="social-icon-lite">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z" />
-                            </svg>
-                        </a>
-                        <a href="https://www.youtube.com/@%E5%A4%A7%E9%9B%84dx" target="_blank" class="social-icon-lite">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                            </svg>
-                        </a>
-                        <a href="https://x.com/dx8152?s=21" target="_blank" class="social-icon-lite">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                            </svg>
-                        </a>
-                    </div>
-                </div>
-            </div>
         </aside>
         <script>
             /* 在侧栏 DOM 解析完后立即把 active 类移到当前页对应的入口，避免首屏先在文生图上闪一下 */
             (function(){
                 try {
                     var pageId = localStorage.getItem('studio_active_page');
-                    if(pageId && pageId !== 'zimage') {
+                    if(pageId && pageId !== 'online') {
                         document.querySelectorAll('.nav-item.active, .side-pill.active').forEach(function(n){
                             n.classList.remove('active');
                         });
@@ -1644,16 +1466,13 @@
         </script>
 
         <main class="stage">
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=2026.06.29.1782700968" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=2026.06.29.1782738858" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=2026.06.29.1782700968" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=2026.06.29.1782738858" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=2026.06.29.1782700968" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.06.29.1782738858" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.06.29.1782738858" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.06.29.1782738858" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2026.06.29.1782738858" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.06.29.1782738858" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=2026.06.30.1783480962" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.07.22.1" scrolling="yes" allowfullscreen></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.06.30.1783480413" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.06.30.1783480413" scrolling="yes"></iframe>
+            <iframe id="frame-works" data-src="/static/works.html?v=2026.07.22.1" scrolling="yes" allowfullscreen></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.06.30.1783480413" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.06.30.1783480413" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -1745,24 +1564,12 @@
     </div>
 
     <script>
-        function generateUUID() {
-            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-                try { return crypto.randomUUID(); } catch (e) { }
-            }
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            });
-        }
-        const CID = localStorage.getItem("client_id") || generateUUID();
-        localStorage.setItem("client_id", CID);
         const ACTIVE_PAGE_KEY = 'studio_active_page';
-        const LOCAL_NAV_COLLAPSED_KEY = 'studio_local_nav_collapsed';
         const SIDEBAR_SETTINGS_COLLAPSED_KEY = 'studio_sidebar_settings_collapsed';
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
-        const DEFAULT_PAGE_ID = 'zimage';
-        const PAGE_IDS = ['zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
-        const LOCAL_PAGE_IDS = ['zimage','enhance','klein','angle'];
+        const SIDEBAR_MANUAL_MODE_KEY = 'studio_sidebar_manual_mode_v1';
+        const DEFAULT_PAGE_ID = 'online';
+        const PAGE_IDS = ['online','ecommerce','gpt-chat','canvas','asset-manager','works','api-settings'];
         const PROJECT_URL = 'https://github.com/hero8152/Infinite-Canvas';
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION' };
         let updateConnectivityResult = null;
@@ -1776,15 +1583,9 @@
             const logo = document.getElementById('sidebarLogoToggle');
             if(!sidebar) return;
             sidebar.classList.toggle('is-pinned', pinned);
-            if(!pinned) {
-                sidebar.classList.add('is-collapsing');
-                window.setTimeout(() => sidebar.classList.remove('is-collapsing'), 360);
-            } else {
-                sidebar.classList.remove('is-collapsing');
-            }
             if(logo) {
                 logo.setAttribute('aria-pressed', pinned ? 'true' : 'false');
-                logo.title = pinned ? '收起导航栏' : '固定导航栏';
+                logo.title = pinned ? '收起导航栏' : '展开导航栏';
             }
             if(!options.skipRemember) localStorage.setItem(SIDEBAR_PINNED_KEY, pinned ? '1' : '0');
         }
@@ -1797,28 +1598,11 @@
         }
 
         function restoreSidebarPinned() {
-            setSidebarPinned(localStorage.getItem(SIDEBAR_PINNED_KEY) === '1', { skipRemember:true });
-        }
-
-        function setLocalNavCollapsed(collapsed, options = {}) {
-            const group = document.getElementById('local-nav-group');
-            const toggle = document.getElementById('local-nav-toggle');
-            if(group) group.classList.toggle('is-collapsed', collapsed);
-            if(toggle) {
-                toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-                toggle.title = collapsed ? '展开本地功能' : '折叠本地功能';
+            if(localStorage.getItem(SIDEBAR_MANUAL_MODE_KEY) !== '1') {
+                localStorage.setItem(SIDEBAR_MANUAL_MODE_KEY, '1');
+                localStorage.setItem(SIDEBAR_PINNED_KEY, '1');
             }
-            if(!options.skipRemember) localStorage.setItem(LOCAL_NAV_COLLAPSED_KEY, collapsed ? '1' : '0');
-        }
-
-        function toggleLocalNav() {
-            const group = document.getElementById('local-nav-group');
-            setLocalNavCollapsed(!group?.classList.contains('is-collapsed'));
-        }
-
-        function restoreLocalNav(id) {
-            const savedCollapsed = localStorage.getItem(LOCAL_NAV_COLLAPSED_KEY) === '1';
-            setLocalNavCollapsed(savedCollapsed && !LOCAL_PAGE_IDS.includes(id), { skipRemember:true });
+            setSidebarPinned(localStorage.getItem(SIDEBAR_PINNED_KEY) !== '0', { skipRemember:true });
         }
 
         function setSidebarSettingsCollapsed(collapsed, options = {}) {
@@ -1839,7 +1623,7 @@
 
         function restoreSidebarSettings(id) {
             const savedCollapsed = localStorage.getItem(SIDEBAR_SETTINGS_COLLAPSED_KEY) !== '0';
-            setSidebarSettingsCollapsed(savedCollapsed && id !== 'comfyui-settings', { skipRemember:true });
+            setSidebarSettingsCollapsed(savedCollapsed, { skipRemember:true });
         }
 
         function resetStudioRootScroll() {
@@ -1863,15 +1647,6 @@
             // sync theme to newly activated iframe
             syncThemeToFrame(target);
             syncLanguageToFrame(target);
-            if(LOCAL_PAGE_IDS.includes(id)) {
-                setLocalNavCollapsed(false, { skipRemember:true });
-            } else {
-                setLocalNavCollapsed(localStorage.getItem(LOCAL_NAV_COLLAPSED_KEY) === '1', { skipRemember:true });
-            }
-            if(id === 'comfyui-settings') {
-                setSidebarSettingsCollapsed(false, { skipRemember:true });
-            }
-            // 切换到画布时通知刷新工作流列表（防止在 comfyui-settings 修改后画布未及时更新）
             if (id === 'canvas' && target.src) {
                 try { target.contentWindow?.postMessage({ type: 'canvas-focus' }, '*'); } catch(e) {}
             }
@@ -1879,7 +1654,7 @@
         }
 
         function forwardStudioApiChange(data) {
-            if(!data || !['providers-changed','workflows-changed','comfy-instances-changed'].includes(data.type)) return;
+            if(!data || data.type !== 'providers-changed') return;
             document.querySelectorAll('iframe').forEach(iframe => {
                 try {
                     if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage(data, '*');
@@ -1900,7 +1675,6 @@
         function restoreActivePage() {
             restoreSidebarPinned();
             const id = PAGE_IDS.includes(localStorage.getItem(ACTIVE_PAGE_KEY)) ? localStorage.getItem(ACTIVE_PAGE_KEY) : DEFAULT_PAGE_ID;
-            restoreLocalNav(id);
             restoreSidebarSettings(id);
             const trigger = document.querySelector(`[onclick*="'${id}'"],[onclick*='"${id}"']`);
             switchUI(trigger, id, { skipRemember:true });
@@ -1908,33 +1682,9 @@
         }
         document.addEventListener('DOMContentLoaded', restoreActivePage, { once:true });
 
-        async function syncStatus() {
-            try {
-                const res = await fetch(`/api/queue_status?client_id=${CID}`);
-                const data = await res.json();
-                const monitor = document.getElementById('nano-monitor');
-                const queueVal = document.getElementById('queue-val');
-                const logoDot = document.getElementById('logo-dot');
-                const total = data.total || 0;
-                const pos = data.position || 0;
-                if (pos > 0) {
-                    monitor?.classList.add('is-busy');
-                    if (queueVal) queueVal.innerText = `${pos}/${total}`;
-                    if (logoDot) logoDot.style.backgroundColor = '#3b82f6';
-                } else {
-                    monitor?.classList.remove('is-busy');
-                    if (queueVal) queueVal.innerText = total > 0 ? total : '0';
-                    if (logoDot) logoDot.style.backgroundColor = 'var(--text)';
-                }
-            } catch (e) { }
-        }
-
         const host = window.location.host;
         if (host) {
-            const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-            const ws = new WebSocket(`${protocol}://${host}/ws/stats?client_id=${CID}`);
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+            const handleRealtimeMessage = (data) => {
                 if (data.type === 'stats') {
                     const ov = document.getElementById('online-val');
                     if (ov) ov.innerText = data.online_count;
@@ -1952,9 +1702,13 @@
                     document.querySelectorAll('iframe').forEach(iframe => {
                         if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage(data, '*');
                     });
+                } else if (data.type === 'entity.changed') {
+                    document.querySelectorAll('iframe').forEach(iframe => {
+                        if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage(data, '*');
+                    });
                 }
             };
-            setInterval(syncStatus, 2000);
+            window.addEventListener('canvas-realtime-message', event => handleRealtimeMessage(event.detail || {}));
         }
 
         // --- 夜间模式 ---

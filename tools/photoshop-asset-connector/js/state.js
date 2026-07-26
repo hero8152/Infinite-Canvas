@@ -3,12 +3,14 @@ window.DX = window.DX || {};
 
 DX.LS = {
   host: 'daxiong.assets.host',
+  token: 'daxiong.assets.token',
   source: 'daxiong.assets.source',
   exportLayer: 'daxiong.assets.exportLayer',
 };
 
 DX.state = {
   host: '',
+  token: '',
   connected: false,
   tab: 'assets',                 // assets | generate | settings
   source: 'assets',              // assets | canvas | local

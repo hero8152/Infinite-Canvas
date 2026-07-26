@@ -324,6 +324,13 @@ body.show-volcengine .api-key-label { display:inline-flex !important; }
 .runninghub-config-block[hidden] { display:none !important; }
 .runninghub-config-block { display:none; gap:14px; }
 body.show-runninghub .runninghub-config-block { display:flex; }
+body.show-local-vision .api-image-model-block,
+body.show-local-vision .api-video-model-block,
+body.show-local-vision .image-request-mode-wrap,
+body.show-local-vision .image-edit-route-wrap,
+body.show-local-vision #probeAsyncBtn { display:none !important; }
+body.show-local-vision .model-grid { grid-template-columns:minmax(0,760px); }
+body.show-local-vision .api-chat-model-block { border-color:color-mix(in srgb,var(--accent) 28%,var(--line)); box-shadow:0 14px 34px rgba(15,23,42,.06); }
 .rh-paste-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; }
 .rh-paste-input { width:100%; height:40px; border:1px solid var(--line); border-radius:11px; background:var(--panel); color:var(--text); outline:none; padding:0 12px; font-size:13px; font-weight:700; }
 .rh-paste-input:focus { border-color:var(--text); }

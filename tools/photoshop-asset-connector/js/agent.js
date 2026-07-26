@@ -127,12 +127,13 @@
     els.messages.innerHTML = a.msgs.map((m) => {
       const imgs = (m.images || []).map((u) =>
         `<div class="agent-imgtile">
-          <img src="${escapeHtml(net.displayUrl(u, 320))}" alt="">
+          <img data-auth-src="${escapeHtml(net.displayUrl(u, 320))}" alt="">
           <button class="agent-dl" type="button" data-addurl="${escapeHtml(u)}" title="下载到图层">下载</button>
         </div>`).join('');
       const text = m.text ? `<div class="agent-text">${escapeHtml(m.text)}</div>` : '';
       return `<div class="agent-msg ${m.role}">${text}${imgs}</div>`;
     }).join('');
+    net.hydrateImages(els.messages);
     els.messages.querySelectorAll('[data-addurl]').forEach((b) => b.addEventListener('click', async () => {
       const u = b.getAttribute('data-addurl');
       b.disabled = true;
@@ -147,7 +148,8 @@
   // 待发送参考图（缩略图 chip）
   function renderAttach() {
     els.attach.innerHTML = a.attachments.map((r, i) =>
-      `<div class="attach-chip"><img src="${escapeHtml(net.displayUrl(r.url, 120))}" alt=""><div class="ref-x" data-ax="${i}">×</div></div>`).join('');
+      `<div class="attach-chip"><img data-auth-src="${escapeHtml(net.displayUrl(r.url, 120))}" alt=""><div class="ref-x" data-ax="${i}">×</div></div>`).join('');
+    net.hydrateImages(els.attach);
     els.attach.querySelectorAll('[data-ax]').forEach((x) => x.addEventListener('click', () => { a.attachments.splice(Number(x.getAttribute('data-ax')), 1); renderAttach(); }));
   }
   async function attachCurrent() {

@@ -1,5 +1,6 @@
 const els = {
   server: document.getElementById('serverInput'),
+  token: document.getElementById('tokenInput'),
   folder: document.getElementById('folderInput'),
   classify: document.getElementById('classifyInput'),
   autoScroll: document.getElementById('autoScrollInput'),
@@ -40,14 +41,19 @@ const SIDEPANEL_PREVIEW_POSITION_STORAGE_KEY = 'webPreviewPositionSidePanel';
 const isSidePanelView = location.pathname.endsWith('/sidepanel.html');
 function apiBase(){
   let value = String(els.server.value || '').trim();
-  if(!value) value = '127.0.0.1:8767';
+  if(!value) value = '127.0.0.1:3000';
   if(!/^https?:\/\//i.test(value)) value = `http://${value}`;
   try {
     const parsed = new URL(value);
     return `${parsed.protocol}//${parsed.host}`;
   } catch {
-    return 'http://127.0.0.1:8767';
+    return 'http://127.0.0.1:3000';
   }
+}
+
+function authHeaders(extra={}){
+  const token = String(els.token?.value || '').trim();
+  return token ? {...extra, Authorization: `Bearer ${token}`} : {...extra};
 }
 
 function setStatus(text){
@@ -531,7 +537,8 @@ async function saveSettings(){
 
 function getSettingsPayload(){
   return {
-    server: els.server.value || '127.0.0.1:8767',
+    server: els.server.value || '127.0.0.1:3000',
+    accessToken: els.token?.value || '',
     folder: els.folder.value || '网页采集',
     classify: Boolean(els.classify.checked),
     autoScroll: Boolean(els.autoScroll.checked),
@@ -544,8 +551,9 @@ function getSettingsPayload(){
 }
 
 async function loadSettings(){
-  const data = await chrome.storage.local.get(['server', 'port', 'folder', 'classify', 'autoScroll', 'filterLowRes', 'provider', 'model', 'prompt', 'settingsCollapsed']);
-  els.server.value = data.server || (data.port ? `127.0.0.1:${data.port}` : '127.0.0.1:8767');
+  const data = await chrome.storage.local.get(['server', 'port', 'accessToken', 'folder', 'classify', 'autoScroll', 'filterLowRes', 'provider', 'model', 'prompt', 'settingsCollapsed']);
+  els.server.value = data.server || (data.port ? `127.0.0.1:${data.port}` : '127.0.0.1:3000');
+  if(els.token) els.token.value = data.accessToken || '';
   els.folder.value = data.folder || '网页采集';
   els.classify.checked = data.classify !== false;
   els.autoScroll.checked = Boolean(data.autoScroll);
@@ -558,16 +566,31 @@ async function loadSettings(){
 }
 
 async function loadProviders(){
-  const res = await fetch(`${apiBase()}/api/providers`);
+  const res = await fetch(`${apiBase()}/api/providers`, {headers: authHeaders()});
   if(!res.ok) throw new Error(await res.text());
   const data = await res.json();
   providers = Array.isArray(data.providers) ? data.providers : [];
   renderProviders();
 }
 
+async function pairIfNeeded(){
+  const value = String(els.token?.value || '').trim();
+  if(!/^\d{6}$/.test(value)) return;
+  const res = await fetch(`${apiBase()}/api/auth/pair`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({code: value, name: 'Chrome 素材导入插件', client_type: 'chrome'}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok || !data.access_token) throw new Error(data.detail || '配对失败');
+  els.token.value = data.access_token;
+  await saveSettings();
+}
+
 async function testConnection(){
   await saveSettings();
   setStatus('正在连接本地服务...');
+  await pairIfNeeded();
   await loadProviders();
   setStatus('连接成功，可以扫描当前页面图片。');
 }
@@ -1090,7 +1113,7 @@ async function importSelected(){
   };
   const res = await fetch(`${apiBase()}/api/local-assets/import-urls`, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: authHeaders({'Content-Type': 'application/json'}),
     body: JSON.stringify(body),
   });
   if(!res.ok) throw new Error(await res.text());
@@ -1393,7 +1416,7 @@ els.filterLowRes?.addEventListener('change', () => {
   renderGrid();
   saveSettings();
 });
-[els.server, els.folder, els.classify, els.model, els.prompt].forEach(el => {
+[els.server, els.token, els.folder, els.classify, els.model, els.prompt].filter(Boolean).forEach(el => {
   el.addEventListener('change', () => {
     if(el === els.model) savedSettings.model = els.model.value || '';
     updateSettingsUi();

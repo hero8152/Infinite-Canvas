@@ -1,7 +1,6 @@
 /* 生成 Tab：顶部模式切换。
  *  - API平台：选平台 + 模型 → 参数按后端 /api/image-params 动态渲染 → /api/canvas-image-tasks 轮询。
  *  - RunningHub：选工作流 → 工作流暴露字段(cfg.fields enabled) → /api/runninghub/workflow-submit 轮询 /query。
- *  - ComfyUI：选工作流 → config.fields → /api/canvas-comfy-tasks 提交后台任务并轮询。
  * 结果自动置入图层。参数全部从后端拉，不写死。 */
 (function () {
   const net = DX.net;
@@ -17,8 +16,6 @@
     rhBar: $('genRhBar'),
     rhWorkflow: $('genRhWorkflow'),
     rhWallet: $('genRhWallet'),
-    comfyBar: $('genComfyBar'),
-    comfyWorkflow: $('genComfyWorkflow'),
     prompt: $('genPrompt'),
     params: $('genParams'),
     refsSection: $('genRefsSection'),
@@ -29,7 +26,7 @@
   };
 
   const g = {
-    mode: 'api',           // api | ms | rh | comfy
+    mode: 'api',           // api | ms | rh
     providersLoaded: false,
     apiProviders: [],
     msProvider: null,
@@ -42,9 +39,6 @@
     results: [],
     rhWorkflows: [],
     rhWorkflowId: '',
-    comfyWorkflows: [],
-    comfyName: '',
-    comfyConfig: null,
     jobs: 0,               // 进行中的生成任务数（支持队列/并行）
   };
 
@@ -89,7 +83,7 @@
     modeMem[g.mode] = {
       fields: g.fields, values: g.values, imgPreview: g.imgPreview, randomActive: g.randomActive,
       refs: g.refs.slice(), results: g.results.slice(),
-      rhWorkflowId: g.rhWorkflowId, comfyName: g.comfyName, comfyConfig: g.comfyConfig,
+      rhWorkflowId: g.rhWorkflowId,
       providerVal: DX.ui.pickerValue(els.provider), modelVal: DX.ui.pickerValue(els.model),
     };
   }
@@ -101,7 +95,6 @@
     els.apiBar.classList.toggle('hidden', !apiLike);
     els.provider.classList.toggle('hidden', mode !== 'api');
     els.rhBar.classList.toggle('hidden', mode !== 'rh');
-    els.comfyBar.classList.toggle('hidden', mode !== 'comfy');
     els.prompt.classList.toggle('hidden', !apiLike);
     els.refsSection.classList.toggle('hidden', !apiLike);
     const mem = modeMem[mode];
@@ -110,14 +103,11 @@
     g.refs = (apiLike && mem && mem.refs) ? mem.refs.slice() : [];
     g.results = (mem && mem.results) ? mem.results.slice() : [];
     g.rhWorkflowId = mem ? mem.rhWorkflowId : '';
-    g.comfyName = mem ? mem.comfyName : '';
-    g.comfyConfig = mem ? mem.comfyConfig : null;
     renderResults();
     if (apiLike) renderRefs();
     if (mode === 'api') loadApi(mem);
     else if (mode === 'ms') loadMs(mem);
     else if (mode === 'rh') loadRhWorkflows(mem);
-    else if (mode === 'comfy') loadComfyWorkflows(mem);
     updateRun();
   }
 
@@ -270,49 +260,6 @@
     updateRun();
   }
 
-  /* ---------- ComfyUI ---------- */
-  async function loadComfyWorkflows(mem) {
-    setMsg('正在加载 ComfyUI 工作流 …');
-    try {
-      const data = await net.apiGet('/api/workflows');
-      g.comfyWorkflows = data.workflows || [];
-      DX.ui.fillPicker(els.comfyWorkflow, [{ value: '', label: '请选择工作流' }].concat(g.comfyWorkflows.map((w) => ({ value: w.name, label: w.title || w.name }))), mem && mem.comfyName);
-      if (mem && mem.comfyName && mem.fields) {
-        g.comfyName = mem.comfyName; g.comfyConfig = mem.comfyConfig; g.fields = mem.fields; g.values = mem.values; g.imgPreview = mem.imgPreview || {};
-        renderParams(); setMsg('');
-      } else {
-        g.comfyName = '';
-        setMsg(g.comfyWorkflows.length ? '请选择一个工作流。' : '没有可用的 ComfyUI 工作流，请先在网页端上传。', g.comfyWorkflows.length ? '' : 'err');
-      }
-    } catch (err) { setMsg(`加载工作流失败：${err.message || err}`, 'err'); }
-    updateRun();
-  }
-  async function loadComfyFields() {
-    const name = DX.ui.pickerValue(els.comfyWorkflow);
-    g.comfyName = name; g.comfyConfig = null;
-    g.fields = []; g.values = {}; g.imgPreview = {}; g.randomActive = {};
-    if (!name) { els.params.innerHTML = ''; updateRun(); return; }
-    els.params.innerHTML = '<div class="gen-label">正在加载工作流参数 …</div>';
-    try {
-      const data = await net.apiGet(`/api/workflows/${encodeURIComponent(name)}`);
-      g.comfyConfig = data.config || { title: name, fields: [] };
-      g.fields = (g.comfyConfig.fields || []).map((f) => {
-        const opts = (f.options || []).filter((o) => o != null && String(o) !== '');
-        const base = { key: f.id, label: f.name || f.id, name: f.name, input: f.input, comfy: { id: f.id }, default: f.default, min: f.min, max: f.max, step: f.step, random_enabled: f.random_enabled === true };
-        // 启发式识别图片输入（LoadImage 的 image 输入等）→ 给上传按钮
-        if (/(^|[^a-z])(image|img|mask|photo)([^a-z]|$)/i.test(`${f.input || ''} ${f.name || ''} ${f.id || ''}`)) return Object.assign(base, { type: 'image' });
-        if (f.type === 'dropdown' && opts.length) return Object.assign(base, { type: 'dropdown', options: opts.map((o) => ({ value: String(o), label: String(o) })), default: f.default != null ? String(f.default) : String(opts[0]) });
-        if (f.type === 'boolean') return Object.assign(base, { type: 'bool', default: !!f.default });
-        if (f.type === 'number' || f.type === 'slider') return Object.assign(base, { type: 'int' });
-        return Object.assign(base, { type: 'textarea' });
-      }).filter((f) => !isHiddenField(f));
-      initValues();
-      renderParams();
-      setMsg(g.fields.length ? '' : '该工作流未配置可填参数，可直接生成。');
-    } catch (err) { g.fields = []; els.params.innerHTML = ''; setMsg(`加载工作流参数失败：${err.message || err}`, 'err'); }
-    updateRun();
-  }
-
   /* ---------- 参数渲染（通用） ---------- */
   function initValues() {
     g.values = {};
@@ -449,7 +396,7 @@
     });
   }
 
-  // RH/Comfy 的图片字段：导出当前图层 → 上传 → 设为该字段输入
+  // RH 图片字段：导出当前图层 → 上传 → 设为该字段输入
   async function setImageField(fi, btn) {
     if (!ps.hasDocument()) { setMsg('没有打开的文档。', 'err'); return; }
     const f = g.fields[fi];
@@ -464,11 +411,6 @@
         const fileName = res.data && res.data.fileName;
         if (!fileName) throw new Error('RunningHub 未返回 fileName');
         g.values[f.key] = fileName;
-      } else if (g.mode === 'comfy') {
-        // ComfyUI 需要图片在其 input 目录，用 base64 传给 comfy 拿回文件名
-        const res = await net.apiSend('POST', '/api/comfyui/upload-base64', { data: net.toBase64(buffer), name, content_type: 'image/png' });
-        if (!res.name) throw new Error('ComfyUI 未返回文件名');
-        g.values[f.key] = res.name;
       } else {
         g.values[f.key] = url;
       }
@@ -569,14 +511,12 @@
     let ok = state.connected;
     if (g.mode === 'api' || g.mode === 'ms') ok = ok && currentProvider() && DX.ui.pickerValue(els.model) && els.prompt.value.trim();
     else if (g.mode === 'rh') ok = ok && g.rhWorkflowId;
-    else if (g.mode === 'comfy') ok = ok && g.comfyName;
     els.run.disabled = !ok;
   }
   function run() {
     let p;
     if (g.mode === 'api' || g.mode === 'ms') p = runApi();
     else if (g.mode === 'rh') p = runRh();
-    else if (g.mode === 'comfy') p = runComfy();
     if (p && p.catch) p.catch((err) => setMsg(`生成失败：${err.message || err}`, 'err'));
   }
   async function runApi() {
@@ -599,53 +539,6 @@
     if (!taskId) throw new Error('未返回 taskId');
     pollRh(taskId);
   }
-  async function runComfy() {
-    applyRandomSeeds();
-    const cfg = g.comfyConfig || { fields: [] };
-    const name = g.comfyName;
-    jobStart();
-    const params = {};
-    for (const f of cfg.fields || []) {
-      if (!f.node || !f.input) continue;
-      if (!(f.id in g.values)) continue;
-      let value = g.values[f.id];
-      if (f.type === 'number' || f.type === 'slider') {
-        const step = Number(f.step);
-        const n = Number(value);
-        if (Number.isFinite(n)) value = Number.isFinite(step) && step < 1 ? n : Math.round(n);
-      } else if (f.type === 'boolean') {
-        value = Boolean(value);
-      } else if (f.type === 'dropdown' && typeof value === 'string') {
-        const s = value.trim();
-        if (s && /^-?\d+(?:\.\d+)?(?:e-?\d+)?$/i.test(s)) value = Number(s);
-      }
-      params[f.node] = params[f.node] || {};
-      params[f.node][f.input] = value;
-    }
-    (async () => {
-      try {
-        const task = await net.apiSend('POST', '/api/canvas-comfy-tasks', { workflow_json: name, params, type: 'workflow-test', client_id: '' });
-        if (!task.task_id) throw new Error('未返回 ComfyUI 任务 ID');
-        const res = await waitComfyTask(task.task_id);
-        const items = appendResults(res.images || res.outputs || [], 'comfy');
-        const placed = await placeResults(items);
-        jobEnd(items.length ? `已生成并添加 ${placed} 张到图层。` : '完成，但没有图片。', items.length ? 'ok' : 'err');
-      } catch (err) { jobEnd(`生成失败：${err.message || err}`, 'err'); }
-    })();
-  }
-
-  async function waitComfyTask(taskId) {
-    let n = 0;
-    while (true) {
-      n += 1;
-      if (n > 900) throw new Error('ComfyUI 生成超时，请稍后查询或重试。');
-      const data = await net.apiGet(`/api/canvas-comfy-tasks/${encodeURIComponent(taskId)}`);
-      if (data.status === 'succeeded') return data.result || {};
-      if (data.status === 'failed') throw new Error(data.error || 'ComfyUI 生成失败');
-      await new Promise((resolve) => setTimeout(resolve, 1600));
-    }
-  }
-
   function pollCanvas(taskId) {
     jobStart();
     let n = 0;
@@ -689,7 +582,6 @@
   DX.ui.onPick(els.provider, () => { renderModels(); loadSchema(); });
   DX.ui.onPick(els.model, () => loadSchema());
   DX.ui.onPick(els.rhWorkflow, loadRhFields);
-  DX.ui.onPick(els.comfyWorkflow, loadComfyFields);
   els.prompt.addEventListener('input', updateRun);
   els.run.addEventListener('click', run);
 
@@ -698,11 +590,11 @@
     reset() {
       g.providersLoaded = false; g.apiProviders = []; g.msProvider = null;
       g.fields = []; g.values = {}; g.imgPreview = {}; g.randomActive = {};
-      g.rhWorkflows = []; g.rhWorkflowId = ''; g.comfyWorkflows = []; g.comfyName = ''; g.comfyConfig = null;
+      g.rhWorkflows = []; g.rhWorkflowId = '';
       g.refs = []; g.results = []; g.jobs = 0;
       for (const k in modeMem) delete modeMem[k];   // 换后端清空模式记忆，避免串台
       DX.ui.fillPicker(els.provider, []); DX.ui.fillPicker(els.model, []);
-      DX.ui.fillPicker(els.rhWorkflow, []); DX.ui.fillPicker(els.comfyWorkflow, []);
+      DX.ui.fillPicker(els.rhWorkflow, []);
       els.params.innerHTML = '';
       updateRun();
     },

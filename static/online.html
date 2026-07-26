@@ -16,25 +16,69 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.06.29.1782696751"></script>
-    <script src="/static/vendor/js/lucide.js?v=2026.06.29.1782696749"></script>
-    <script src="/static/js/theme.js?v=2026.06.29.1782696718"></script>
-    <script src="/static/js/i18n.js?v=2026.06.29.1782699985"></script>
-    <script src="/static/js/image-preview.js?v=2026.06.29.1782696713"></script>
-    <script src="/static/js/history-bulk-manager.js?v=2026.06.29.1782696703"></script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/theme.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
+    <script src="/static/js/image-preview.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/history-bulk-manager.js?v=2026.06.30.1782781876"></script>
     <style>
-        @import url('/static/vendor/css/fonts.css?v=2026.06.29.1782696732');
+        @import url('/static/vendor/css/fonts.css?v=2026.06.30.1782781876');
         :root { --accent:#111827; --bg:#f9fafb; --card:#fff; --easing:cubic-bezier(0.4,0,0.2,1); }
         body { background:var(--bg); font-family:'Inter',-apple-system,sans-serif; color:var(--accent); -webkit-font-smoothing:antialiased; }
         .container-box { max-width:1280px; margin:0 auto; padding:0 40px; margin-top:50px; }
         .nano-input { background:var(--card); border:1px solid #eef0f2; transition:all .3s var(--easing); }
         .nano-input:focus { border-color:#000; box-shadow:0 0 0 1px #000; }
-        .upload-item { background:var(--card); border:1px dashed #e2e8f0; transition:all .4s var(--easing); position:relative; overflow:hidden; }
+        .upload-item { background:var(--card); border:1px dashed #e2e8f0; transition:transform .35s var(--easing), border-color .35s var(--easing), box-shadow .35s var(--easing), opacity .25s var(--easing); position:relative; overflow:hidden; transform-origin:center; }
         .upload-item:hover,.upload-item.drag-over { border-color:#000; transform:translateY(-2px); }
+        .upload-item.ref-dragging { opacity:.58; transform:scale(.98); box-shadow:none; }
+        .upload-item.ref-drop-target { border-color:#111827; box-shadow:0 18px 40px rgba(15,23,42,.1); transform:translateY(-4px) scale(1.02); }
+        .upload-item.ref-drop-target::after { content:''; position:absolute; inset:10px; border:1px dashed rgba(17,24,39,.55); border-radius:18px; animation:refDropPulse .95s ease-in-out infinite; pointer-events:none; }
+        .upload-item.ref-main-promote { animation:refMainPromote .42s var(--easing); }
+        .upload-item.ref-selection-mode { cursor:pointer; }
+        .upload-item.ref-selected { border-color:#111827; box-shadow:0 18px 34px rgba(15,23,42,.12); transform:translateY(-2px); }
+        .upload-item.ref-selected::before { content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(17,24,39,.02), rgba(17,24,39,.16)); pointer-events:none; z-index:1; }
+        .reference-toast { position:fixed; right:24px; bottom:104px; z-index:45; max-width:min(360px, calc(100vw - 32px)); padding:12px 16px; border-radius:18px; background:rgba(17,24,39,.96); color:#fff; box-shadow:0 18px 42px rgba(15,23,42,.24); font-size:10px; font-weight:900; letter-spacing:.22em; text-transform:uppercase; opacity:0; transform:translateY(8px); transition:opacity .28s var(--easing), transform .28s var(--easing), background .28s var(--easing), box-shadow .28s var(--easing); pointer-events:none; display:flex; align-items:center; gap:9px; line-height:1.35; }
+        .reference-toast.toast-success { background:rgba(20,83,45,.96); box-shadow:0 18px 42px rgba(20,83,45,.24); }
+        .reference-toast.toast-danger { background:rgba(127,29,29,.96); box-shadow:0 18px 42px rgba(127,29,29,.24); }
+        .reference-toast-icon { flex:0 0 18px; width:18px; height:18px; border-radius:999px; background:rgba(255,255,255,.18); display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; letter-spacing:0; }
+        .reference-toast-message { min-width:0; overflow-wrap:anywhere; }
+        .reference-toast.show { opacity:1; transform:translateY(0); }
         .preview-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; animation:fadeIn .5s var(--easing); }
         .glass-btn { background:#111827; transition:all .3s var(--easing); }
         .glass-btn:hover { background:#000; transform:translateY(-1px); box-shadow:0 12px 24px rgba(0,0,0,.1); }
+        .online-result-column { align-self:start; }
+        #resultBox { height:clamp(500px, calc(100vh - 220px), 640px); }
+        @supports (height:100dvh) {
+            #resultBox { height:clamp(500px, calc(100dvh - 220px), 640px); }
+        }
+        #resultBox #outputImg { position:absolute; inset:0; width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; object-position:center; box-sizing:border-box; }
         .result-frame { background:#fff; border-radius:32px; border:1px solid #f1f5f9; box-shadow:0 2px 15px rgba(0,0,0,.02); }
+        .result-frame.generating #outputImg:not(.hidden) { opacity:.3; filter:saturate(.8) blur(1px); transform:scale(.99); transition:opacity .28s var(--easing), filter .28s var(--easing), transform .28s var(--easing); }
+        .result-frame.generating.generating-with-preview #outputImg:not(.hidden) { opacity:1; filter:none; transform:none; }
+        .online-generating-overlay { position:absolute; inset:0; z-index:8; display:flex; align-items:center; justify-content:center; padding:32px; background:rgba(255,255,255,.72); backdrop-filter:blur(10px) saturate(1.05); }
+        .online-generating-overlay.hidden { display:none; }
+        .online-generating-panel { width:min(360px, 88%); display:flex; flex-direction:column; align-items:center; text-align:center; gap:12px; color:#111827; }
+        .online-generating-spinner { width:42px; height:42px; border:2px solid rgba(17,24,39,.16); border-top-color:#111827; border-radius:999px; animation:spin .85s linear infinite; }
+        .online-generating-status { font-size:10px; font-weight:900; letter-spacing:.42em; text-transform:uppercase; }
+        .online-generating-time { font-size:28px; font-weight:900; letter-spacing:0; line-height:1; font-variant-numeric:tabular-nums; }
+        .online-generating-prompt { max-width:100%; color:#64748b; font-size:11px; font-weight:800; line-height:1.45; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+        .online-generating-overlay.has-preview { inset:auto auto 16px 16px; width:min(340px, calc(100% - 32px)); min-height:0; justify-content:flex-start; padding:12px 14px; border:1px solid rgba(226,232,240,.92); border-radius:20px; background:rgba(255,255,255,.92); box-shadow:0 18px 42px rgba(15,23,42,.16); pointer-events:none; }
+        .result-frame.with-history-rail .online-generating-overlay.has-preview { bottom:118px; }
+        .online-generating-overlay.has-preview .online-generating-panel { width:100%; display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:center; gap:6px 10px; text-align:left; }
+        .online-generating-overlay.has-preview .online-generating-spinner { width:26px; height:26px; grid-row:1 / span 2; }
+        .online-generating-overlay.has-preview .online-generating-status { min-width:0; letter-spacing:.18em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .online-generating-overlay.has-preview .online-generating-time { font-size:14px; white-space:nowrap; }
+        .online-generating-overlay.has-preview .online-generating-prompt { grid-column:2 / 4; font-size:10px; -webkit-line-clamp:1; }
+        .online-generation-meta { min-width:0; display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; color:#475569; }
+        .online-generation-meta.hidden { display:none; }
+        .online-generation-meta-chip { min-width:0; max-width:100%; display:inline-flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid #e2e8f0; border-radius:999px; background:#f8fafc; color:#334155; font-size:10px; font-weight:800; line-height:1.25; }
+        .online-generation-meta-label { flex:0 0 auto; color:#94a3b8; font-size:8px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; white-space:nowrap; }
+        .online-generation-meta-value { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .online-generation-meta-chip.params { flex:1 1 220px; border-radius:14px; }
+        .online-generation-meta-chip.params .online-generation-meta-value { white-space:normal; overflow-wrap:anywhere; }
+        .online-preview-meta { position:absolute; z-index:7; top:18px; left:18px; right:86px; max-width:calc(100% - 116px); margin-top:0; padding:8px; border:1px solid rgba(226,232,240,.9); border-radius:18px; background:rgba(255,255,255,.9); box-shadow:0 14px 32px rgba(15,23,42,.12); backdrop-filter:blur(12px) saturate(1.05); -webkit-backdrop-filter:blur(12px) saturate(1.05); pointer-events:none; }
+        .online-preview-meta .online-generation-meta-chip { background:rgba(255,255,255,.82); }
         .tool-panel { background:#fff; border:1px solid #edf0f3; border-radius:24px; padding:12px; display:flex; flex-direction:column; gap:10px; }
         .model-pill { background:#f8fafc; border:1px solid #edf2f7; border-radius:999px; padding:3px; display:grid; grid-template-columns:1fr 1fr; gap:2px; }
         .model-option { border-radius:999px; height:34px; display:flex; align-items:center; justify-content:center; gap:6px; color:#64748b; font-size:10px; font-weight:600; letter-spacing:.02em; transition:all .25s var(--easing); }
@@ -61,14 +105,268 @@
         .masonry-item { aspect-ratio:1/1; border-radius:24px; overflow:hidden; background:#fff; border:1px solid #f1f5f9; transition:all .5s var(--easing); }
         .masonry-item:hover { transform:translateY(-6px); box-shadow:0 20px 40px rgba(0,0,0,.08); }
         .gallery-lightbox { background:rgba(255,255,255,.99); backdrop-filter:blur(22px) saturate(1.05); }
+        #lightbox { overflow:hidden; padding:clamp(16px, 3vw, 32px); }
+        #lightbox .online-lightbox-shell { width:min(1280px, 92vw); max-width:100%; height:min(920px, calc(100vh - 64px)); display:grid; grid-template-rows:minmax(0, 1fr) auto; gap:clamp(14px, 2.4vh, 28px); align-items:stretch; }
+        @supports (height:100dvh) {
+            #lightbox .online-lightbox-shell { height:min(920px, calc(100dvh - 64px)); }
+        }
+        #lightboxFrame { width:100%; height:100%; min-height:0; max-width:100%; max-height:100%; border-radius:24px; }
+        #lightboxImg { width:100%; height:100%; object-fit:contain; }
+        #lightboxCard { margin-top:0 !important; max-height:min(220px, 32vh); overflow:hidden; }
+        #lightboxPrompt { max-height:min(84px, 12vh); }
+        #lightboxFrame.lightbox-slide-animate { animation:lightboxFrameSlide .34s var(--easing) both; }
+        #lightboxFrame.lightbox-slide-next { --lightbox-slide-offset:34px; }
+        #lightboxFrame.lightbox-slide-prev { --lightbox-slide-offset:-34px; }
+        #lightboxFrame.lightbox-slide-soft { --lightbox-slide-offset:0px; }
+        #lightboxFrame.lightbox-slide-animate #lightboxImg { animation:lightboxImageFade .34s var(--easing) both; }
+        .result-frame.with-preview-meta #outputImg:not(.hidden) { padding-top:92px; }
+        .result-frame.with-history-rail #outputImg:not(.hidden) { padding-bottom:118px; }
+        .result-frame.preview-slide-animate #outputImg:not(.hidden) { animation:onlinePreviewSlide .32s var(--easing) both; }
+        .result-frame.preview-slide-next { --online-preview-slide-offset:24px; }
+        .result-frame.preview-slide-prev { --online-preview-slide-offset:-24px; }
+        .result-frame.preview-slide-soft { --online-preview-slide-offset:0px; }
+        .online-history-rail { position:absolute; left:16px; right:16px; bottom:16px; z-index:6; height:86px; display:grid; grid-template-columns:36px minmax(0,1fr) 36px; gap:8px; align-items:center; padding:8px; border:1px solid rgba(226,232,240,.9); border-radius:22px; background:rgba(255,255,255,.9); box-shadow:0 18px 40px rgba(15,23,42,.14); backdrop-filter:blur(14px) saturate(1.05); -webkit-backdrop-filter:blur(14px) saturate(1.05); }
+        .online-history-rail.hidden { display:none; }
+        .online-history-rail-btn { width:36px; height:36px; border-radius:14px; background:#111827; color:#fff; display:flex; align-items:center; justify-content:center; transition:transform .22s var(--easing), background .22s var(--easing); }
+        .online-history-rail-btn:hover { transform:translateY(-1px); background:#000; }
+        .online-history-rail-track { min-width:0; height:70px; display:flex; gap:8px; align-items:center; overflow-x:auto; scroll-snap-type:x proximity; scrollbar-width:none; }
+        .online-history-rail-track::-webkit-scrollbar { display:none; }
+        .online-history-thumb { flex:0 0 64px; width:64px; height:64px; border:2px solid transparent; border-radius:16px; padding:0; overflow:hidden; background:#f8fafc; scroll-snap-align:start; cursor:pointer; transition:border-color .2s var(--easing), transform .2s var(--easing), box-shadow .2s var(--easing); }
+        .online-history-thumb:hover { transform:translateY(-2px); box-shadow:0 10px 22px rgba(15,23,42,.16); }
+        .online-history-thumb.active { border-color:#111827; box-shadow:0 0 0 3px rgba(17,24,39,.1); }
+        .online-history-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+        .online-task-dock { position:fixed; right:24px; bottom:24px; z-index:44; width:min(380px, calc(100vw - 32px)); display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:none; }
+        .online-task-toggle { pointer-events:auto; min-height:54px; border:1px solid rgba(15,23,42,.08); background:rgba(255,255,255,.96); color:#111827; border-radius:20px; padding:0 14px; box-shadow:0 18px 42px rgba(15,23,42,.16); display:flex; align-items:center; gap:10px; font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.18em; transition:transform .28s var(--easing), box-shadow .28s var(--easing); }
+        .online-task-toggle:hover { transform:translateY(-2px); box-shadow:0 22px 48px rgba(15,23,42,.2); }
+        .online-task-badge { min-width:24px; height:24px; padding:0 7px; border-radius:999px; background:#111827; color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; letter-spacing:0; }
+        .online-task-panel { pointer-events:auto; width:100%; max-height:min(520px, calc(100vh - 132px)); background:rgba(255,255,255,.98); border:1px solid rgba(226,232,240,.9); border-radius:24px; box-shadow:0 24px 60px rgba(15,23,42,.18); overflow:hidden; transform-origin:bottom right; transition:opacity .22s var(--easing), transform .22s var(--easing); }
+        .online-task-dock:not(.expanded) .online-task-panel { opacity:0; transform:translateY(8px) scale(.98); pointer-events:none; display:none; }
+        .online-task-head { height:58px; padding:0 16px; border-bottom:1px solid #f1f5f9; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        .online-task-title { display:flex; align-items:center; gap:8px; min-width:0; font-size:10px; font-weight:900; letter-spacing:.2em; text-transform:uppercase; }
+        .online-task-count { color:#94a3b8; font-size:9px; font-weight:900; letter-spacing:.14em; text-transform:uppercase; white-space:nowrap; }
+        .online-task-list { max-height:450px; overflow:auto; padding:10px; display:flex; flex-direction:column; gap:8px; }
+        .online-task-empty { min-height:110px; display:flex; align-items:center; justify-content:center; color:#cbd5e1; font-size:10px; font-weight:900; letter-spacing:.18em; text-transform:uppercase; }
+        .online-task-item { border:1px solid #edf2f7; border-radius:18px; background:#fff; padding:11px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; }
+        .online-task-main { min-width:0; display:flex; flex-direction:column; gap:6px; }
+        .online-task-prompt { color:#111827; font-size:11px; font-weight:800; line-height:1.35; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+        .online-task-meta { color:#94a3b8; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .online-task-status { width:max-content; max-width:100%; border-radius:999px; padding:4px 8px; font-size:9px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+        .online-task-status.queued { background:#f1f5f9; color:#475569; }
+        .online-task-status.running { background:#eff6ff; color:#1d4ed8; }
+        .online-task-status.succeeded { background:#dcfce7; color:#166534; }
+        .online-task-status.failed { background:#fee2e2; color:#991b1b; }
+        .online-task-status.jimeng_pending { background:#fef3c7; color:#92400e; }
+        .online-task-thumb { width:64px; height:64px; border:0; border-radius:14px; overflow:hidden; background:#f8fafc; padding:0; cursor:pointer; }
+        .online-task-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+        .online-task-waiting { width:64px; height:64px; border-radius:14px; background:#f8fafc; display:flex; align-items:center; justify-content:center; color:#94a3b8; }
+        .online-task-error { color:#991b1b; font-size:10px; font-weight:700; line-height:1.35; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+        @media (max-width:640px){
+            .reference-toast { right:16px; bottom:96px; }
+            .online-task-dock { right:16px; bottom:16px; }
+            #resultBox { height:clamp(420px, 70vh, 560px); }
+            @supports (height:100dvh) {
+                #resultBox { height:clamp(420px, 70dvh, 560px); }
+            }
+            #lightbox { padding:16px; }
+            #lightbox .online-lightbox-shell { width:100%; height:calc(100vh - 32px); gap:12px; }
+            @supports (height:100dvh) {
+                #lightbox .online-lightbox-shell { height:calc(100dvh - 32px); }
+            }
+            #lightboxFrame { border-radius:20px; }
+            #lightboxCard { max-height:32vh; padding:16px; border-radius:20px; flex-direction:column; align-items:stretch; gap:12px; overflow:auto; }
+            .result-frame.with-preview-meta #outputImg:not(.hidden) { padding-top:132px; }
+            .online-preview-meta { top:14px; left:14px; right:76px; max-width:none; }
+            .online-preview-meta .online-generation-meta-chip { flex:1 1 100%; }
+            #sameStyleBtn { width:100%; justify-content:center; }
+        }
         @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+        @keyframes spin { to{ transform:rotate(360deg); } }
+        @keyframes lightboxFrameSlide {
+            from { opacity:.72; transform:translateX(var(--lightbox-slide-offset)) scale(.988); }
+            to { opacity:1; transform:translateX(0) scale(1); }
+        }
+        @keyframes lightboxImageFade {
+            from { opacity:.2; filter:saturate(.92); }
+            to { opacity:1; filter:saturate(1); }
+        }
+        @keyframes onlinePreviewSlide {
+            from { opacity:.35; transform:translateX(var(--online-preview-slide-offset)) scale(.985); }
+            to { opacity:1; transform:translateX(0) scale(1); }
+        }
+        @media (prefers-reduced-motion:reduce){
+            #lightboxFrame.lightbox-slide-animate,
+            #lightboxFrame.lightbox-slide-animate #lightboxImg,
+            .result-frame.preview-slide-animate #outputImg:not(.hidden) { animation:none; }
+        }
+        @keyframes refDropPulse {
+            0%,100% { opacity:.4; transform:scale(.985); }
+            50% { opacity:.9; transform:scale(1); }
+        }
+        @keyframes refMainPromote {
+            0% { transform:scale(.96); box-shadow:0 0 0 0 rgba(15,23,42,0); }
+            55% { transform:scale(1.03); box-shadow:0 18px 42px rgba(15,23,42,.14); }
+            100% { transform:scale(1); box-shadow:0 0 0 0 rgba(15,23,42,0); }
+        }
     </style>
-    <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.29.1782696682">
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.30.1782781876">
     <style>
         html:not(.studio-theme-dark) body:not(.studio-theme-dark) #lightbox.gallery-lightbox {
             background: rgba(255,255,255,.99) !important;
             backdrop-filter: blur(22px) saturate(1.05) !important;
             -webkit-backdrop-filter: blur(22px) saturate(1.05) !important;
+        }
+        html.studio-theme-dark body .online-generating-overlay,
+        body.studio-theme-dark .online-generating-overlay {
+            background: rgba(8,13,22,.76);
+            backdrop-filter: blur(12px) saturate(1.05);
+            -webkit-backdrop-filter: blur(12px) saturate(1.05);
+        }
+        html.studio-theme-dark body .online-generating-overlay.has-preview,
+        body.studio-theme-dark .online-generating-overlay.has-preview {
+            border-color: rgba(148,163,184,.18);
+            background: rgba(15,23,42,.9);
+            box-shadow: 0 18px 42px rgba(0,0,0,.32);
+        }
+        html.studio-theme-dark body .online-generating-panel,
+        body.studio-theme-dark .online-generating-panel {
+            color: #e5e9f0;
+        }
+        html.studio-theme-dark body .online-generating-spinner,
+        body.studio-theme-dark .online-generating-spinner {
+            border-color: rgba(226,232,240,.18);
+            border-top-color: #f8fafc;
+        }
+        html.studio-theme-dark body .online-generating-prompt,
+        body.studio-theme-dark .online-generating-prompt {
+            color: #94a3b8;
+        }
+        html.studio-theme-dark body .online-preview-meta,
+        body.studio-theme-dark .online-preview-meta {
+            background: rgba(17,23,34,.9);
+            border-color: rgba(51,65,85,.88);
+            box-shadow: 0 14px 32px rgba(0,0,0,.34);
+        }
+        html.studio-theme-dark body .online-generation-meta-chip,
+        body.studio-theme-dark .online-generation-meta-chip {
+            background: rgba(15,23,42,.72);
+            border-color: rgba(71,85,105,.82);
+            color: #e5e9f0;
+        }
+        html.studio-theme-dark body .online-generation-meta-label,
+        body.studio-theme-dark .online-generation-meta-label {
+            color: #94a3b8;
+        }
+        html.studio-theme-dark body .online-task-toggle,
+        body.studio-theme-dark .online-task-toggle {
+            background: rgba(17,23,34,.96);
+            border-color: rgba(71,85,105,.78);
+            color: #e5e9f0;
+            box-shadow: 0 18px 42px rgba(0,0,0,.38);
+        }
+        html.studio-theme-dark body .online-task-toggle:hover,
+        body.studio-theme-dark .online-task-toggle:hover {
+            box-shadow: 0 22px 48px rgba(0,0,0,.48);
+        }
+        html.studio-theme-dark body .online-task-badge,
+        body.studio-theme-dark .online-task-badge {
+            background: #e5e9f0;
+            color: #0f172a;
+        }
+        html.studio-theme-dark body .online-task-panel,
+        body.studio-theme-dark .online-task-panel {
+            background: rgba(17,23,34,.98);
+            border-color: rgba(51,65,85,.9);
+            box-shadow: 0 24px 60px rgba(0,0,0,.46);
+        }
+        html.studio-theme-dark body .online-task-head,
+        body.studio-theme-dark .online-task-head {
+            border-bottom-color: rgba(51,65,85,.86);
+            color: #e5e9f0;
+        }
+        html.studio-theme-dark body .online-task-count,
+        body.studio-theme-dark .online-task-count,
+        html.studio-theme-dark body .online-task-meta,
+        body.studio-theme-dark .online-task-meta {
+            color: #94a3b8;
+        }
+        html.studio-theme-dark body .online-task-empty,
+        body.studio-theme-dark .online-task-empty {
+            color: #64748b;
+        }
+        html.studio-theme-dark body .online-task-item,
+        body.studio-theme-dark .online-task-item {
+            background: #111722;
+            border-color: rgba(51,65,85,.84);
+        }
+        html.studio-theme-dark body .online-task-prompt,
+        body.studio-theme-dark .online-task-prompt {
+            color: #e5e9f0;
+        }
+        html.studio-theme-dark body .online-task-status.queued,
+        body.studio-theme-dark .online-task-status.queued {
+            background: rgba(148,163,184,.14);
+            color: #cbd5e1;
+        }
+        html.studio-theme-dark body .online-task-status.running,
+        body.studio-theme-dark .online-task-status.running {
+            background: rgba(37,99,235,.22);
+            color: #93c5fd;
+        }
+        html.studio-theme-dark body .online-task-status.succeeded,
+        body.studio-theme-dark .online-task-status.succeeded {
+            background: rgba(22,101,52,.24);
+            color: #86efac;
+        }
+        html.studio-theme-dark body .online-task-status.failed,
+        body.studio-theme-dark .online-task-status.failed {
+            background: rgba(153,27,27,.28);
+            color: #fca5a5;
+        }
+        html.studio-theme-dark body .online-task-status.jimeng_pending,
+        body.studio-theme-dark .online-task-status.jimeng_pending {
+            background: rgba(146,64,14,.26);
+            color: #fcd34d;
+        }
+        html.studio-theme-dark body .online-task-thumb,
+        body.studio-theme-dark .online-task-thumb,
+        html.studio-theme-dark body .online-task-waiting,
+        body.studio-theme-dark .online-task-waiting {
+            background: #0f172a;
+            color: #94a3b8;
+        }
+        html.studio-theme-dark body .online-task-error,
+        body.studio-theme-dark .online-task-error {
+            color: #fca5a5;
+        }
+        html.studio-theme-dark body .online-history-rail,
+        body.studio-theme-dark .online-history-rail {
+            background: rgba(17,23,34,.9);
+            border-color: rgba(51,65,85,.88);
+            box-shadow: 0 18px 40px rgba(0,0,0,.38);
+        }
+        html.studio-theme-dark body #lightboxFrame,
+        body.studio-theme-dark #lightboxFrame {
+            background: rgba(8,13,22,.92);
+            border-color: rgba(148,163,184,.18);
+            box-shadow: 0 30px 90px rgba(0,0,0,.48);
+        }
+        html.studio-theme-dark body .online-history-rail-btn,
+        body.studio-theme-dark .online-history-rail-btn {
+            background: #e5e9f0;
+            color: #0f172a;
+        }
+        html.studio-theme-dark body .online-history-rail-btn:hover,
+        body.studio-theme-dark .online-history-rail-btn:hover {
+            background: #f8fafc;
+        }
+        html.studio-theme-dark body .online-history-thumb,
+        body.studio-theme-dark .online-history-thumb {
+            background: #0f172a;
+        }
+        html.studio-theme-dark body .online-history-thumb.active,
+        body.studio-theme-dark .online-history-thumb.active {
+            border-color: #e5e9f0;
+            box-shadow: 0 0 0 3px rgba(226,232,240,.16);
         }
     </style>
 </head>
@@ -98,24 +396,20 @@
                     <div class="flex items-center gap-2 text-gray-400">
                         <i data-lucide="images" class="w-3.5 h-3.5"></i>
                         <span class="text-[10px] font-black uppercase tracking-widest" data-i18n="online.referenceImages">Reference Images</span>
-                    </div>
-                    <div class="grid grid-cols-3 gap-4">
-                        <div id="drop-zone-1" onclick="document.getElementById('file1').click()" class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file1" accept="image/*" class="hidden" onchange="handleFile(this.files[0],1)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Main</span>
-                            <img id="prev1" class="preview-img hidden"><button id="del1" onclick="clearSlot(1,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
-                        </div>
-                        <div id="drop-zone-2" onclick="document.getElementById('file2').click()" class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file2" accept="image/*" class="hidden" onchange="handleFile(this.files[0],2)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Aux A</span>
-                            <img id="prev2" class="preview-img hidden"><button id="del2" onclick="clearSlot(2,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
-                        </div>
-                        <div id="drop-zone-3" onclick="document.getElementById('file3').click()" class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer">
-                            <input type="file" id="file3" accept="image/*" class="hidden" onchange="handleFile(this.files[0],3)">
-                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Aux B</span>
-                            <img id="prev3" class="preview-img hidden"><button id="del3" onclick="clearSlot(3,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
+                        <span id="referenceTopCount" class="text-[9px] font-black uppercase tracking-widest text-gray-300"></span>
+                        <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+                            <button id="referenceSelectBtn" type="button" class="hidden px-3 py-1 rounded-full border border-gray-200 text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-black hover:border-black transition-colors">Select</button>
+                            <button id="selectAllReferencesBtn" type="button" class="hidden px-3 py-1 rounded-full border border-gray-200 text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-black hover:border-black transition-colors">All</button>
+                            <button id="invertReferenceSelectionBtn" type="button" class="hidden px-3 py-1 rounded-full border border-gray-200 text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-black hover:border-black transition-colors">Invert</button>
+                            <button id="deleteSelectedReferencesBtn" type="button" class="hidden px-3 py-1 rounded-full border border-black bg-black text-white text-[9px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-colors">Delete</button>
+                            <button id="cancelReferenceSelectionBtn" type="button" class="hidden px-3 py-1 rounded-full border border-gray-200 text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-black hover:border-black transition-colors">Cancel</button>
+                            <button id="clearReferencesBtn" type="button" class="hidden px-3 py-1 rounded-full border border-gray-200 text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-black hover:border-black transition-colors">Clear</button>
                         </div>
                     </div>
+                    <div id="referenceGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-4"></div>
+                    <input type="file" id="referenceFileInput" accept="image/*" class="hidden" multiple>
+                    <p id="referenceStatusText" class="text-[10px] font-bold uppercase tracking-widest text-gray-300">Drop / Paste / Upload multiple images</p>
+                    <div id="referenceToast" class="reference-toast" aria-live="polite"></div>
                 </section>
 
                 <div class="tool-panel">
@@ -194,12 +488,29 @@
                 </button>
             </div>
 
-            <div class="lg:col-span-7">
+            <div class="lg:col-span-7 online-result-column">
                 <div id="resultBox" class="result-frame min-h-[500px] lg:h-full flex items-center justify-center relative overflow-hidden">
                     <div id="placeholder" class="text-center space-y-4 opacity-20"><i data-lucide="layout" class="w-12 h-12 mx-auto stroke-[1px]"></i><p class="text-[10px] font-black tracking-[0.5em] uppercase" data-i18n="online.canvasReady">Canvas Ready</p></div>
-                    <div id="loader" class="hidden text-center space-y-4"><div class="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto"></div><p class="text-[10px] font-black tracking-[0.5em] uppercase" data-i18n="online.generating">Generating</p></div>
+                    <div id="loader" class="online-generating-overlay hidden" aria-live="polite">
+                        <div class="online-generating-panel">
+                            <div class="online-generating-spinner" aria-hidden="true"></div>
+                            <p id="onlinePreviewStatus" class="online-generating-status" data-i18n="online.generating">Generating</p>
+                            <p id="onlinePreviewElapsed" class="online-generating-time">00:00</p>
+                            <p id="onlinePreviewPrompt" class="online-generating-prompt"></p>
+                        </div>
+                    </div>
                     <img id="outputImg" class="hidden w-full h-full object-contain p-8 cursor-zoom-in" onclick="zoomImage()">
+                    <div id="onlinePreviewMeta" class="online-generation-meta online-preview-meta hidden" aria-label="生成信息"></div>
                     <a id="downloadBtn" href="#" download class="hidden absolute top-8 right-8 w-12 h-12 bg-white/90 shadow-2xl rounded-2xl flex items-center justify-center hover:bg-black hover:text-white"><i data-lucide="download" class="w-4 h-4"></i></a>
+                    <div id="onlineHistoryRail" class="online-history-rail hidden" aria-label="生成历史预览">
+                        <button id="onlineHistoryRailPrev" type="button" class="online-history-rail-btn" aria-label="上一组">
+                            <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                        </button>
+                        <div id="onlineHistoryRailTrack" class="online-history-rail-track"></div>
+                        <button id="onlineHistoryRailNext" type="button" class="online-history-rail-btn" aria-label="下一组">
+                            <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         </main>
@@ -211,9 +522,27 @@
         </section>
     </div>
 
+    <div id="onlineTaskDock" class="online-task-dock" aria-live="polite">
+        <div class="online-task-panel" aria-label="生成任务栏">
+            <div class="online-task-head">
+                <div class="online-task-title">
+                    <i data-lucide="list-checks" class="w-4 h-4"></i>
+                    <span>生成任务栏</span>
+                </div>
+                <span id="onlineTaskCountText" class="online-task-count">0 active</span>
+            </div>
+            <div id="onlineTaskList" class="online-task-list"></div>
+        </div>
+        <button id="onlineTaskToggle" type="button" class="online-task-toggle" aria-expanded="false" aria-controls="onlineTaskList">
+            <i data-lucide="rows-3" class="w-4 h-4"></i>
+            <span>生成任务栏</span>
+            <span id="onlineTaskBadge" class="online-task-badge">0</span>
+        </button>
+    </div>
+
     <div id="lightbox" onclick="handleOutsideClick(event)" class="hidden fixed inset-0 z-50 gallery-lightbox flex flex-col items-center justify-center p-8">
         <button onclick="closeLightbox()" class="absolute top-10 right-10 text-gray-400 hover:text-black"><i data-lucide="x" class="w-8 h-8"></i></button>
-        <div class="w-full flex flex-col items-center pointer-events-none" style="max-width:min(1280px, 92vw)">
+        <div id="lightboxShell" class="online-lightbox-shell w-full flex flex-col items-center pointer-events-none" style="max-width:min(1280px, 92vw)">
             <div id="lightboxFrame" class="studio-preview-frame pointer-events-auto">
                 <img id="lightboxImg" class="studio-preview-img" alt="preview">
                 <div data-no-pan class="absolute top-6 left-6 bg-black/50 backdrop-blur-md text-white px-3 py-1.5 rounded-xl text-[10px] font-black tracking-widest shadow-2xl pointer-events-auto z-10">
@@ -224,9 +553,10 @@
                 </button>
             </div>
             <div id="lightboxCard" class="w-full mt-16 pointer-events-auto bg-white border border-gray-100 rounded-[2rem] p-8 shadow-sm flex justify-between items-center gap-8">
-                <div class="flex-1">
+                <div class="flex-1 min-w-0">
                     <span class="text-[9px] font-black text-gray-300 uppercase tracking-widest block mb-2">Prompt</span>
                     <p id="lightboxPrompt" class="text-gray-700 text-sm leading-relaxed max-h-32 overflow-y-auto pr-2"></p>
+                    <div id="lightboxMeta" class="online-generation-meta hidden" aria-label="生成信息"></div>
                 </div>
                 <button id="sameStyleBtn" onclick="applySameStyle()" class="bg-black text-white px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2"><i data-lucide="copy" class="w-4 h-4"></i><span data-i18n="online.reuse">Reuse</span></button>
             </div>
@@ -244,29 +574,70 @@
         }
         window.addEventListener('message', event => {
             if(event.data?.type === 'studio-lang') applyLanguage(event.data.lang);
+            if(event.data?.type === 'canvas.preferences' && event.data.values?.online_generation_settings){
+                const settings = parseOnlineSettings(event.data.values.online_generation_settings);
+                if(settings){
+                    localStorage.setItem(ONLINE_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+                    applyOnlineSettings(settings, onlineModelsInitialized);
+                }
+            }
             // API 设置页通过 postMessage 通知平台/模型变更（iframe 内嵌场景）
-            if(event.data?.type === 'providers-changed' || event.data?.type === 'workflows-changed') scheduleProviderRefresh();
+            if(event.data?.type === 'providers-changed') scheduleProviderRefresh();
         });
         window.addEventListener('studio-lang-change', () => {
             document.title = tr('online.title');
             updateAdaptivePanel();
         });
-        let refs = {1:null,2:null,3:null};
-        let refDims = {1:null,2:null,3:null};
-        let provider = 'comfly';
-        let selectedModel = 'gpt-image-2';
+        const REFERENCE_IMAGE_MAX = 20;
+        const ONLINE_DEFAULT_PROVIDER_ID = 'grsai';
+        const ONLINE_DEFAULT_MODEL = 'gpt-image-2-vip';
+        const ONLINE_DEFAULT_RATIO = 'wide';
+        const ONLINE_DEFAULT_RESOLUTION = '4k';
+        const ONLINE_DEFAULT_QUALITY = 'high';
+        const ONLINE_DEFAULT_COUNT = 1;
+        const ONLINE_SETTINGS_STORAGE_KEY = 'studio_online_generation_settings_v1';
+        let refs = [];
+        let refDims = [];
+        let pendingReplaceIndex = -1;
+        let referenceUploading = false;
+        let referenceDragIndex = -1;
+        let referenceDropIndex = -1;
+        let referenceSelectionMode = false;
+        let selectedReferenceIndexes = new Set();
+        let referenceToastTimer = null;
+        let pendingReferenceMotion = null;
+        let referenceSuppressClickUntil = 0;
+        let imageSubmitting = false;
+        let onlineGenerationTasks = [];
+        let onlineTaskDockExpanded = false;
+        let onlineTaskPollTimers = new Map();
+        let onlineTaskPollInflight = new Set();
+        let onlineRenderedResultTaskIds = new Set();
+        let onlineTaskClockTimer = null;
+        let onlinePreviewTaskId = '';
+        let provider = ONLINE_DEFAULT_PROVIDER_ID;
+        let selectedModel = ONLINE_DEFAULT_MODEL;
         let apiProviders = [];
-        let ratio = 'square';
-        let resolution = '1k';
+        let ratio = ONLINE_DEFAULT_RATIO;
+        let resolution = ONLINE_DEFAULT_RESOLUTION;
         let customRatioWidth = '';
         let customRatioHeight = '';
         let customWidth = '';
         let customHeight = '';
-        let quality = 'auto';
-        let outputCount = 1;
+        let quality = ONLINE_DEFAULT_QUALITY;
+        let outputCount = ONLINE_DEFAULT_COUNT;
+        let hasPersistedOnlineSettings = false;
+        let onlineModelsInitialized = false;
+        let onlineSettingsSyncTimer = null;
         let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
-        let allHistory = [], currentIndex = 0, currentResult = null, currentLightboxData = null, isLoading = false;
+        let allHistory = [], currentIndex = 0, currentResult = null, currentResultImageIndex = 0, currentLightboxData = null, currentLightboxImageIndex = 0, isLoading = false;
+        const onlineLightboxDataByKey = new Map();
+        let onlineHistoryRailItems = [];
+        let onlinePreviewSlideTimer = null, lightboxSlideTimer = null;
         const PAGE_SIZE = 24;
+        const ONLINE_TASK_POLL_INTERVAL = 2000;
+        const ONLINE_TASK_ACTIVE_STATUSES = new Set(['queued', 'running']);
+        const ONLINE_TASK_DONE_STATUSES = new Set(['succeeded', 'failed', 'jimeng_pending']);
         const SIZE_OPTIONS = {
             square: [
                 ['1024x1024', '1k'],
@@ -307,6 +678,52 @@
         const RES_LONG_SIDE = { '1k': 1536, '2k': 2048, '4k': 3840 };
         const RES_PIXEL_LIMIT = { '1k': 1572864, '2k': 4194304, '4k': 8294400 };
 
+        function parseOnlineSettings(value){
+            try {
+                const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+            } catch(e) { return null; }
+        }
+        function onlineSettingsSnapshot(){
+            return {
+                provider, selectedModel, ratio, resolution,
+                customRatioWidth, customRatioHeight, customWidth, customHeight,
+                quality, outputCount
+            };
+        }
+        function applyOnlineSettings(settings, render = false){
+            if(!settings || typeof settings !== 'object') return false;
+            if(typeof settings.provider === 'string' && settings.provider) provider = settings.provider;
+            if(typeof settings.selectedModel === 'string' && settings.selectedModel) selectedModel = settings.selectedModel;
+            if(['', 'square', 'portrait', 'portrait43', 'landscape43', 'landscape', 'story', 'wide', 'custom'].includes(settings.ratio)) ratio = settings.ratio;
+            if(['1k', '2k', '4k', 'custom'].includes(settings.resolution)) resolution = settings.resolution;
+            customRatioWidth = String(settings.customRatioWidth || '');
+            customRatioHeight = String(settings.customRatioHeight || '');
+            customWidth = String(settings.customWidth || '');
+            customHeight = String(settings.customHeight || '');
+            if(['auto', 'low', 'medium', 'high'].includes(settings.quality)) quality = settings.quality;
+            outputCount = Math.max(1, Math.min(4, parseInt(settings.outputCount, 10) || ONLINE_DEFAULT_COUNT));
+            if(render){
+                renderProviderControls();
+                updateSizeUI();
+            }
+            return true;
+        }
+        function restoreOnlineSettings(){
+            const settings = parseOnlineSettings(localStorage.getItem(ONLINE_SETTINGS_STORAGE_KEY));
+            hasPersistedOnlineSettings = applyOnlineSettings(settings);
+        }
+        function persistOnlineSettings(){
+            const serialized = JSON.stringify(onlineSettingsSnapshot());
+            localStorage.setItem(ONLINE_SETTINGS_STORAGE_KEY, serialized);
+            clearTimeout(onlineSettingsSyncTimer);
+            onlineSettingsSyncTimer = setTimeout(() => {
+                try {
+                    (window.RuntimeSync || window.top?.RuntimeSync)?.setPreference?.('online_generation_settings', serialized);
+                } catch(e) {}
+            }, 120);
+        }
+
         function uniqueModels(list){
             const seen = new Set();
             return (list || []).map(item => String(item || '').trim()).filter(item => item && !seen.has(item) && seen.add(item));
@@ -322,6 +739,32 @@
         }
         function providerModels(id){
             return uniqueModels(providerById(id)?.image_models || [models.gpt]);
+        }
+        function preferredResolutionForModel(model){
+            const value = String(model || '').toLowerCase();
+            if(value.includes('nano')) return '2k';
+            if(value.includes('gpt-image-2') || value.includes('gpt2') || value.includes('gpt-vip') || value.includes('gptvip')) return '4k';
+            return '';
+        }
+        function applyModelDefaultResolution(model = selectedModel){
+            const preferred = preferredResolutionForModel(model);
+            if(!preferred) return;
+            resolution = preferred;
+            if(ratio === '') ratio = ONLINE_DEFAULT_RATIO;
+            customWidth = '';
+            customHeight = '';
+            updateSizeUI();
+        }
+        function applyOnlineDefaultProviderModel(){
+            const providers = imageProviders();
+            if(providers.some(p => p.id === ONLINE_DEFAULT_PROVIDER_ID)){
+                provider = ONLINE_DEFAULT_PROVIDER_ID;
+            } else if(!providers.some(p => p.id === provider)) {
+                provider = providers[0]?.id || provider;
+            }
+            const modelsForProvider = providerModels(provider);
+            if(modelsForProvider.includes(ONLINE_DEFAULT_MODEL)) selectedModel = ONLINE_DEFAULT_MODEL;
+            else if(!modelsForProvider.includes(selectedModel)) selectedModel = modelsForProvider[0] || models.gpt;
         }
         /* ---- RunningHub：模型下拉来自 API 设置里配置的工作流 / AI 应用，而非通用 image_models ----
          * 与智能画布一致：value=app:ID / workflow:ID，后端 generate_ai_image 走 RH 工作流运行路径。 */
@@ -406,8 +849,10 @@
             const cs = document.getElementById('countSelect');
             if(cs) cs.value = String(outputCount);
         }
-        function setQuality(next){ quality = next || 'auto'; }
-        function setCount(next){ outputCount = Math.max(1, Math.min(4, parseInt(next, 10) || 1)); }
+        function setQuality(next){ quality = next || 'auto'; persistOnlineSettings(); }
+        function setCount(next){ outputCount = Math.max(1, Math.min(4, parseInt(next, 10) || 1)); persistOnlineSettings(); }
+
+        restoreOnlineSettings();
 
         async function initModels(){
             try {
@@ -416,9 +861,15 @@
                 models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
                 models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
                 apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
-                selectedModel = providerModels(provider)[0] || models.gpt;
+                if(!hasPersistedOnlineSettings){
+                    applyOnlineDefaultProviderModel();
+                    applyModelDefaultResolution(selectedModel);
+                }
             } catch(e) {}
+            onlineModelsInitialized = true;
             renderProviderControls();
+            updateSizeUI();
+            persistOnlineSettings();
         }
         // API 设置页保存后会广播 studio-api 事件；这里重新拉取 /api/config，
         // 尽量保留当前已选的平台/模型，renderProviderControls 会在其不存在时自动回退。
@@ -447,12 +898,17 @@
         function setProvider(next){
             provider = next;
             selectedModel = providerModels(provider)[0] || selectedModel;
+            applyModelDefaultResolution(selectedModel);
             renderProviderControls();
+            persistOnlineSettings();
         }
         function setModel(next){
             selectedModel = next;
+            applyModelDefaultResolution(selectedModel);
+            persistOnlineSettings();
         }
         function escapeHtml(str){ return String(str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
+        function escapeAttr(str){ return escapeHtml(str); }
 
         function parseSizeValue(value){
             const match = String(value || '').trim().match(/^(\d+)\s*[xX*]\s*(\d+)$/);
@@ -476,8 +932,640 @@
                 img.src = src;
             });
         }
+        function normalizeReferenceState(){
+            refs = (Array.isArray(refs) ? refs : []).filter(ref => ref?.url).slice(0, REFERENCE_IMAGE_MAX);
+            refDims = Array.isArray(refDims) ? refDims.slice(0, refs.length) : [];
+            while(refDims.length < refs.length) refDims.push(null);
+            normalizeReferenceSelection();
+        }
+        function referenceCountLabel(){
+            return `${refs.length}/${REFERENCE_IMAGE_MAX}`;
+        }
+        function normalizeReferenceSelection(){
+            if(!(selectedReferenceIndexes instanceof Set)){
+                selectedReferenceIndexes = new Set(Array.isArray(selectedReferenceIndexes) ? selectedReferenceIndexes : []);
+            }
+            selectedReferenceIndexes = new Set(
+                [...selectedReferenceIndexes].filter(index => Number.isInteger(index) && index >= 0 && index < refs.length)
+            );
+            if(!referenceSelectionMode && selectedReferenceIndexes.size) selectedReferenceIndexes = new Set();
+            if(!refs.length) referenceSelectionMode = false;
+        }
+        function selectedReferenceCount(){
+            normalizeReferenceSelection();
+            return selectedReferenceIndexes.size;
+        }
+        function clearReferenceSelection(){
+            selectedReferenceIndexes = new Set();
+        }
+        function setReferenceSelectionMode(active){
+            normalizeReferenceState();
+            referenceSelectionMode = !!active && refs.length > 0;
+            if(!referenceSelectionMode) clearReferenceSelection();
+            pendingReplaceIndex = -1;
+            referenceDragIndex = -1;
+            referenceDropIndex = -1;
+            clearReferenceDragDecor();
+            updateReferenceUIState();
+            renderReferenceGrid();
+        }
+        function toggleReferenceSelection(index){
+            normalizeReferenceState();
+            if(!referenceSelectionMode || index < 0 || index >= refs.length) return;
+            if(selectedReferenceIndexes.has(index)) selectedReferenceIndexes.delete(index);
+            else selectedReferenceIndexes.add(index);
+            updateReferenceUIState();
+            renderReferenceGrid();
+        }
+        function selectAllReferences(){
+            normalizeReferenceState();
+            if(referenceUploading || !referenceSelectionMode || !refs.length) return;
+            selectedReferenceIndexes = new Set(refs.map((_, index) => index));
+            updateReferenceUIState();
+            renderReferenceGrid();
+        }
+        function invertReferenceSelection(){
+            normalizeReferenceState();
+            if(referenceUploading || !referenceSelectionMode || !refs.length) return;
+            selectedReferenceIndexes = new Set(
+                refs.map((_, index) => index).filter(index => !selectedReferenceIndexes.has(index))
+            );
+            updateReferenceUIState();
+            renderReferenceGrid();
+        }
+        function setReferenceUploading(active){
+            referenceUploading = !!active;
+            updateReferenceUIState();
+            renderReferenceGrid();
+        }
+        function setImageSubmitting(active){
+            imageSubmitting = !!active;
+            updateReferenceUIState();
+        }
+        function updateReferenceUIState(){
+            normalizeReferenceState();
+            const count = document.getElementById('referenceTopCount');
+            const selectBtn = document.getElementById('referenceSelectBtn');
+            const selectAllBtn = document.getElementById('selectAllReferencesBtn');
+            const invertSelectionBtn = document.getElementById('invertReferenceSelectionBtn');
+            const deleteSelectedBtn = document.getElementById('deleteSelectedReferencesBtn');
+            const cancelSelectionBtn = document.getElementById('cancelReferenceSelectionBtn');
+            const clearBtn = document.getElementById('clearReferencesBtn');
+            const status = document.getElementById('referenceStatusText');
+            const genBtn = document.getElementById('genBtn');
+            const selectedCount = selectedReferenceCount();
+            if(count) count.textContent = refs.length ? referenceCountLabel() : '';
+            if(selectBtn){
+                selectBtn.classList.toggle('hidden', !refs.length || referenceSelectionMode);
+                selectBtn.disabled = referenceUploading || !refs.length;
+                selectBtn.classList.toggle('opacity-50', !!selectBtn.disabled);
+                selectBtn.classList.toggle('cursor-not-allowed', !!selectBtn.disabled);
+            }
+            if(selectAllBtn){
+                selectAllBtn.classList.toggle('hidden', !referenceSelectionMode);
+                selectAllBtn.disabled = referenceUploading || !refs.length || selectedCount === refs.length;
+                selectAllBtn.classList.toggle('opacity-50', !!selectAllBtn.disabled);
+                selectAllBtn.classList.toggle('cursor-not-allowed', !!selectAllBtn.disabled);
+            }
+            if(invertSelectionBtn){
+                invertSelectionBtn.classList.toggle('hidden', !referenceSelectionMode);
+                invertSelectionBtn.disabled = referenceUploading || !refs.length;
+                invertSelectionBtn.classList.toggle('opacity-50', !!invertSelectionBtn.disabled);
+                invertSelectionBtn.classList.toggle('cursor-not-allowed', !!invertSelectionBtn.disabled);
+            }
+            if(deleteSelectedBtn){
+                deleteSelectedBtn.classList.toggle('hidden', !referenceSelectionMode);
+                deleteSelectedBtn.disabled = referenceUploading || !selectedCount;
+                deleteSelectedBtn.textContent = selectedCount ? `Delete (${selectedCount})` : 'Delete';
+                deleteSelectedBtn.classList.toggle('opacity-50', !!deleteSelectedBtn.disabled);
+                deleteSelectedBtn.classList.toggle('cursor-not-allowed', !!deleteSelectedBtn.disabled);
+            }
+            if(cancelSelectionBtn){
+                cancelSelectionBtn.classList.toggle('hidden', !referenceSelectionMode);
+                cancelSelectionBtn.disabled = referenceUploading;
+                cancelSelectionBtn.classList.toggle('opacity-50', !!cancelSelectionBtn.disabled);
+                cancelSelectionBtn.classList.toggle('cursor-not-allowed', !!cancelSelectionBtn.disabled);
+            }
+            if(clearBtn){
+                clearBtn.classList.toggle('hidden', !refs.length || referenceSelectionMode);
+                clearBtn.disabled = referenceUploading || !refs.length;
+                clearBtn.classList.toggle('opacity-50', !!clearBtn.disabled);
+                clearBtn.classList.toggle('cursor-not-allowed', !!clearBtn.disabled);
+            }
+            if(status){
+                if(referenceUploading) status.textContent = 'Uploading reference images...';
+                else if(referenceSelectionMode) status.textContent = selectedCount ? `Selected ${selectedCount} • All / Invert / Delete` : 'Select refs to delete • All / Invert available';
+                else if(refs.length) status.textContent = defaultReferenceStatusText();
+                else status.textContent = 'Drop / Paste / Upload multiple images';
+            }
+            if(genBtn){
+                genBtn.disabled = referenceUploading;
+                genBtn.classList.toggle('opacity-60', genBtn.disabled);
+                genBtn.classList.toggle('cursor-not-allowed', genBtn.disabled);
+            }
+        }
         function firstReferenceDimension(){
-            return [1,2,3].map(id => refDims[id]).find(dim => dim?.width && dim?.height) || null;
+            normalizeReferenceState();
+            return refDims.find(dim => dim?.width && dim?.height) || null;
+        }
+        function referenceCardLabel(index){
+            return index === 0 ? 'Main' : `Ref ${index + 1}`;
+        }
+        function referenceToastLabel(ref, index){
+            const name = String(ref?.name || '').trim().replace(/\s+/g, ' ');
+            if(!name) return referenceCardLabel(index);
+            return name.length <= 44 ? name : `${name.slice(0, 28)}...${name.slice(-12)}`;
+        }
+        function hideReferenceToast(){
+            const toast = document.getElementById('referenceToast');
+            if(!toast) return;
+            toast.classList.remove('show');
+        }
+        function referenceToastIcon(type){
+            if(type === 'danger') return '!';
+            if(type === 'success') return '✓';
+            return 'i';
+        }
+        function showReferenceToast(message, type = 'info'){
+            const toast = document.getElementById('referenceToast');
+            if(!toast || !message) return;
+            const safeType = ['info', 'success', 'danger'].includes(type) ? type : 'info';
+            toast.classList.remove('toast-info', 'toast-success', 'toast-danger');
+            toast.classList.add(`toast-${safeType}`);
+            toast.innerHTML = `<span class="reference-toast-icon" aria-hidden="true">${escapeHtml(referenceToastIcon(safeType))}</span><span class="reference-toast-message">${escapeHtml(message)}</span>`;
+            toast.setAttribute('aria-label', message);
+            toast.classList.add('show');
+            if(referenceToastTimer) clearTimeout(referenceToastTimer);
+            referenceToastTimer = setTimeout(() => {
+                hideReferenceToast();
+                referenceToastTimer = null;
+            }, 1800);
+        }
+        function referenceReplaceButtonLabel(index){
+            return isMainReference(index) ? 'Replace Main' : 'Replace';
+        }
+        function referencePromoteButtonLabel(){
+            return 'Set Main';
+        }
+        function defaultReferenceStatusText(){
+            if(refs.length <= 0) return 'Drop / Paste / Upload multiple images';
+            if(refs.length === 1) return 'Main pinned • Use Replace Main • Drop / Paste / Upload more images';
+            return 'Main pinned • Use Replace / Set Main • Drag to reorder refs • Select for bulk delete';
+        }
+        function isMainReference(index){
+            return index === 0;
+        }
+        function imageFilesFromList(fileList){
+            return Array.from(fileList || []).filter(file => file && String(file.type || '').startsWith('image/'));
+        }
+        async function loadReferenceDimension(src, index){
+            try {
+                const dim = await getImageDimensions(src);
+                if(refs[index]?.url === src){
+                    refDims[index] = dim;
+                    updateSizeUI();
+                }
+            } catch(e) {}
+        }
+        async function uploadReferenceFiles(files){
+            const form = new FormData();
+            files.forEach(file => form.append('files', file));
+            const res = await fetch('/api/ai/upload', {method:'POST', body:form});
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok) throw new Error(data.detail || '上传失败');
+            return Array.isArray(data.files) ? data.files.filter(item => item?.url) : [];
+        }
+        function handleReferenceError(err){
+            alert(err?.message || '上传失败');
+        }
+        function captureReferenceMotion(){
+            const grid = document.getElementById('referenceGrid');
+            if(!grid) return null;
+            const snapshot = {};
+            grid.querySelectorAll('[data-ref-motion-key]').forEach(node => {
+                snapshot[node.dataset.refMotionKey] = node.getBoundingClientRect();
+            });
+            return snapshot;
+        }
+        function queueReferenceMotion(type, focusKey = ''){
+            pendingReferenceMotion = {
+                type,
+                focusKey,
+                snapshot: captureReferenceMotion()
+            };
+        }
+        function playReferenceMotion(){
+            const motion = pendingReferenceMotion;
+            pendingReferenceMotion = null;
+            if(!motion?.snapshot) return;
+            const grid = document.getElementById('referenceGrid');
+            if(!grid) return;
+            requestAnimationFrame(() => {
+                const nodes = Array.from(grid.querySelectorAll('[data-ref-motion-key]'));
+                nodes.forEach(node => {
+                    const key = node.dataset.refMotionKey;
+                    const before = motion.snapshot[key];
+                    const after = node.getBoundingClientRect();
+                    if(before){
+                        const deltaX = before.left - after.left;
+                        const deltaY = before.top - after.top;
+                        if(deltaX || deltaY){
+                            node.animate([
+                                { transform:`translate(${deltaX}px, ${deltaY}px)` },
+                                { transform:'translate(0, 0)' }
+                            ], {
+                                duration:280,
+                                easing:'cubic-bezier(0.22, 1, 0.36, 1)'
+                            });
+                        }
+                    } else {
+                        node.animate([
+                            { opacity:.68, transform:'scale(.94)' },
+                            { opacity:1, transform:'scale(1)' }
+                        ], {
+                            duration:220,
+                            easing:'cubic-bezier(0.22, 1, 0.36, 1)'
+                        });
+                    }
+                });
+                if(motion.type === 'main' && motion.focusKey){
+                    const promotedNode = nodes.find(node => node.dataset.refMotionKey === motion.focusKey);
+                    if(promotedNode){
+                        promotedNode.classList.remove('ref-main-promote');
+                        void promotedNode.offsetWidth;
+                        promotedNode.classList.add('ref-main-promote');
+                        setTimeout(() => promotedNode.classList.remove('ref-main-promote'), 450);
+                    }
+                }
+            });
+        }
+        function reorderReferences(fromIndex, toIndex){
+            normalizeReferenceState();
+            if(fromIndex <= 0 || toIndex <= 0 || fromIndex >= refs.length || toIndex >= refs.length || fromIndex === toIndex) return;
+            clearReferenceSelection();
+            queueReferenceMotion('reorder', refs[fromIndex]?.url || '');
+            refs.splice(toIndex, 0, refs.splice(fromIndex, 1)[0]);
+            refDims.splice(toIndex, 0, refDims.splice(fromIndex, 1)[0]);
+            updateReferenceUIState();
+            renderReferenceGrid();
+        }
+        function moveReferenceToEnd(fromIndex){
+            normalizeReferenceState();
+            if(fromIndex <= 0 || fromIndex >= refs.length || fromIndex === refs.length - 1) return;
+            clearReferenceSelection();
+            queueReferenceMotion('reorder', refs[fromIndex]?.url || '');
+            refs.push(refs.splice(fromIndex, 1)[0]);
+            refDims.push(refDims.splice(fromIndex, 1)[0]);
+            updateReferenceUIState();
+            renderReferenceGrid();
+        }
+        function setReferenceAsMain(index){
+            normalizeReferenceState();
+            if(index <= 0 || index >= refs.length) return;
+            const promotedLabel = referenceToastLabel(refs[index], index);
+            clearReferenceSelection();
+            queueReferenceMotion('main', refs[index]?.url || '');
+            refs.unshift(refs.splice(index, 1)[0]);
+            refDims.unshift(refDims.splice(index, 1)[0]);
+            referenceDragIndex = -1;
+            referenceDropIndex = -1;
+            updateReferenceUIState();
+            renderReferenceGrid();
+            showReferenceToast(`${promotedLabel} is now Main`, 'success');
+        }
+        function deleteSelectedReferences(){
+            normalizeReferenceState();
+            if(referenceUploading || !selectedReferenceIndexes.size) return;
+            const removedCount = selectedReferenceIndexes.size;
+            queueReferenceMotion('delete');
+            refs = refs.filter((_, index) => !selectedReferenceIndexes.has(index));
+            refDims = refDims.filter((_, index) => !selectedReferenceIndexes.has(index));
+            referenceSelectionMode = false;
+            clearReferenceSelection();
+            pendingReplaceIndex = -1;
+            referenceDragIndex = -1;
+            referenceDropIndex = -1;
+            updateReferenceUIState();
+            renderReferenceGrid();
+            updateSizeUI();
+            showReferenceToast(removedCount === 1 ? 'Removed 1 ref' : `Removed ${removedCount} refs`, 'danger');
+        }
+        function clearReferenceDragDecor(){
+            const grid = document.getElementById('referenceGrid');
+            if(!grid) return;
+            grid.querySelectorAll('[data-ref-index], [data-add-ref]').forEach(node => {
+                node.classList.remove('drag-over', 'ring-1', 'ring-black', 'opacity-60', 'scale-[0.98]', 'ref-dragging', 'ref-drop-target');
+            });
+        }
+        function renderReferenceGrid(){
+            normalizeReferenceState();
+            const grid = document.getElementById('referenceGrid');
+            if(!grid) return;
+            const cards = refs.map((ref, index) => {
+                const selected = referenceSelectionMode && selectedReferenceIndexes.has(index);
+                const cardCursorClass = referenceSelectionMode
+                    ? 'cursor-pointer'
+                    : ((!referenceUploading && !isMainReference(index)) ? 'cursor-grab' : 'cursor-default');
+                return `
+                <div class="upload-item group aspect-square rounded-2xl ${cardCursorClass} ${referenceUploading ? 'pointer-events-none opacity-80' : ''} ${referenceSelectionMode ? 'ref-selection-mode' : ''} ${selected ? 'ref-selected ring-2 ring-black border-black' : ''}" data-ref-index="${index}" data-ref-motion-key="${escapeAttr(ref.url)}" draggable="${(!referenceUploading && !referenceSelectionMode && !isMainReference(index)) ? 'true' : 'false'}">
+                    <img src="${escapeAttr(ref.url)}" class="preview-img" alt="${escapeAttr(ref.name || referenceCardLabel(index))}">
+                    <span class="absolute top-2 left-2 px-2 py-1 rounded-full ${isMainReference(index) ? 'bg-black text-white' : 'bg-white/90 text-gray-500'} shadow-sm z-10 text-[9px] font-black uppercase tracking-widest">${escapeHtml(referenceCardLabel(index))}</span>
+                    <span class="absolute top-2 right-11 px-2 py-1 rounded-full bg-white/90 shadow-sm z-10 text-[9px] font-black uppercase tracking-widest text-gray-400">${isMainReference(index) ? 'PIN' : '↕'}</span>
+                    <span class="absolute bottom-2 left-2 right-2 rounded-xl bg-black/55 text-white text-[9px] font-bold tracking-widest px-2 py-1.5 uppercase backdrop-blur-sm z-10">${escapeHtml(ref.name || referenceCardLabel(index))}</span>
+                    ${!referenceSelectionMode ? `<button type="button" data-replace-ref-btn="${index}" ${referenceUploading ? 'disabled' : ''} class="absolute top-11 left-2 px-2 py-1 bg-white/90 rounded-full shadow-sm z-20 text-[9px] font-black uppercase tracking-widest hover:bg-black hover:text-white transition-colors ${referenceUploading ? 'opacity-50 cursor-not-allowed' : ''}">${escapeHtml(referenceReplaceButtonLabel(index))}</button>` : ''}
+                    ${(!referenceSelectionMode && !isMainReference(index)) ? `<button type="button" data-make-main="${index}" ${referenceUploading ? 'disabled' : ''} class="absolute top-11 right-2 px-2 py-1 bg-white/90 rounded-full shadow-sm z-20 text-[9px] font-black uppercase tracking-widest hover:bg-black hover:text-white transition-colors ${referenceUploading ? 'opacity-50 cursor-not-allowed' : ''}">${escapeHtml(referencePromoteButtonLabel())}</button>` : ''}
+                    ${referenceSelectionMode
+                        ? `<span class="absolute top-2 right-2 w-7 h-7 rounded-full border ${selected ? 'bg-black border-black text-white' : 'bg-white/90 border-white/90 text-gray-300'} shadow-sm z-20 flex items-center justify-center text-[11px] font-black">${selected ? '✓' : ''}</span>`
+                        : `<button type="button" data-remove-ref="${index}" ${referenceUploading ? 'disabled' : ''} class="absolute top-2 right-2 w-7 h-7 bg-white/90 rounded-full shadow-sm z-20 text-sm font-black hover:bg-black hover:text-white transition-colors ${referenceUploading ? 'opacity-50 cursor-not-allowed' : ''}">×</button>`}
+                </div>
+            `;
+            }).join('');
+            const addCard = `
+                <div class="upload-item group aspect-square rounded-2xl flex flex-col items-center justify-center cursor-pointer ${(refs.length >= REFERENCE_IMAGE_MAX || referenceUploading || referenceSelectionMode) ? 'opacity-70' : ''} ${referenceSelectionMode ? 'pointer-events-none' : ''}" data-add-ref="1" data-ref-motion-key="__add__">
+                    ${referenceUploading
+                        ? '<div class="w-5 h-5 border-2 border-gray-300 border-t-black rounded-full animate-spin"></div>'
+                        : '<i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i>'}
+                    <span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">${referenceUploading ? 'Uploading' : (referenceSelectionMode ? 'Selecting' : (refs.length ? 'Add More' : 'Add'))}</span>
+                    <span class="text-[9px] mt-1 font-bold text-gray-300 uppercase tracking-widest">${referenceCountLabel()}</span>
+                </div>
+            `;
+            grid.innerHTML = cards + addCard;
+            lucide.createIcons();
+            playReferenceMotion();
+        }
+        function bindReferenceInteractions(){
+            const grid = document.getElementById('referenceGrid');
+            const input = document.getElementById('referenceFileInput');
+            const selectBtn = document.getElementById('referenceSelectBtn');
+            const selectAllBtn = document.getElementById('selectAllReferencesBtn');
+            const invertSelectionBtn = document.getElementById('invertReferenceSelectionBtn');
+            const deleteSelectedBtn = document.getElementById('deleteSelectedReferencesBtn');
+            const cancelSelectionBtn = document.getElementById('cancelReferenceSelectionBtn');
+            const clearBtn = document.getElementById('clearReferencesBtn');
+            if(!grid || !input || grid.dataset.bound === '1') return;
+            grid.dataset.bound = '1';
+            selectBtn?.addEventListener('click', event => {
+                event.preventDefault();
+                if(referenceUploading || !refs.length) return;
+                setReferenceSelectionMode(true);
+            });
+            selectAllBtn?.addEventListener('click', event => {
+                event.preventDefault();
+                selectAllReferences();
+            });
+            invertSelectionBtn?.addEventListener('click', event => {
+                event.preventDefault();
+                invertReferenceSelection();
+            });
+            deleteSelectedBtn?.addEventListener('click', event => {
+                event.preventDefault();
+                const selectedCount = selectedReferenceCount();
+                if(referenceUploading || !selectedCount) return;
+                if(!confirm(`确定删除选中的 ${selectedCount} 张参考图吗？`)) return;
+                deleteSelectedReferences();
+            });
+            cancelSelectionBtn?.addEventListener('click', event => {
+                event.preventDefault();
+                if(referenceUploading) return;
+                setReferenceSelectionMode(false);
+            });
+            clearBtn?.addEventListener('click', event => {
+                event.preventDefault();
+                if(referenceUploading || !refs.length) return;
+                resetReferences();
+            });
+            grid.addEventListener('click', event => {
+                if(Date.now() < referenceSuppressClickUntil || referenceUploading) return;
+                const refCard = event.target.closest('[data-ref-index]');
+                if(referenceSelectionMode && refCard){
+                    event.preventDefault();
+                    toggleReferenceSelection(Number(refCard.dataset.refIndex));
+                    return;
+                }
+                const replaceBtn = event.target.closest('[data-replace-ref-btn]');
+                if(replaceBtn){
+                    event.stopPropagation();
+                    openReferencePicker(Number(replaceBtn.dataset.replaceRefBtn));
+                    return;
+                }
+                const makeMainBtn = event.target.closest('[data-make-main]');
+                if(makeMainBtn){
+                    event.stopPropagation();
+                    setReferenceAsMain(Number(makeMainBtn.dataset.makeMain));
+                    return;
+                }
+                const removeBtn = event.target.closest('[data-remove-ref]');
+                if(removeBtn){
+                    event.stopPropagation();
+                    removeReference(Number(removeBtn.dataset.removeRef));
+                    return;
+                }
+                const addCard = event.target.closest('[data-add-ref]');
+                if(addCard){
+                    if(referenceSelectionMode) return;
+                    openReferencePicker();
+                    return;
+                }
+            });
+            const setDragState = active => {
+                const addCard = grid.querySelector('[data-add-ref]');
+                if(addCard) addCard.classList.toggle('drag-over', !!active);
+            };
+            grid.addEventListener('dragstart', event => {
+                const card = event.target.closest('[data-ref-index]');
+                if(!card || referenceUploading || referenceSelectionMode) return;
+                const index = Number(card.dataset.refIndex);
+                if(index <= 0){
+                    event.preventDefault();
+                    return;
+                }
+                referenceDragIndex = index;
+                referenceDropIndex = -1;
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', String(referenceDragIndex));
+                clearReferenceDragDecor();
+                card.classList.add('opacity-60', 'scale-[0.98]', 'ref-dragging');
+            });
+            grid.addEventListener('dragend', () => {
+                referenceDragIndex = -1;
+                referenceDropIndex = -1;
+                referenceSuppressClickUntil = Date.now() + 180;
+                clearReferenceDragDecor();
+            });
+            grid.addEventListener('dragover', event => {
+                const files = imageFilesFromList(event.dataTransfer?.files);
+                if(referenceSelectionMode){
+                    if(files.length) event.preventDefault();
+                    return;
+                }
+                if(referenceDragIndex >= 0){
+                    const targetCard = event.target.closest('[data-ref-index]');
+                    const addCard = event.target.closest('[data-add-ref]');
+                    const targetIndex = targetCard ? Number(targetCard.dataset.refIndex) : -1;
+                    if((targetCard && targetIndex > 0) || addCard){
+                        event.preventDefault();
+                        referenceDropIndex = targetCard ? targetIndex : refs.length;
+                        clearReferenceDragDecor();
+                        grid.querySelector(`[data-ref-index="${referenceDragIndex}"]`)?.classList.add('opacity-60', 'scale-[0.98]', 'ref-dragging');
+                        (targetCard || addCard)?.classList.add('drag-over', 'ring-1', 'ring-black', 'ref-drop-target');
+                        return;
+                    }
+                }
+                if(!files.length || referenceUploading) return;
+                event.preventDefault();
+                setDragState(true);
+            });
+            grid.addEventListener('dragleave', event => {
+                if(referenceDragIndex >= 0){
+                    if(!grid.contains(event.relatedTarget)){
+                        referenceDropIndex = -1;
+                        clearReferenceDragDecor();
+                    }
+                    return;
+                }
+                if(!grid.contains(event.relatedTarget)) setDragState(false);
+            });
+            grid.addEventListener('drop', event => {
+                if(referenceSelectionMode){
+                    if(imageFilesFromList(event.dataTransfer?.files).length) event.preventDefault();
+                    return;
+                }
+                if(referenceDragIndex >= 0){
+                    const targetCard = event.target.closest('[data-ref-index]');
+                    const addCard = event.target.closest('[data-add-ref]');
+                    event.preventDefault();
+                    const fromIndex = referenceDragIndex;
+                    const targetIndex = targetCard ? Number(targetCard.dataset.refIndex) : -1;
+                    const toIndex = targetCard ? targetIndex : (addCard ? refs.length : -1);
+                    referenceDragIndex = -1;
+                    referenceDropIndex = -1;
+                    referenceSuppressClickUntil = Date.now() + 180;
+                    clearReferenceDragDecor();
+                    if(toIndex === refs.length) moveReferenceToEnd(fromIndex);
+                    else if(toIndex > 0) reorderReferences(fromIndex, toIndex);
+                    return;
+                }
+                const files = imageFilesFromList(event.dataTransfer?.files);
+                if(!files.length || referenceUploading) return;
+                event.preventDefault();
+                setDragState(false);
+                addReferenceFiles(files).catch(handleReferenceError);
+            });
+            input.addEventListener('change', async event => {
+                const files = imageFilesFromList(event.target.files);
+                const replaceIndex = pendingReplaceIndex;
+                pendingReplaceIndex = -1;
+                event.target.value = '';
+                if(!files.length) return;
+                try {
+                    if(replaceIndex >= 0){
+                        await replaceReferenceFile(files[0], replaceIndex);
+                        return;
+                    }
+                    await addReferenceFiles(files);
+                } catch(err) {
+                    handleReferenceError(err);
+                }
+            });
+        }
+        function openReferencePicker(replaceIndex = -1){
+            const input = document.getElementById('referenceFileInput');
+            if(!input) return;
+            if(referenceUploading || referenceSelectionMode) return;
+            pendingReplaceIndex = Number.isInteger(replaceIndex) ? replaceIndex : -1;
+            input.multiple = pendingReplaceIndex < 0;
+            input.value = '';
+            if(pendingReplaceIndex < 0 && refs.length >= REFERENCE_IMAGE_MAX){
+                alert(`最多支持 ${REFERENCE_IMAGE_MAX} 张参考图`);
+                return;
+            }
+            input.click();
+        }
+        async function addReferenceFiles(fileList){
+            normalizeReferenceState();
+            if(referenceUploading || referenceSelectionMode) return;
+            const files = imageFilesFromList(fileList);
+            if(!files.length) return;
+            const remaining = Math.max(0, REFERENCE_IMAGE_MAX - refs.length);
+            if(!remaining){
+                alert(`最多支持 ${REFERENCE_IMAGE_MAX} 张参考图`);
+                return;
+            }
+            const accepted = files.slice(0, remaining);
+            setReferenceUploading(true);
+            try {
+                const uploaded = await uploadReferenceFiles(accepted);
+                clearReferenceSelection();
+                refs.push(...uploaded);
+                refDims.push(...new Array(uploaded.length).fill(null));
+                renderReferenceGrid();
+                updateSizeUI();
+                updateReferenceUIState();
+                uploaded.forEach((ref, index) => loadReferenceDimension(ref.url, refs.length - uploaded.length + index));
+                if(files.length > accepted.length) alert(`最多支持 ${REFERENCE_IMAGE_MAX} 张参考图，已为你保留前 ${REFERENCE_IMAGE_MAX} 张。`);
+            } finally {
+                setReferenceUploading(false);
+            }
+        }
+        async function replaceReferenceFile(file, index){
+            normalizeReferenceState();
+            if(referenceUploading || referenceSelectionMode) return;
+            if(index < 0 || index >= refs.length || !file) return;
+            setReferenceUploading(true);
+            try {
+                const uploaded = await uploadReferenceFiles([file]);
+                if(!uploaded.length) return;
+                clearReferenceSelection();
+                refs[index] = uploaded[0];
+                refDims[index] = null;
+                renderReferenceGrid();
+                updateSizeUI();
+                updateReferenceUIState();
+                loadReferenceDimension(uploaded[0].url, index);
+            } finally {
+                setReferenceUploading(false);
+            }
+        }
+        function removeReference(index){
+            normalizeReferenceState();
+            if(referenceUploading) return;
+            if(index < 0 || index >= refs.length) return;
+            const removedLabel = referenceCardLabel(index);
+            clearReferenceSelection();
+            queueReferenceMotion('delete');
+            refs.splice(index, 1);
+            refDims.splice(index, 1);
+            updateReferenceUIState();
+            renderReferenceGrid();
+            updateSizeUI();
+            showReferenceToast(`Removed ${removedLabel}`, 'danger');
+        }
+        function resetReferences(){
+            if(referenceUploading) return;
+            const clearedCount = refs.length;
+            refs = [];
+            refDims = [];
+            referenceSelectionMode = false;
+            clearReferenceSelection();
+            pendingReplaceIndex = -1;
+            referenceDragIndex = -1;
+            referenceDropIndex = -1;
+            updateReferenceUIState();
+            renderReferenceGrid();
+            updateSizeUI();
+            if(clearedCount) showReferenceToast(clearedCount === 1 ? 'Cleared 1 ref' : `Cleared ${clearedCount} refs`, 'danger');
+        }
+        function applyReferenceImages(list){
+            refs = (Array.isArray(list) ? list : []).filter(ref => ref?.url).slice(0, REFERENCE_IMAGE_MAX).map(ref => ({...ref}));
+            refDims = new Array(refs.length).fill(null);
+            referenceSelectionMode = false;
+            clearReferenceSelection();
+            referenceDragIndex = -1;
+            referenceDropIndex = -1;
+            updateReferenceUIState();
+            renderReferenceGrid();
+            updateSizeUI();
+            refs.forEach((ref, index) => loadReferenceDimension(ref.url, index));
         }
 
         function setRatio(next, preferredSize = ''){
@@ -491,6 +1579,7 @@
                 customRatioHeight = '';
             }
             updateSizeUI();
+            persistOnlineSettings();
         }
 
         function setCustomRatio(){
@@ -498,6 +1587,7 @@
             customRatioHeight = document.getElementById('ratioCustomHeight').value;
             ratio = 'custom';
             updateSizeUI();
+            persistOnlineSettings();
         }
 
         function setCustomSize(){
@@ -506,6 +1596,7 @@
             resolution = 'custom';
             ratio = '';
             updateSizeUI();
+            persistOnlineSettings();
         }
 
         function setResolution(next){
@@ -518,6 +1609,7 @@
                 if(ratio === '') ratio = 'square';
             }
             updateSizeUI();
+            persistOnlineSettings();
         }
 
         function updateSizeUI(){
@@ -553,6 +1645,7 @@
             customWidth = dim.width;
             customHeight = dim.height;
             updateSizeUI();
+            persistOnlineSettings();
         }
 
         function currentSize(){
@@ -574,83 +1667,485 @@
             return match[0];
         }
 
-        [1,2,3].forEach(id => {
-            const zone = document.getElementById(`drop-zone-${id}`);
-            zone.ondragover = e => { e.preventDefault(); zone.classList.add('drag-over'); };
-            zone.ondragleave = () => zone.classList.remove('drag-over');
-            zone.ondrop = e => { e.preventDefault(); zone.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0], id); };
-        });
         window.addEventListener('paste', e => {
-            const item = [...(e.clipboardData?.items || [])].find(x => x.kind === 'file' && x.type.startsWith('image/'));
-            if (item) handleFile(item.getAsFile(), firstEmptySlot());
+            if(referenceSelectionMode) return;
+            const files = [...(e.clipboardData?.items || [])]
+                .filter(item => item.kind === 'file' && String(item.type || '').startsWith('image/'))
+                .map(item => item.getAsFile())
+                .filter(Boolean);
+            if(files.length && !referenceUploading) addReferenceFiles(files).catch(handleReferenceError);
         });
-        function firstEmptySlot(){ return [1,2,3].find(id => !refs[id]) || 1; }
 
-        async function handleFile(file, index){
-            if(!file) return;
-            const reader = new FileReader();
-            reader.onload = e => {
-                const prev = document.getElementById(`prev${index}`);
-                prev.src = e.target.result; prev.classList.remove('hidden');
-                document.getElementById(`del${index}`).classList.remove('hidden');
-                getImageDimensions(e.target.result).then(dim => {
-                    refDims[index] = dim;
-                    updateSizeUI();
-                }).catch(() => {});
+        function onlineTaskId(task){
+            return String(task?.task_id || task?.id || '').trim();
+        }
+        function normalizeOnlineTask(task){
+            const id = onlineTaskId(task);
+            if(!id) return null;
+            return {
+                ...task,
+                id,
+                task_id:id,
+                status:String(task.status || 'queued')
             };
-            reader.readAsDataURL(file);
-            const form = new FormData();
-            form.append('files', file);
-            const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
-            refs[index] = data.files[0];
         }
-        function clearSlot(index, ev){
-            if(ev) ev.stopPropagation();
-            refs[index] = null;
-            refDims[index] = null;
-            document.getElementById(`prev${index}`).src = '';
-            document.getElementById(`prev${index}`).classList.add('hidden');
-            document.getElementById(`del${index}`).classList.add('hidden');
+        function onlineTaskIsActive(task){
+            return ONLINE_TASK_ACTIVE_STATUSES.has(String(task?.status || ''));
         }
-
-        async function submitImage(){
-            const prompt = document.getElementById('promptInput').value.trim();
-            if(!prompt){ alert(tr('online.promptRequired')); return; }
-            const btn = document.getElementById('genBtn'), loader = document.getElementById('loader'), placeholder = document.getElementById('placeholder'), out = document.getElementById('outputImg'), dl = document.getElementById('downloadBtn');
-            btn.disabled = true; placeholder.classList.add('hidden'); out.classList.add('hidden'); dl.classList.add('hidden'); loader.classList.remove('hidden');
-            try {
-                const reqBody = { prompt, provider_id:provider, model:selectedModel, size:currentSize(), n:outputCount, reference_images:Object.values(refs).filter(Boolean) };
-                if(QUALITY_PROTOCOLS.has(providerProtocol(provider))) reqBody.quality = quality;
-                const result = await fetch('/api/online-image', {
-                    method:'POST', headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify(reqBody)
-                }).then(async r => { if(!r.ok) throw new Error((await r.json()).detail || '生成失败'); return r.json(); });
-                currentResult = result; out.src = result.images[0]; out.classList.remove('hidden'); dl.href = result.images[0]; dl.classList.remove('hidden'); renderImageCard(result, true);
-            } catch(err) {
-                alert(err.message || 'Generation failed'); placeholder.classList.remove('hidden');
-            } finally {
-                loader.classList.add('hidden'); btn.disabled = false;
+        function onlineTaskIsDone(task){
+            return ONLINE_TASK_DONE_STATUSES.has(String(task?.status || ''));
+        }
+        function onlineTaskStatusText(status){
+            return ({
+                queued:'排队中',
+                running:'生成中',
+                succeeded:'已完成',
+                failed:'失败',
+                jimeng_pending:'上游排队中'
+            })[status] || status || '未知';
+        }
+        function onlineTaskTimeText(value){
+            const time = Number(value || 0);
+            if(!time) return '';
+            try { return new Date(time * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+            catch(e) { return ''; }
+        }
+        function onlineTaskCreatedAt(task){
+            return Number(task?.created_at || task?.request?.created_at || 0);
+        }
+        function formatOnlineTaskElapsed(seconds){
+            const total = Math.max(0, Math.floor(Number(seconds || 0)));
+            const hours = Math.floor(total / 3600);
+            const minutes = Math.floor((total % 3600) / 60);
+            const secs = total % 60;
+            const pad = value => String(value).padStart(2, '0');
+            return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${pad(minutes)}:${pad(secs)}`;
+        }
+        function onlineTaskElapsedText(task){
+            if(!onlineTaskIsActive(task)) return '';
+            const createdAt = onlineTaskCreatedAt(task);
+            if(!createdAt) return '已等待 00:00';
+            const elapsed = Math.floor(Date.now() / 1000 - createdAt);
+            return `已等待 ${formatOnlineTaskElapsed(elapsed)}`;
+        }
+        function onlineTaskPromptText(task){
+            const text = String(task?.prompt || task?.request?.prompt || '').trim();
+            return text || 'Untitled prompt';
+        }
+        function onlineTaskMetaText(task){
+            return [
+                task?.model || task?.request?.model || '',
+                task?.size || task?.request?.size || '',
+                `×${Math.max(1, Number(task?.n || task?.request?.n || 1) || 1)}`,
+                onlineTaskElapsedText(task),
+                onlineTaskTimeText(task?.created_at)
+            ].filter(Boolean).join(' · ');
+        }
+        function onlineGenerationParams(data){
+            return data?.params && typeof data.params === 'object' ? data.params : {};
+        }
+        function onlineGenerationFirstValue(...values){
+            return values.find(value => value !== undefined && value !== null && value !== '');
+        }
+        function onlineGenerationNumber(value){
+            if(value === undefined || value === null || value === '') return null;
+            const number = Number(value);
+            return Number.isFinite(number) ? number : null;
+        }
+        function onlineGenerationElapsedSeconds(data){
+            const params = onlineGenerationParams(data);
+            const direct = onlineGenerationNumber(onlineGenerationFirstValue(
+                data?.generation_elapsed_seconds,
+                data?.elapsed_seconds,
+                data?.duration_seconds,
+                params.generation_elapsed_seconds,
+                params.elapsed_seconds,
+                params.duration_seconds
+            ));
+            if(direct !== null) return direct;
+            const startedAt = onlineGenerationNumber(onlineGenerationFirstValue(
+                data?.generation_started_at,
+                data?.created_at,
+                params.generation_started_at,
+                params.created_at
+            ));
+            const completedAt = onlineGenerationNumber(onlineGenerationFirstValue(
+                data?.generation_completed_at,
+                data?.timestamp,
+                params.generation_completed_at
+            ));
+            if(startedAt !== null && completedAt !== null && completedAt >= startedAt) return completedAt - startedAt;
+            return null;
+        }
+        function onlineGenerationElapsedText(data){
+            const elapsed = onlineGenerationElapsedSeconds(data);
+            return elapsed === null ? '耗时 --' : `耗时 ${formatOnlineTaskElapsed(elapsed)}`;
+        }
+        function onlineGenerationMetaItems(data){
+            if(!data) return [];
+            const params = onlineGenerationParams(data);
+            const model = onlineGenerationFirstValue(data.model, params.model, data.request?.model) || '未知模型';
+            const providerName = onlineGenerationFirstValue(data.provider_name, params.provider_name, data.provider_id, params.provider_id);
+            const size = onlineGenerationFirstValue(params.size, data.size, data.request?.size);
+            const quality = onlineGenerationFirstValue(params.quality, data.quality, data.request?.quality);
+            const count = onlineGenerationNumber(onlineGenerationFirstValue(params.n, data.n, data.request?.n));
+            const refCount = Array.isArray(params.reference_images) ? params.reference_images.length : 0;
+            const paramParts = [];
+            if(providerName) paramParts.push(`平台 ${providerName}`);
+            if(size) paramParts.push(`尺寸 ${size}`);
+            if(quality) paramParts.push(`质量 ${quality}`);
+            if(count !== null) paramParts.push(`张数 ×${Math.max(1, count)}`);
+            if(refCount > 0) paramParts.push(`参考图 ${refCount}`);
+            return [
+                {label:'模型', value:model, kind:'model'},
+                {label:'参数', value:paramParts.length ? paramParts.join(' · ') : '参数 --', kind:'params'},
+                {label:'耗时', value:onlineGenerationElapsedText(data), kind:'time'}
+            ];
+        }
+        function renderOnlineGenerationMeta(elementId, data){
+            const target = document.getElementById(elementId);
+            if(!target) return;
+            const items = onlineGenerationMetaItems(data);
+            target.classList.toggle('hidden', !items.length);
+            target.innerHTML = items.map(item => `<span class="online-generation-meta-chip ${escapeAttr(item.kind || '')}"><span class="online-generation-meta-label">${escapeHtml(item.label)}</span><span class="online-generation-meta-value">${escapeHtml(item.value)}</span></span>`).join('');
+            if(elementId === 'onlinePreviewMeta'){
+                document.getElementById('resultBox')?.classList.toggle('with-preview-meta', !!items.length);
             }
         }
+        function onlineTaskQueueText(task){
+            const info = task?.queue_info || {};
+            const index = info.queue_idx ?? info.queueIndex ?? info.index;
+            const total = info.queue_length ?? info.queueLength ?? info.total;
+            if(index !== undefined && total !== undefined) return `队列 ${index}/${total}`;
+            return task?.message || '任务仍在上游队列中';
+        }
+        function onlineTaskResultImage(task){
+            const result = task?.result || {};
+            return result.images?.[0] || result.image_items?.[0]?.url || '';
+        }
+        function activeOnlineTaskCount(){
+            return onlineGenerationTasks.filter(onlineTaskIsActive).length;
+        }
+        function latestActiveOnlineTask(){
+            return onlineGenerationTasks
+                .filter(onlineTaskIsActive)
+                .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))[0] || null;
+        }
+        function onlineTaskById(taskId){
+            const id = String(taskId || '').trim();
+            return id ? onlineGenerationTasks.find(task => onlineTaskId(task) === id) : null;
+        }
+        function ensureOnlineTaskClock(){
+            if(onlineTaskClockTimer || !activeOnlineTaskCount()) return;
+            onlineTaskClockTimer = setInterval(refreshOnlineTaskClock, 1000);
+        }
+        function stopOnlineTaskClockIfIdle(){
+            if(activeOnlineTaskCount() || !onlineTaskClockTimer) return;
+            clearInterval(onlineTaskClockTimer);
+            onlineTaskClockTimer = null;
+        }
+        function updateOnlinePreviewWaiting(task){
+            const status = document.getElementById('onlinePreviewStatus');
+            const elapsed = document.getElementById('onlinePreviewElapsed');
+            const prompt = document.getElementById('onlinePreviewPrompt');
+            const state = String(task?.status || 'queued');
+            if(status) status.textContent = onlineTaskStatusText(state);
+            if(elapsed) elapsed.textContent = onlineTaskElapsedText(task) || '已等待 00:00';
+            if(prompt) prompt.textContent = onlineTaskPromptText(task);
+        }
+        function currentOnlinePreviewImageUrl(){
+            const images = lightboxImages(currentResult);
+            return images[currentResultImageIndex] || images[0] || '';
+        }
+        function showOnlineActivePreview(task){
+            if(!task || !onlineTaskIsActive(task)) return;
+            const resultBox = document.getElementById('resultBox');
+            const loader = document.getElementById('loader');
+            const placeholder = document.getElementById('placeholder');
+            const out = document.getElementById('outputImg');
+            const dl = document.getElementById('downloadBtn');
+            const currentImage = currentOnlinePreviewImageUrl();
+            const hasResult = !!currentImage;
+            onlinePreviewTaskId = onlineTaskId(task);
+            if(resultBox){
+                resultBox.classList.add('generating');
+                resultBox.classList.toggle('generating-with-preview', hasResult);
+            }
+            if(placeholder) placeholder.classList.add('hidden');
+            if(out){
+                if(currentImage) out.src = currentImage;
+                out.classList.toggle('hidden', !hasResult);
+            }
+            if(dl){
+                if(currentImage) dl.href = currentImage;
+                dl.classList.toggle('hidden', !hasResult);
+            }
+            renderOnlineGenerationMeta('onlinePreviewMeta', hasResult ? currentResult : null);
+            if(loader){
+                loader.classList.toggle('has-preview', hasResult);
+                loader.classList.remove('hidden');
+            }
+            updateOnlinePreviewWaiting(task);
+            ensureOnlineTaskClock();
+        }
+        function hideOnlineActivePreview(){
+            const resultBox = document.getElementById('resultBox');
+            const loader = document.getElementById('loader');
+            const placeholder = document.getElementById('placeholder');
+            const out = document.getElementById('outputImg');
+            const dl = document.getElementById('downloadBtn');
+            const hasResult = !!currentResult?.images?.[0];
+            onlinePreviewTaskId = '';
+            if(resultBox) resultBox.classList.remove('generating', 'generating-with-preview');
+            if(loader){
+                loader.classList.add('hidden');
+                loader.classList.remove('has-preview');
+            }
+            if(placeholder) placeholder.classList.toggle('hidden', hasResult);
+            if(out) out.classList.toggle('hidden', !hasResult);
+            if(dl) dl.classList.toggle('hidden', !hasResult);
+            renderOnlineGenerationMeta('onlinePreviewMeta', hasResult ? currentResult : null);
+            stopOnlineTaskClockIfIdle();
+        }
+        function syncOnlineActivePreview(){
+            const task = latestActiveOnlineTask();
+            if(task) showOnlineActivePreview(task);
+            else hideOnlineActivePreview();
+        }
+        function refreshOnlineTaskClock(){
+            if(!activeOnlineTaskCount()){
+                stopOnlineTaskClockIfIdle();
+                syncOnlineActivePreview();
+                return;
+            }
+            renderOnlineTaskDock();
+            const previewTask = onlineTaskById(onlinePreviewTaskId) || latestActiveOnlineTask();
+            if(previewTask && onlineTaskIsActive(previewTask)) updateOnlinePreviewWaiting(previewTask);
+            else syncOnlineActivePreview();
+        }
+        function setOnlineTaskDockExpanded(active){
+            onlineTaskDockExpanded = !!active;
+            renderOnlineTaskDock();
+        }
+        function renderOnlineTaskDock(){
+            const dock = document.getElementById('onlineTaskDock');
+            const list = document.getElementById('onlineTaskList');
+            const badge = document.getElementById('onlineTaskBadge');
+            const countText = document.getElementById('onlineTaskCountText');
+            const toggle = document.getElementById('onlineTaskToggle');
+            if(!dock || !list) return;
+            const activeCount = activeOnlineTaskCount();
+            dock.classList.toggle('expanded', onlineTaskDockExpanded);
+            if(toggle) toggle.setAttribute('aria-expanded', onlineTaskDockExpanded ? 'true' : 'false');
+            if(badge) badge.textContent = String(Math.min(activeCount, 99));
+            if(countText) countText.textContent = `${activeCount} active`;
+            if(!onlineGenerationTasks.length){
+                list.innerHTML = '<div class="online-task-empty">暂无生成任务</div>';
+                lucide.createIcons();
+                return;
+            }
+            list.innerHTML = onlineGenerationTasks.map(task => {
+                const id = onlineTaskId(task);
+                const status = String(task.status || 'queued');
+                const image = onlineTaskResultImage(task);
+                const detail = status === 'failed' && task.error
+                    ? `<div class="online-task-error">${escapeHtml(task.error)}</div>`
+                    : (status === 'jimeng_pending' ? `<div class="online-task-meta">${escapeHtml(onlineTaskQueueText(task))}</div>` : '');
+                const side = image
+                    ? `<button type="button" class="online-task-thumb" data-open-online-task="${escapeAttr(id)}"><img src="${escapeAttr(image)}" alt=""></button>`
+                    : `<div class="online-task-waiting"><i data-lucide="${status === 'failed' ? 'circle-alert' : 'loader-circle'}" class="w-5 h-5 ${onlineTaskIsActive(task) ? 'animate-spin' : ''}"></i></div>`;
+                return `<div class="online-task-item" data-online-task="${escapeAttr(id)}">
+                    <div class="online-task-main">
+                        <div class="online-task-status ${escapeAttr(status)}">${escapeHtml(onlineTaskStatusText(status))}</div>
+                        <div class="online-task-prompt">${escapeHtml(onlineTaskPromptText(task))}</div>
+                        <div class="online-task-meta">${escapeHtml(onlineTaskMetaText(task))}</div>
+                        ${detail}
+                    </div>
+                    ${side}
+                </div>`;
+            }).join('');
+            lucide.createIcons();
+        }
+        function upsertOnlineTask(task, options = {}){
+            const normalized = normalizeOnlineTask(task);
+            if(!normalized) return null;
+            const index = onlineGenerationTasks.findIndex(item => onlineTaskId(item) === normalized.id);
+            const previous = index >= 0 ? onlineGenerationTasks[index] : null;
+            if(index >= 0) onlineGenerationTasks[index] = {...previous, ...normalized};
+            else onlineGenerationTasks.unshift(normalized);
+            onlineGenerationTasks.sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+            if(onlineTaskIsActive(normalized)) startOnlineTaskPoll(normalized.id);
+            else stopOnlineTaskPoll(normalized.id);
+            if(normalized.status === 'succeeded' && options.finalize && !onlineRenderedResultTaskIds.has(normalized.id)){
+                onlineRenderedResultTaskIds.add(normalized.id);
+                showOnlineTaskResult(normalized.result || {});
+            }
+            renderOnlineTaskDock();
+            syncOnlineActivePreview();
+            stopOnlineTaskClockIfIdle();
+            return normalized;
+        }
+        function bindOnlineTaskDock(){
+            const toggle = document.getElementById('onlineTaskToggle');
+            const list = document.getElementById('onlineTaskList');
+            toggle?.addEventListener('click', () => setOnlineTaskDockExpanded(!onlineTaskDockExpanded));
+            list?.addEventListener('click', event => {
+                const button = event.target.closest('[data-open-online-task]');
+                if(!button) return;
+                const task = onlineGenerationTasks.find(item => onlineTaskId(item) === button.dataset.openOnlineTask);
+                if(task?.result) openLightbox(task.result);
+            });
+        }
+        async function initOnlineTasks(){
+            try {
+                const data = await fetch('/api/online-image-tasks?limit=50').then(async r => {
+                    if(!r.ok) throw new Error(await r.text());
+                    return r.json();
+                });
+                onlineGenerationTasks = [];
+                (data.tasks || []).forEach(task => {
+                    const normalized = normalizeOnlineTask(task);
+                    if(!normalized) return;
+                    if(normalized.status === 'succeeded') onlineRenderedResultTaskIds.add(normalized.id);
+                    onlineGenerationTasks.push(normalized);
+                });
+                onlineGenerationTasks.sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+                onlineGenerationTasks.filter(onlineTaskIsActive).forEach(task => startOnlineTaskPoll(onlineTaskId(task)));
+                renderOnlineTaskDock();
+                syncOnlineActivePreview();
+            } catch(err) {
+                console.warn('online tasks restore failed', err);
+                renderOnlineTaskDock();
+                syncOnlineActivePreview();
+            }
+        }
+        function stopOnlineTaskPoll(taskId){
+            const timer = onlineTaskPollTimers.get(taskId);
+            if(timer) clearInterval(timer);
+            onlineTaskPollTimers.delete(taskId);
+            onlineTaskPollInflight.delete(taskId);
+        }
+        function startOnlineTaskPoll(taskId){
+            if(!taskId || onlineTaskPollTimers.has(taskId)) return;
+            const timer = setInterval(() => pollOnlineTask(taskId), ONLINE_TASK_POLL_INTERVAL);
+            onlineTaskPollTimers.set(taskId, timer);
+            pollOnlineTask(taskId);
+        }
+        async function pollOnlineTask(taskId){
+            if(!taskId || onlineTaskPollInflight.has(taskId)) return;
+            onlineTaskPollInflight.add(taskId);
+            try {
+                const data = await fetch(`/api/online-image-tasks/${encodeURIComponent(taskId)}`).then(async r => {
+                    if(!r.ok) throw new Error(await r.text());
+                    return r.json();
+                });
+                const task = upsertOnlineTask(data, {finalize:String(data.status || '') === 'succeeded'});
+                if(!task || onlineTaskIsDone(task)) stopOnlineTaskPoll(taskId);
+            } catch(err) {
+                stopOnlineTaskPoll(taskId);
+                upsertOnlineTask({id:taskId, task_id:taskId, status:'failed', error:err.message || '任务查询失败'}, {finalize:false});
+            } finally {
+                onlineTaskPollInflight.delete(taskId);
+            }
+        }
+        function currentOnlineTaskPayload(){
+            const body = {
+                prompt:document.getElementById('promptInput').value.trim(),
+                provider_id:provider,
+                model:selectedModel,
+                size:currentSize(),
+                n:outputCount,
+                reference_images:refs.filter(Boolean).map(ref => ({...ref}))
+            };
+            if(QUALITY_PROTOCOLS.has(providerProtocol(provider))) body.quality = quality;
+            return body;
+        }
+        function showOnlineTaskResult(result){
+            if(!result?.images?.[0]) return;
+            const resultBox = document.getElementById('resultBox');
+            const loader = document.getElementById('loader');
+            const placeholder = document.getElementById('placeholder');
+            const out = document.getElementById('outputImg');
+            const dl = document.getElementById('downloadBtn');
+            currentResult = result;
+            currentResultImageIndex = 0;
+            if(resultBox) resultBox.classList.remove('generating', 'generating-with-preview');
+            if(loader){
+                loader.classList.add('hidden');
+                loader.classList.remove('has-preview');
+            }
+            if(placeholder) placeholder.classList.add('hidden');
+            if(out){
+                out.src = result.images[0];
+                out.classList.remove('hidden');
+                playOnlinePreviewSlide(0);
+            }
+            if(dl){
+                dl.href = result.images[0];
+                dl.classList.remove('hidden');
+            }
+            renderOnlineGenerationMeta('onlinePreviewMeta', result);
+            renderImageCard(result, true);
+        }
+        async function enqueueOnlineImageTask(){
+            if(referenceUploading){
+                alert('参考图上传中，请稍候再生成');
+                return;
+            }
+            const reqBody = currentOnlineTaskPayload();
+            if(!reqBody.prompt){ alert(tr('online.promptRequired')); return; }
+            try {
+                const task = await fetch('/api/online-image-tasks', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify(reqBody)
+                }).then(async r => {
+                    const data = await r.json().catch(() => ({}));
+                    if(!r.ok) throw new Error(data.detail || '创建生成任务失败');
+                    return data;
+                });
+                upsertOnlineTask(task);
+                showReferenceToast('生成任务已加入队列', 'success');
+            } catch(err) {
+                alert(err.message || '创建生成任务失败');
+            }
+        }
+        async function submitImage(){
+            return enqueueOnlineImageTask();
+        }
 
+        function focusOnlineResultPreview(){
+            document.getElementById('resultBox')?.scrollIntoView({block:'center', behavior:'smooth'});
+        }
         function renderImageCard(data, isNew=false){
-            if(!data.images?.[0] || document.getElementById(`history-${data.timestamp}`)) return;
+            const historyKey = lightboxDataKey(data);
+            rememberLightboxData(data);
+            if(!data.images?.[0]) return;
+            if(historyKey && document.getElementById(`history-${historyKey}`)){
+                renderOnlineHistoryRail();
+                return;
+            }
             const card = document.createElement('div');
-            card.id = `history-${data.timestamp}`;
-            card.dataset.historyTs = data.timestamp;
-            card.className = 'masonry-item group relative cursor-zoom-in';
-            card.onclick = () => { if(document.body.classList.contains('history-bulk-selecting')) return; openLightbox(data); };
+            card.id = `history-${historyKey || data.timestamp}`;
+            card.dataset.historyTs = historyKey || data.timestamp;
+            card.className = 'masonry-item group relative cursor-pointer';
+            card.onclick = () => {
+                if(document.body.classList.contains('history-bulk-selecting')) return;
+                showHistoryPreviewItem(data, 0, 0);
+                focusOnlineResultPreview();
+            };
             const multi = Array.isArray(data.images) && data.images.length > 1
                 ? `<div class="absolute top-3 right-3 bg-black/60 text-white text-[10px] font-black px-2 py-0.5 rounded-full pointer-events-none">×${data.images.length}</div>` : '';
             card.innerHTML = `<img src="${data.images[0]}" class="w-full h-full object-cover block group-hover:scale-105 transition-transform duration-1000" loading="lazy">${multi}
                 <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 p-6 flex flex-col justify-end"><p class="text-white text-[10px] font-medium line-clamp-2 uppercase tracking-wider">${data.prompt || tr('online.onlineImageFallback')}</p></div>`;
             isNew ? document.getElementById('masonry').prepend(card) : document.getElementById('masonry').appendChild(card);
+            renderOnlineHistoryRail();
             lucide.createIcons();
         }
         async function loadHistory(page=0){
             if(isLoading) return; isLoading = true;
             const loader = document.getElementById('loadMoreTrigger');
-            if(page === 0){ loader.innerText = tr('online.loadingArchives'); allHistory = await fetch('/api/history?type=online').then(r=>r.json()); document.getElementById('masonry').innerHTML=''; currentIndex=0; }
+            if(page === 0){ loader.innerText = tr('online.loadingArchives'); allHistory = await fetch('/api/history?type=online').then(r=>r.json()); document.getElementById('masonry').innerHTML=''; onlineLightboxDataByKey.clear(); renderOnlineHistoryRail(); currentIndex=0; }
             const next = allHistory.slice(currentIndex, currentIndex + PAGE_SIZE);
             next.forEach(item => renderImageCard(item)); currentIndex += next.length;
             loader.classList.toggle('hidden', currentIndex >= allHistory.length);
@@ -663,29 +2158,217 @@
             }
             return lightboxPreview;
         }
-        function openLightbox(data){
+        function lightboxDataKey(data){
+            return String(data?.timestamp || data?.id || data?.images?.[0] || '').trim();
+        }
+        function rememberLightboxData(data){
+            const key = lightboxDataKey(data);
+            if(key) onlineLightboxDataByKey.set(key, data);
+        }
+        function lightboxImages(data){
+            return Array.isArray(data?.images) ? data.images.filter(Boolean) : [];
+        }
+        function currentLightboxImageUrl(){
+            return lightboxImages(currentLightboxData)[currentLightboxImageIndex] || '';
+        }
+        function visibleLightboxItems(){
+            return [...document.querySelectorAll('#masonry [data-history-ts]')].flatMap(card => {
+                const data = onlineLightboxDataByKey.get(String(card.dataset.historyTs || ''));
+                return lightboxImages(data).map((url, imageIndex) => ({data, imageIndex, url, key:lightboxDataKey(data)}));
+            });
+        }
+        function isCurrentResultItem(item){
+            return !!currentResult
+                && lightboxDataKey(currentResult) === item.key
+                && currentResultImageIndex === item.imageIndex;
+        }
+        function currentOnlineHistoryRailIndex(){
+            return onlineHistoryRailItems.findIndex(item => isCurrentResultItem(item));
+        }
+        function playOnlinePreviewSlide(direction=0){
+            const resultBox = document.getElementById('resultBox');
+            if(!resultBox) return;
+            window.clearTimeout(onlinePreviewSlideTimer);
+            resultBox.classList.remove('preview-slide-animate', 'preview-slide-prev', 'preview-slide-next', 'preview-slide-soft');
+            void resultBox.offsetWidth;
+            resultBox.classList.add(direction < 0 ? 'preview-slide-prev' : direction > 0 ? 'preview-slide-next' : 'preview-slide-soft', 'preview-slide-animate');
+            onlinePreviewSlideTimer = window.setTimeout(() => {
+                resultBox.classList.remove('preview-slide-animate', 'preview-slide-prev', 'preview-slide-next', 'preview-slide-soft');
+            }, 360);
+        }
+        function playLightboxSlide(direction=0){
+            const frame = document.getElementById('lightboxFrame');
+            if(!frame) return;
+            window.clearTimeout(lightboxSlideTimer);
+            frame.classList.remove('lightbox-slide-animate', 'lightbox-slide-prev', 'lightbox-slide-next', 'lightbox-slide-soft');
+            void frame.offsetWidth;
+            frame.classList.add(direction < 0 ? 'lightbox-slide-prev' : direction > 0 ? 'lightbox-slide-next' : 'lightbox-slide-soft', 'lightbox-slide-animate');
+            lightboxSlideTimer = window.setTimeout(() => {
+                frame.classList.remove('lightbox-slide-animate', 'lightbox-slide-prev', 'lightbox-slide-next', 'lightbox-slide-soft');
+            }, 380);
+        }
+        function renderOnlineHistoryRail(){
+            const rail = document.getElementById('onlineHistoryRail');
+            const track = document.getElementById('onlineHistoryRailTrack');
+            const resultBox = document.getElementById('resultBox');
+            if(!rail || !track) return;
+            onlineHistoryRailItems = visibleLightboxItems();
+            const hasItems = onlineHistoryRailItems.length > 0;
+            rail.classList.toggle('hidden', !hasItems);
+            if(resultBox) resultBox.classList.toggle('with-history-rail', hasItems);
+            if(!hasItems){
+                track.innerHTML = '';
+                return;
+            }
+            track.innerHTML = onlineHistoryRailItems.map((item, index) => {
+                const active = isCurrentResultItem(item) ? ' active' : '';
+                return `<button type="button" class="online-history-thumb${active}" data-history-rail-index="${index}" aria-label="预览图片 ${index + 1}" aria-current="${active ? 'true' : 'false'}"><img src="${escapeAttr(item.url)}" alt=""></button>`;
+            }).join('');
+        }
+        function showHistoryPreviewItem(data, imageIndex=0, direction=0){
+            const images = lightboxImages(data);
+            if(!images.length) return;
+            const index = Math.min(Math.max(Number(imageIndex) || 0, 0), images.length - 1);
+            const placeholder = document.getElementById('placeholder');
+            const out = document.getElementById('outputImg');
+            const dl = document.getElementById('downloadBtn');
+            currentResult = data;
+            currentResultImageIndex = index;
+            rememberLightboxData(data);
+            if(placeholder) placeholder.classList.add('hidden');
+            if(out){
+                out.src = images[index];
+                out.classList.remove('hidden');
+                playOnlinePreviewSlide(direction);
+            }
+            if(dl){
+                dl.href = images[index];
+                dl.classList.remove('hidden');
+            }
+            renderOnlineGenerationMeta('onlinePreviewMeta', data);
+            renderOnlineHistoryRail();
+            syncOnlineActivePreview();
+        }
+        function scrollOnlineHistoryRail(direction){
+            const track = document.getElementById('onlineHistoryRailTrack');
+            if(!track) return;
+            const distance = Math.max(160, Math.floor(track.clientWidth * .75));
+            track.scrollBy({left:direction * distance, behavior:'smooth'});
+        }
+        function bindOnlineHistoryRail(){
+            const track = document.getElementById('onlineHistoryRailTrack');
+            document.getElementById('onlineHistoryRailPrev')?.addEventListener('click', () => scrollOnlineHistoryRail(-1));
+            document.getElementById('onlineHistoryRailNext')?.addEventListener('click', () => scrollOnlineHistoryRail(1));
+            track?.addEventListener('click', event => {
+                const button = event.target.closest('[data-history-rail-index]');
+                if(!button) return;
+                const nextIndex = Number(button.dataset.historyRailIndex);
+                const item = onlineHistoryRailItems[nextIndex];
+                const current = currentOnlineHistoryRailIndex();
+                const direction = current < 0 || nextIndex === current ? 0 : (nextIndex > current ? 1 : -1);
+                if(item) showHistoryPreviewItem(item.data, item.imageIndex, direction);
+            });
+        }
+        function onlinePreviewCurrentPosition(items){
+            const key = lightboxDataKey(currentResult);
+            const url = currentOnlinePreviewImageUrl();
+            let index = items.findIndex(item => item.key === key && item.imageIndex === currentResultImageIndex);
+            if(index < 0) index = items.findIndex(item => item.url === url);
+            return index;
+        }
+        function navigateOnlinePreview(direction){
+            const items = onlineHistoryRailItems.length ? onlineHistoryRailItems : visibleLightboxItems();
+            if(items.length < 2) return false;
+            const current = onlinePreviewCurrentPosition(items);
+            if(current < 0) return false;
+            const next = items[(current + direction + items.length) % items.length];
+            if(!next) return false;
+            showHistoryPreviewItem(next.data, next.imageIndex, direction);
+            return true;
+        }
+        function shouldIgnoreOnlinePreviewKeydown(event){
+            const target = event.target;
+            const tag = String(target?.tagName || '').toLowerCase();
+            return isLightboxOpen()
+                || event.altKey
+                || event.ctrlKey
+                || event.metaKey
+                || target?.isContentEditable
+                || ['input', 'textarea', 'select'].includes(tag);
+        }
+        function handleOnlinePreviewKeydown(event){
+            if(shouldIgnoreOnlinePreviewKeydown(event)) return;
+            if(event.key === 'ArrowLeft'){
+                if(navigateOnlinePreview(-1)) event.preventDefault();
+            } else if(event.key === 'ArrowRight'){
+                if(navigateOnlinePreview(1)) event.preventDefault();
+            }
+        }
+        function isLightboxOpen(){
+            const lightbox = document.getElementById('lightbox');
+            return !!lightbox && !lightbox.classList.contains('hidden');
+        }
+        function lightboxCurrentPosition(items){
+            const key = lightboxDataKey(currentLightboxData);
+            const url = currentLightboxImageUrl();
+            let index = items.findIndex(item => item.key === key && item.imageIndex === currentLightboxImageIndex);
+            if(index < 0) index = items.findIndex(item => item.url === url);
+            return index;
+        }
+        function navigateLightbox(direction){
+            if(!isLightboxOpen()) return;
+            const items = visibleLightboxItems();
+            if(items.length < 2) return;
+            const current = lightboxCurrentPosition(items);
+            if(current < 0) return;
+            const next = items[(current + direction + items.length) % items.length];
+            if(next) openLightbox(next.data, next.imageIndex, direction);
+        }
+        function handleLightboxKeydown(event){
+            if(!isLightboxOpen() || event.altKey || event.ctrlKey || event.metaKey) return;
+            if(event.key === 'Escape'){
+                event.preventDefault();
+                closeLightbox();
+            } else if(event.key === 'ArrowLeft'){
+                event.preventDefault();
+                navigateLightbox(-1);
+            } else if(event.key === 'ArrowRight'){
+                event.preventDefault();
+                navigateLightbox(1);
+            }
+        }
+        function openLightbox(data, imageIndex=0, direction=0){
+            const images = lightboxImages(data);
+            if(!images.length) return;
             currentLightboxData = data;
+            currentLightboxImageIndex = Math.min(Math.max(Number(imageIndex) || 0, 0), images.length - 1);
+            rememberLightboxData(data);
             const img = document.getElementById('lightboxImg');
             const res = document.getElementById('lightboxRes');
             res.textContent = '...';
             ensureLightboxPreview();
             if(lightboxPreview) lightboxPreview.reset();
             img.onload = () => { res.textContent = img.naturalWidth && img.naturalHeight ? `${img.naturalWidth} x ${img.naturalHeight}` : (data.params?.size || '--'); };
-            img.src = data.images[0];
+            img.src = images[currentLightboxImageIndex];
             document.getElementById('lightboxPrompt').textContent = data.prompt || '';
+            renderOnlineGenerationMeta('lightboxMeta', data);
             document.getElementById('lightbox').classList.replace('hidden','flex');
+            playLightboxSlide(direction);
             document.body.style.overflow='hidden';
             lucide.createIcons();
         }
         function closeLightbox(){
             if(lightboxPreview) lightboxPreview.reset();
+            window.clearTimeout(lightboxSlideTimer);
+            document.getElementById('lightboxFrame')?.classList.remove('lightbox-slide-animate', 'lightbox-slide-prev', 'lightbox-slide-next', 'lightbox-slide-soft');
+            renderOnlineGenerationMeta('lightboxMeta', null);
             document.getElementById('lightbox').classList.replace('flex','hidden');
             document.body.style.overflow='auto';
         }
         function handleOutsideClick(e){ if(e.target.id === 'lightbox') closeLightbox(); }
         async function downloadLightboxImage(e){
             e.stopPropagation();
-            const url = currentLightboxData?.images?.[0];
+            const url = currentLightboxImageUrl();
             if(!url) return;
             const res = await fetch(url);
             if(!res.ok) return alert('下载失败');
@@ -700,19 +2383,11 @@
             link.remove();
             setTimeout(() => URL.revokeObjectURL(link.href), 1000);
         }
-        function zoomImage(){ if(currentResult) openLightbox(currentResult); }
+        function zoomImage(){ if(currentResult) openLightbox(currentResult, currentResultImageIndex); }
         function applySameStyle(){
             if(!currentLightboxData) return;
             document.getElementById('promptInput').value = currentLightboxData.prompt || '';
-            [1,2,3].forEach(id => clearSlot(id));
-            (currentLightboxData.params?.reference_images || []).slice(0,3).forEach((ref,i) => {
-                refs[i+1] = ref; const prev = document.getElementById(`prev${i+1}`);
-                prev.src = ref.url; prev.classList.remove('hidden'); document.getElementById(`del${i+1}`).classList.remove('hidden');
-                getImageDimensions(ref.url).then(dim => {
-                    refDims[i+1] = dim;
-                    updateSizeUI();
-                }).catch(() => {});
-            });
+            applyReferenceImages(currentLightboxData.params?.reference_images || []);
             const size = currentLightboxData.params?.size || '1024x1024';
             const matchedRatio = Object.keys(SIZE_OPTIONS).find(key => SIZE_OPTIONS[key].some(([value]) => value === size)) || 'square';
             const matchedRes = SIZE_OPTIONS[matchedRatio]?.find(([value]) => value === size)?.[1];
@@ -725,6 +2400,7 @@
                 customWidth = parsed?.width || '';
                 customHeight = parsed?.height || '';
                 updateSizeUI();
+                persistOnlineSettings();
             }
             closeLightbox(); window.scrollTo({top:0, behavior:'smooth'});
         }
@@ -732,10 +2408,39 @@
             ev.stopPropagation();
             if(!confirm(tr('online.deleteConfirm'))) return;
             const res = await fetch('/api/history/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({timestamp:ts})}).then(r=>r.json());
-            if(res.success) document.getElementById(`history-${ts}`)?.remove();
+            if(res.success){
+                const card = document.getElementById(`history-${ts}`);
+                const key = card?.dataset.historyTs || String(ts);
+                card?.remove();
+                onlineLightboxDataByKey.delete(key);
+                renderOnlineHistoryRail();
+            }
         }
         const observer = new IntersectionObserver(entries => { if(entries[0].isIntersecting && currentIndex < allHistory.length) loadHistory(1); }, {threshold:.1});
-        window.onload = async () => { applyLanguage(); setRatio('square'); setResolution('1k'); await initModels(); await loadHistory(0); window.HistoryBulkManager?.attach({masonry:'#masonry'}); observer.observe(document.getElementById('loadMoreTrigger')); document.getElementById('loadMoreTrigger').onclick = () => loadHistory(1); };
+        window.onload = async () => {
+            applyLanguage();
+            bindOnlineTaskDock();
+            bindOnlineHistoryRail();
+            bindReferenceInteractions();
+            renderReferenceGrid();
+            updateReferenceUIState();
+            if(hasPersistedOnlineSettings) updateSizeUI();
+            else {
+                setRatio(ONLINE_DEFAULT_RATIO);
+                setResolution(ONLINE_DEFAULT_RESOLUTION);
+            }
+            await initModels();
+            await loadHistory(0);
+            await initOnlineTasks();
+            window.HistoryBulkManager?.attach({masonry:'#masonry'});
+            window.addEventListener('keydown', handleOnlinePreviewKeydown);
+            window.addEventListener('keydown', handleLightboxKeydown);
+            const loadMoreTrigger = document.getElementById('loadMoreTrigger');
+            if(loadMoreTrigger){
+                observer.observe(loadMoreTrigger);
+                loadMoreTrigger.onclick = () => loadHistory(1);
+            }
+        };
     </script>
 </body>
 </html>

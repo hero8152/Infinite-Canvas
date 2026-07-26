@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Canvas 设备配对</title>
+  <style>
+    :root{color-scheme:dark;font-family:Inter,"Microsoft YaHei",sans-serif;background:#0b0d12;color:#f4f6fb}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 20%,#22283a 0,#11141d 38%,#090b10 76%)}
+    main{width:min(430px,100%);padding:32px;border:1px solid #30364a;border-radius:20px;background:rgba(20,23,33,.94);box-shadow:0 28px 90px rgba(0,0,0,.45)}
+    .brand{display:flex;align-items:center;gap:12px;margin-bottom:26px}.mark{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:#6c63ff;font-size:22px;font-weight:800}
+    h1{font-size:22px;margin:0 0 6px}p{margin:0;color:#aab1c3;line-height:1.65;font-size:14px}
+    label{display:block;margin-top:22px;color:#dfe3ed;font-size:13px}input{width:100%;margin-top:8px;padding:13px 14px;border:1px solid #383f54;border-radius:11px;background:#0d1017;color:#fff;outline:none;font-size:15px}
+    #code{font-size:24px;letter-spacing:.32em;text-align:center;padding-left:calc(14px + .32em)}input:focus{border-color:#7b73ff;box-shadow:0 0 0 3px rgba(108,99,255,.15)}
+    button{width:100%;margin-top:20px;padding:13px;border:0;border-radius:11px;background:#6c63ff;color:#fff;font-weight:700;font-size:15px;cursor:pointer}button:disabled{opacity:.55;cursor:wait}
+    #message{min-height:22px;margin-top:14px;text-align:center}.error{color:#ff8a94}.success{color:#6ee7a8}.note{margin-top:22px;padding-top:18px;border-top:1px solid #2c3142;font-size:12px}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><div class="mark">C</div><div><h1>连接 Canvas</h1><p>输入桌面软件显示的 6 位一次性配对码</p></div></div>
+    <form id="form">
+      <label>设备名称<input id="name" maxlength="80" autocomplete="name" placeholder="例如：书房电脑"></label>
+      <label>配对码<input id="code" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required></label>
+      <button id="submit" type="submit">配对并进入</button>
+    </form>
+    <p id="message" aria-live="polite"></p>
+    <p class="note">配对码 5 分钟内有效且只能使用一次。请仅在可信私人局域网中使用，勿将 3000 端口映射到公网。</p>
+  </main>
+  <script>
+    const form=document.getElementById('form'),code=document.getElementById('code'),nameInput=document.getElementById('name'),button=document.getElementById('submit'),message=document.getElementById('message');
+    nameInput.value=localStorage.getItem('canvas.pair.deviceName')||`${navigator.platform||'浏览器'} 浏览器`;
+    code.addEventListener('input',()=>{code.value=code.value.replace(/\D/g,'').slice(0,6)});
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();button.disabled=true;message.className='';message.textContent='正在验证…';
+      try{
+        const response=await fetch('/api/auth/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code.value,name:nameInput.value,client_type:'browser'})});
+        const data=await response.json();if(!response.ok)throw new Error(data.detail||'配对失败');
+        localStorage.setItem('canvas.pair.deviceName',nameInput.value);message.className='success';message.textContent='配对成功，正在进入…';location.replace('/');
+      }catch(error){message.className='error';message.textContent=error.message||String(error);button.disabled=false;code.select()}
+    });
+  </script>
+</body>
+</html>

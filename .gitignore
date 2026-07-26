@@ -1,0 +1,44 @@
+# Dependencies and local package stores
+node_modules/
+.pnpm-store/
+.npm/
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+python/Lib/
+python/Scripts/
+python/Include/
+python/tcl/
+python/share/
+
+# Build outputs and temporary workspaces
+.build/
+build/
+dist/
+release/
+target/
+src-tauri/target/
+src-tauri/gen/
+
+# Local runtime data, logs, and generated output
+data/
+output/
+logs/
+*.log
+tmp/
+temp/
+CLI/**/output/
+
+# Local development records and backups
+backup/
+进度快照/
+避坑指南/
+案例/
+api文档/

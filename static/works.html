@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>作品管理</title>
+    <script>
+        (function(){
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'system';
+                if(theme === 'system') theme = window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light';
+                if(theme === 'dark') document.documentElement.classList.add('studio-theme-dark','theme-dark');
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/js/theme.js?v=2026.07.22.1"></script>
+    <script src="/static/js/i18n.js?v=2026.07.22.3"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.22.1">
+    <link rel="stylesheet" href="/static/css/compare-viewer.css?v=2026.07.22.1">
+    <link rel="stylesheet" href="/static/css/works.css?v=2026.07.22.1">
+</head>
+<body>
+    <main class="works-page">
+        <header class="works-toolbar">
+            <div class="works-heading">
+                <div class="works-title"><span>WORKS</span><h1 data-i18n="works.title">作品管理</h1><em id="worksCount">0</em></div>
+                <nav id="worksTabs" class="works-tabs" aria-label="作品分类">
+                    <button class="active" type="button" data-tab="all" data-i18n="works.all">全部作品</button>
+                    <button type="button" data-tab="favorite" data-i18n="works.favorites">收藏</button>
+                    <button type="button" data-tab="trash" data-i18n="works.trash">回收站</button>
+                </nav>
+            </div>
+            <div class="works-filters">
+                <label class="works-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input id="worksSearch" type="search" data-i18n-placeholder="works.search" placeholder="搜索提示词、模型或文件名"></label>
+                <select id="worksKind" aria-label="作品类型"><option value="" data-i18n="works.allTypes">全部类型</option></select>
+                <button id="worksQuickCompare" class="works-compare-now" type="button" data-i18n="works.compareNow">随时对比</button>
+                <button id="worksRefresh" class="works-icon-button" type="button" data-i18n-title="works.refresh" aria-label="刷新">↻</button>
+            </div>
+        </header>
+
+        <section id="worksGrid" class="works-grid" aria-live="polite"></section>
+        <section id="worksEmpty" class="works-empty hidden"><div>◇</div><h2 data-i18n="works.emptyTitle">还没有作品</h2><p data-i18n="works.emptyHint">生成完成的图片会自动出现在这里</p></section>
+    </main>
+
+    <dialog id="worksCompareDialog" class="works-compare-dialog">
+        <div class="works-compare-shell">
+            <header>
+                <div><small data-i18n="works.compare">划像对比</small><h2 id="compareWorkName">—</h2></div>
+                <div class="works-dialog-actions"><button id="compareFavorite" type="button" aria-label="收藏">☆</button><button id="closeWorksCompare" type="button" aria-label="关闭">×</button></div>
+            </header>
+            <div class="works-compare-controls">
+                <label><span data-i18n="works.targetImage">待核对作品</span><select id="compareTargetSelect"></select></label>
+                <button id="compareTargetFileButton" type="button" data-i18n="works.chooseLocalTarget">选择本地作品</button>
+                <label><span data-i18n="works.baseImage">对比基准</span><select id="compareBaseSelect"></select></label>
+                <button id="compareBaseFileButton" type="button" data-i18n="works.chooseLocalBase">选择本地基准图</button>
+                <span id="compareHint" data-i18n="works.compareHint">滚轮缩放；按住鼠标中键拖拽平移</span>
+            </div>
+            <div id="worksCompareStage" class="works-compare-stage">
+                <img id="worksBeforeImage" data-compare-before alt="基准图">
+                <div id="worksAfterClip" class="works-after-clip" data-compare-after-clip><img id="worksAfterImage" data-compare-after alt="作品"></div>
+                <button id="worksCompareHandle" class="works-compare-handle" data-compare-handle type="button" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span>‹</span><span>›</span></button>
+                <span class="works-compare-label compare-viewer-label before" data-i18n="works.base">基准</span>
+                <span class="works-compare-label compare-viewer-label after" data-i18n="works.work">作品</span>
+                <div class="works-compare-tools compare-viewer-tools">
+                    <button id="worksZoomOut" type="button" data-compare-zoom-out aria-label="缩小">−</button>
+                    <button id="worksZoomReset" type="button" data-compare-zoom-label aria-label="复位">1×</button>
+                    <button id="worksZoomIn" type="button" data-compare-zoom-in aria-label="放大">＋</button>
+                    <button id="worksFullscreen" type="button" data-compare-fullscreen aria-label="全屏"><span class="compare-viewer-fullscreen-enter">⛶</span><span class="compare-viewer-fullscreen-exit">×</span></button>
+                </div>
+            </div>
+            <footer><div id="compareMeta" class="works-compare-meta"></div><button id="compareDownload" type="button" data-i18n="works.download">下载</button></footer>
+        </div>
+    </dialog>
+
+    <dialog id="worksRenameDialog" class="works-rename-dialog">
+        <form id="worksRenameForm" method="dialog">
+            <header><div><small>MANAGE</small><h2 data-i18n="works.renameTitle">重命名作品</h2></div><button id="closeWorksRename" type="button" aria-label="关闭">×</button></header>
+            <label><span data-i18n="works.workName">作品名称</span><input id="worksRenameInput" maxlength="160" autocomplete="off"></label>
+            <footer><button value="cancel" type="button" id="cancelWorksRename" data-i18n="works.cancel">取消</button><button value="default" type="submit" data-i18n="works.saveName">保存名称</button></footer>
+        </form>
+    </dialog>
+
+    <input id="compareBaseFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+    <input id="compareTargetFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+    <div id="worksToast" class="works-toast" role="status"></div>
+    <script src="/static/js/compare-viewer.js?v=2026.07.22.1"></script>
+    <script src="/static/js/works.js?v=2026.07.22.1"></script>
+</body>
+</html>

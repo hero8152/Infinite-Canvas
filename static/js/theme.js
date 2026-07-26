@@ -4,12 +4,25 @@
     const SCALE_KEY = 'studio_ui_scale_mode';
     const SCALE_OPTIONS = ['auto', '100', '115', '125', '140'];
 
+    const systemPreference = window.matchMedia?.('(prefers-color-scheme: dark)');
+
+    function currentThemeMode(){
+        const saved = localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY) || 'system';
+        return ['light','dark','system'].includes(saved) ? saved : 'system';
+    }
+
+    function resolvedTheme(theme=currentThemeMode()){
+        if(theme === 'system') return systemPreference?.matches ? 'dark' : 'light';
+        return theme === 'dark' ? 'dark' : 'light';
+    }
+
     function currentTheme(){
-        return localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY) || 'light';
+        return resolvedTheme();
     }
 
     function applyTheme(theme){
-        const next = theme === 'dark' ? 'dark' : 'light';
+        const mode = ['light','dark','system'].includes(theme) ? theme : currentThemeMode();
+        const next = resolvedTheme(mode);
         const dark = next === 'dark';
         document.documentElement.classList.toggle('studio-theme-dark', dark);
         document.documentElement.classList.toggle('theme-dark', dark);
@@ -17,7 +30,7 @@
             document.body.classList.toggle('studio-theme-dark', dark);
             document.body.classList.toggle('theme-dark', dark);
         }
-        window.dispatchEvent(new CustomEvent('studio-theme-change', { detail: { theme: next } }));
+        window.dispatchEvent(new CustomEvent('studio-theme-change', { detail: { theme: next, mode } }));
     }
 
     function ensureScaleStyle(){
@@ -138,6 +151,7 @@
         } catch(e) {}
         applyScale(next);
         if(shouldBroadcast) broadcastScale(next);
+        if(shouldBroadcast) (window.RuntimeSync || window.top?.RuntimeSync)?.setPreference?.('ui_scale', next);
     }
 
     let resizeTimer = null;
@@ -154,12 +168,14 @@
     window.StudioTheme = {
         key: KEY,
         get: currentTheme,
+        getMode: currentThemeMode,
         apply: applyTheme,
         set(theme){
-            const next = theme === 'dark' ? 'dark' : 'light';
-            localStorage.setItem(KEY, next);
-            localStorage.setItem(LEGACY_KEY, next);
-            applyTheme(next);
+            const mode = ['light','dark','system'].includes(theme) ? theme : 'system';
+            localStorage.setItem(KEY, mode);
+            localStorage.setItem(LEGACY_KEY, mode);
+            applyTheme(mode);
+            (window.RuntimeSync || window.top?.RuntimeSync)?.setPreference?.('theme', mode);
         }
     };
 
@@ -172,11 +188,11 @@
         set: setScaleMode
     };
 
-    applyTheme(currentTheme());
+    applyTheme(currentThemeMode());
     applyScale(currentScaleMode());
 
     document.addEventListener('DOMContentLoaded', () => {
-        applyTheme(currentTheme());
+        applyTheme(currentThemeMode());
         applyScale(currentScaleMode());
     });
     window.addEventListener('message', event => {
@@ -184,8 +200,17 @@
         if(event.data?.type === 'studio-ui-scale') setScaleMode(event.data.mode, false);
     });
     window.addEventListener('storage', event => {
-        if(event.key === KEY || event.key === LEGACY_KEY) applyTheme(currentTheme());
+        if(event.key === KEY || event.key === LEGACY_KEY) applyTheme(currentThemeMode());
         if(event.key === SCALE_KEY) applyScale(currentScaleMode());
     });
     window.addEventListener('resize', scheduleAutoScaleRefresh);
+    systemPreference?.addEventListener?.('change', () => {
+        if(currentThemeMode() === 'system') applyTheme('system');
+    });
+
+    if(!window.RuntimeSync){
+        const script = document.createElement('script');
+        script.src = '/static/js/runtime-sync.js';
+        document.head.appendChild(script);
+    }
 })();

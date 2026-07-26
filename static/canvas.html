@@ -16,12 +16,12 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.06.29.1782696751"></script>
-    <script src="/static/vendor/js/lucide.js?v=2026.06.29.1782696749"></script>
-    <script src="/static/js/theme.js?v=2026.06.29.1782696718"></script>
-    <script src="/static/js/i18n.js?v=2026.06.29.1782699985"></script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.06.29.1782721925">
-    <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.29.1782696682">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/theme.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
+    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.06.30.1783083505">
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.30.1782781876">
 </head>
 <body>
     <div id="shell" class="shell no-canvas">
@@ -42,11 +42,8 @@
                     <button class="tool-btn" onclick="addLoopNode()"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loop">循环</span></button>
                     <button class="tool-btn" onclick="addLLMNode()"><i data-lucide="message-square-text" class="w-4 h-4"></i>LLM</button>
                     <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
-                    <button class="tool-btn" onclick="addMsGenNode()"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.msGenerate">MS生成</span></button>
                     <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
                     <button class="tool-btn" onclick="addRhNode()"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
-                    <button class="tool-btn" onclick="addComfyNode()"><i data-lucide="workflow" class="w-4 h-4"></i>ComfyUI</button>
-                    <button class="tool-btn" onclick="addLTXDirectorNode()"><i data-lucide="film" class="w-4 h-4"></i><span data-i18n="canvas.ltxDirector">LTX Director</span></button>
                     <button class="tool-btn" onclick="addOutputNode()"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
                     <button class="tool-btn" onclick="groupSelectedImages()"><i data-lucide="group" class="w-4 h-4"></i><span data-i18n="canvas.group">分组</span></button>
                 </div>
@@ -70,11 +67,8 @@
                 <button class="menu-btn" onclick="menuAdd('loop')"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
-                <button class="menu-btn" onclick="menuAdd('msgen')"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.modelscopeGenerate">Modelscope生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('rh')"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
-                <button class="menu-btn" onclick="menuAdd('comfy')"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.comfyGenerate">ComfyUI 生成</span></button>
-                <button class="menu-btn" onclick="menuAdd('ltxDirector')"><i data-lucide="film" class="w-4 h-4"></i><span data-i18n="canvas.ltxDirector">LTX Director</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
             </div>
             <div id="linkCreateMenu" class="create-menu"></div>
@@ -231,6 +225,7 @@
                         <button type="button" data-image-edit-mode="outpaint"><i data-lucide="expand" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeOutpaint">扩展</span></button>
                         <button type="button" data-image-edit-mode="mask"><i data-lucide="brush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeMask">遮罩</span></button>
                         <button type="button" data-image-edit-mode="brush"><i data-lucide="paintbrush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeBrush">画笔</span></button>
+                        <button type="button" data-image-edit-mode="resize"><i data-lucide="minimize-2" class="w-3.5 h-3.5"></i><span>缩放</span></button>
                         <button type="button" data-image-edit-mode="grid"><i data-lucide="grid-3x3" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeGrid">宫格切分</span></button>
                     </div>
                     <div class="image-edit-head-end">
@@ -267,6 +262,11 @@
                     <button id="brushUndoBtn" class="image-edit-btn secondary" type="button" onclick="undoEditDrawing()" title="撤销"><i data-lucide="undo-2" class="w-4 h-4"></i></button>
                     <button id="brushRedoBtn" class="image-edit-btn secondary" type="button" onclick="redoEditDrawing()" title="恢复"><i data-lucide="redo-2" class="w-4 h-4"></i></button>
                     <button class="image-edit-btn secondary" type="button" onclick="clearEditDrawing()"><i data-lucide="eraser" class="w-4 h-4"></i><span data-i18n="canvas.clear">清空</span></button>
+                </div>
+                <div id="imageResizeTools" class="image-edit-tools image-resize-tools">
+                    <label><span>倍数</span> <input id="imageResizeScaleRange" type="range" min="0.05" max="1" step="0.05" value="0.5"></label>
+                    <label><input id="imageResizeScaleInput" type="number" min="0.05" max="1" step="0.05" value="0.5"><span>×</span></label>
+                    <span id="imageResizeResolution" class="image-edit-sub image-resize-resolution">-</span>
                 </div>
                 <div id="imageGridTools" class="image-edit-tools">
                     <button id="gridCustomToggle" class="image-edit-btn secondary" type="button" onclick="toggleGridCustomMode()" data-i18n="canvas.gridCustom" data-i18n-title="canvas.gridCustomTitle" title="自由放置切割线">自定义</button>
@@ -316,6 +316,7 @@
                                 <div class="outpaint-handle" data-outpaint-handle="corner"></div>
                             </div>
                             <div id="outpaintResolution" class="outpaint-resolution"></div>
+                            <div id="resizeResolutionOverlay" class="resize-resolution-overlay"></div>
                         </div>
                     </div>
                 </div>
@@ -342,7 +343,6 @@
         </div>
     </div>
 
-    <script src="/static/js/ltx-director-timeline.js?v=2026.06.29.1782696715"></script>
-    <script src="/static/js/canvas.js?v=2026.06.29.1782721954"></script>
+    <script src="/static/js/canvas.js?v=2026.06.30.1783083505"></script>
 </body>
 </html>

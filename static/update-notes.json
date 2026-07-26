@@ -1,22 +1,90 @@
 {
-  "version": "2026.06.29",
-  "updated_at": "2026-06-29T21:05:00+08:00",
+  "version": "1.0.16",
+  "updated_at": "2026-07-23T09:22:39+08:00",
   "items": [
     {
-      "type": "improve",
-      "text": "新增节点排序功能"
+      "type": "feature",
+      "text": "全能模式结果与对比区改为固定正方形框架，生成信息、主预览和候选图分层显示，切换多张结果时不再跳动或遮挡图片"
     },
     {
-      "type": "improve",
-      "text": "优化裁剪功能"
+      "type": "feature",
+      "text": "API 设置新增内置视觉模型，支持自定义 Key、VLM 模型及 IP、端口或域名形式的 OpenAI 兼容地址自动补齐"
     },
     {
-      "type": "improve",
-      "text": "修复日志无法复制信息的bug"
+      "type": "update",
+      "text": "电商生成支持连续多次提交和批量状态轮询，服务端生成任务并发上限提升至 2000，并加入视觉分析并发控制、缓存和增量持久化"
     },
     {
-      "type": "improve",
-      "text": "修复Safari兼容问题"
+      "type": "fix",
+      "text": "全能模式新增自动组合提示词：默认按模特、服装、鞋子、配饰/道具、动作和场景生成完整电商产品图提示词，并可用视觉模型辅助解析"
+    },
+    {
+      "type": "feature",
+      "text": "电商专用模型折叠面板新增比例、分辨率、质量和生成数量下拉参数，并支持 4:5 比例"
+    },
+    {
+      "type": "fix",
+      "text": "修复相机 MPO/JPEG 图片可正常预览却被电商换衣误判为无效 garment 的问题"
+    },
+    {
+      "type": "feature",
+      "text": "电商专用接入 shiying 原生 Gemini 图片编辑，支持 gemini-3-pro-image-preview 多参考图生成"
+    },
+    {
+      "type": "feature",
+      "text": "服装类型自动识别可调用本地视觉模型，并在生成结果中显示具体服装名称"
+    },
+    {
+      "type": "update",
+      "text": "移除本地功能菜单、工作流设置、ComfyUI/Forge Neo/旧 ModelScope 专用生成入口及其后端接口和内置工作流"
+    },
+    {
+      "type": "update",
+      "text": "无限画布与智能画布统一使用在线 API 生成；旧本地生成节点仅保留不可运行的兼容提示"
+    },
+    {
+      "type": "update",
+      "text": "API 平台列表移除未配置的 ModelScope、RunningHub、火山引擎和灵境预置项，保留 Grsai 并新增 shiying"
+    },
+    {
+      "type": "feature",
+      "text": "电商专用新增可折叠平台/模型选择器，仅显示已启用、已配置 API Key 的真实模型"
+    },
+    {
+      "type": "feature",
+      "text": "新增“电商专用”工作台：一键换衣、动作迁移、道具替换、角度修改和背景修改"
+    },
+    {
+      "type": "feature",
+      "text": "新增 1K 快览与 4 张 2K 上架候选、原图/生成图划像对比及任务版本历史"
+    },
+    {
+      "type": "feature",
+      "text": "新增上架前人工质量门禁、正式导出和保存到素材库闭环"
+    },
+    {
+      "type": "update",
+      "text": "仅使用现有图像 API 自动路由，并在上游状态未知时阻止自动补发以避免重复扣费"
+    },
+    {
+      "type": "feature",
+      "text": "新增 OpenAI Codex CLI 平台"
+    },
+    {
+      "type": "feature",
+      "text": "图片编辑新增缩放原图"
+    },
+    {
+      "type": "feature",
+      "text": "Alt 复制支持保留连线"
+    },
+    {
+      "type": "update",
+      "text": "图片节点标题可显示改名"
+    },
+    {
+      "type": "feature",
+      "text": "生成完成新增提示音"
     }
   ]
 }

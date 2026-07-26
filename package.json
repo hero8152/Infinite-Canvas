@@ -1,0 +1,15 @@
+{
+  "name": "canvas-windows-desktop",
+  "private": true,
+  "version": "1.0.16",
+  "scripts": {
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build --no-bundle",
+    "portable:build": "powershell -ExecutionPolicy Bypass -File tools/build-portable.ps1",
+    "portable:release": "powershell -ExecutionPolicy Bypass -File tools/build-portable.ps1 -IncrementVersion",
+    "version:patch": "powershell -ExecutionPolicy Bypass -File tools/increment-version.ps1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

@@ -51,9 +51,11 @@
         window.dispatchEvent(new CustomEvent('studio-lang-change', { detail:{ lang:lang() } }));
     }
 
-    function set(next){
-        localStorage.setItem(KEY, next === 'en' ? 'en' : 'zh');
+    function set(next, options={}){
+        const value = next === 'en' ? 'en' : 'zh';
+        localStorage.setItem(KEY, value);
         apply();
+        if(options.sync !== false) (window.RuntimeSync || window.top?.RuntimeSync)?.setPreference?.('language', value);
     }
 
     function toggle(){

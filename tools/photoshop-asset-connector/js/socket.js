@@ -9,11 +9,12 @@
     closeSocket();
     if (!handlers.isLive()) return;
     let ws;
-    try { ws = new WebSocket(`${net.wsBase()}/ws/stats`); }
+    try { ws = new WebSocket(`${net.wsBase()}/ws/events`); }
     catch (e) { return; }
     state.ws = ws;
 
     ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({ type: 'auth', token: state.token, client_id: 'photoshop' }));
       state.wsBackoff = 1000;
       clearInterval(state.wsPing);
       state.wsPing = setInterval(() => { try { ws.send('ping'); } catch (e) {} }, 15000);
@@ -24,8 +25,8 @@
     ws.addEventListener('message', (evt) => {
       let msg; try { msg = JSON.parse(evt.data); } catch (e) { return; }
       if (!msg || msg.type === 'pong') return;
-      if (msg.type === 'asset_library_updated') handlers.onUpdate('assets');
-      else if (msg.type === 'canvas_updated') handlers.onUpdate('canvas');
+      if (msg.type === 'entity.changed' && msg.topic === 'asset') handlers.onUpdate('assets');
+      else if (msg.type === 'entity.changed' && msg.topic === 'canvas') handlers.onUpdate('canvas');
     });
 
     ws.addEventListener('close', () => {

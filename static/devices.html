@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canvas 配对设备</title>
+  <style>
+    :root { color-scheme: light dark; font-family: "Microsoft YaHei", system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; background: #11131a; color: #eef0f7; }
+    main { width: min(820px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 64px; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+    h1 { margin: 0; font-size: 26px; }
+    p { color: #aeb4c5; line-height: 1.6; }
+    .card { margin-top: 24px; padding: 22px; border: 1px solid #313646; border-radius: 14px; background: #191c25; }
+    button, a.button { border: 0; border-radius: 8px; padding: 10px 16px; font: inherit; cursor: pointer; color: #fff; background: #536dfe; text-decoration: none; }
+    button.danger { background: #a93c4a; }
+    button:disabled { opacity: .55; cursor: default; }
+    #pair-code { margin: 18px 0 8px; font: 700 38px/1 ui-monospace, Consolas, monospace; letter-spacing: 10px; }
+    .device { display: grid; grid-template-columns: 1fr auto; gap: 10px 18px; align-items: center; padding: 16px 0; border-bottom: 1px solid #303543; }
+    .device:last-child { border-bottom: 0; }
+    .device strong { display: block; margin-bottom: 5px; }
+    .meta, #pair-expiry, #empty { color: #949bad; font-size: 13px; }
+    .error { color: #ff8e9a; }
+  </style>
+</head>
+<body>
+  <main>
+    <header><div><h1>配对设备</h1><p>配对码仅可使用一次，并在 5 分钟后失效。</p></div><a class="button" href="/">返回 Canvas</a></header>
+    <section class="card">
+      <button id="create-code" type="button">生成配对码</button>
+      <div id="pair-code">------</div>
+      <div id="pair-expiry">尚未生成</div>
+    </section>
+    <section class="card">
+      <h2>已授权设备</h2>
+      <div id="devices"></div>
+      <div id="empty">正在加载…</div>
+    </section>
+  </main>
+  <script>
+    const codeButton = document.getElementById('create-code');
+    const codeBox = document.getElementById('pair-code');
+    const expiryBox = document.getElementById('pair-expiry');
+    let expiryTimer = 0;
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, { credentials: 'same-origin', ...options });
+      if (response.status === 401) { location.href = '/pair'; throw new Error('会话已失效'); }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `请求失败 (${response.status})`);
+      return data;
+    }
+
+    function renderExpiry(expiresAt) {
+      clearInterval(expiryTimer);
+      const refresh = () => {
+        const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+        expiryBox.textContent = seconds ? `${seconds} 秒后失效` : '配对码已失效';
+        if (!seconds) { clearInterval(expiryTimer); codeBox.textContent = '------'; }
+      };
+      refresh();
+      expiryTimer = setInterval(refresh, 1000);
+    }
+
+    async function createCode() {
+      codeButton.disabled = true;
+      try {
+        const data = await api('/api/auth/pair-code', { method: 'POST' });
+        codeBox.textContent = data.code;
+        renderExpiry(data.expires_at);
+      } catch (error) { expiryBox.textContent = error.message; expiryBox.className = 'error'; }
+      finally { codeButton.disabled = false; }
+    }
+
+    function timeText(value) {
+      if (!value) return '从未访问';
+      return new Date(value).toLocaleString();
+    }
+
+    async function loadDevices() {
+      const host = document.getElementById('devices');
+      const empty = document.getElementById('empty');
+      try {
+        const { devices } = await api('/api/auth/devices');
+        host.replaceChildren(...devices.map(device => {
+          const row = document.createElement('div'); row.className = 'device';
+          const info = document.createElement('div');
+          const name = document.createElement('strong'); name.textContent = device.name || '未命名设备';
+          const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = `${device.client_type} · 最后访问：${timeText(device.last_seen_at)}`;
+          info.append(name, meta);
+          const revoke = document.createElement('button'); revoke.className = 'danger'; revoke.textContent = '撤销';
+          revoke.onclick = async () => { revoke.disabled = true; try { await api(`/api/auth/devices/${encodeURIComponent(device.id)}`, { method: 'DELETE' }); await loadDevices(); } catch (error) { alert(error.message); revoke.disabled = false; } };
+          row.append(info, revoke); return row;
+        }));
+        empty.textContent = devices.length ? '' : '暂无已授权设备';
+      } catch (error) { empty.textContent = error.message; empty.className = 'error'; }
+    }
+
+    codeButton.addEventListener('click', createCode);
+    loadDevices();
+  </script>
+</body>
+</html>

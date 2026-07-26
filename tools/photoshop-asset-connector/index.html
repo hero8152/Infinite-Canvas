@@ -80,7 +80,7 @@
           <div class="panel-head">
             <div class="panel-title">
               <strong>生成</strong>
-              <span>API / MS / RH / ComfyUI</span>
+              <span>API / MS / RH</span>
             </div>
           </div>
 
@@ -89,7 +89,6 @@
               <button class="seg active" type="button" data-mode="api">API</button>
               <button class="seg" type="button" data-mode="ms">MS</button>
               <button class="seg" type="button" data-mode="rh">RH</button>
-              <button class="seg last" type="button" data-mode="comfy">ComfyUI</button>
             </div>
 
             <div id="genApiBar" class="gen-row2">
@@ -101,11 +100,6 @@
               <div class="gen-label">RunningHub 工作流</div>
               <sp-picker id="genRhWorkflow" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
               <label class="gen-check"><input id="genRhWallet" type="checkbox"> 使用钱包扣费</label>
-            </div>
-
-            <div id="genComfyBar" class="hidden workflow-box">
-              <div class="gen-label">ComfyUI 工作流</div>
-              <sp-picker id="genComfyWorkflow" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
             </div>
 
             <textarea id="genPrompt" class="gen-prompt" rows="3" placeholder="描述你想生成的画面…"></textarea>
@@ -196,6 +190,12 @@
                        placeholder="例：192.168.1.10:3000">
                 <button id="connectBtn" class="primary-sm" type="button">连接</button>
               </div>
+            </div>
+
+            <div class="field">
+              <label>访问令牌 / 6 位配对码</label>
+              <input id="accessToken" class="server" type="password" spellcheck="false" autocomplete="off"
+                     placeholder="粘贴令牌，或输入桌面端配对码">
             </div>
 
             <div id="connMsg" class="conn-msg">同一局域网填运行后端那台电脑的 IP:端口。</div>

@@ -1,0 +1,23 @@
+.compare-viewer-stage { --compare-divider:50%; --compare-scale:1; --compare-pan-x:0px; --compare-pan-y:0px; position:relative; overflow:hidden; user-select:none; touch-action:none; }
+.compare-viewer-stage .compare-viewer-media { transform:translate3d(var(--compare-pan-x),var(--compare-pan-y),0) scale(var(--compare-scale)); transform-origin:50% 50%; transition:transform .14s ease; will-change:transform; }
+.compare-viewer-stage.is-panning .compare-viewer-media { transition:none; cursor:grabbing; }
+.compare-viewer-stage.is-zoomed { cursor:grab; }
+.compare-viewer-stage .compare-viewer-after-clip { width:var(--compare-divider); }
+.compare-viewer-stage .compare-viewer-handle { left:var(--compare-divider); }
+.compare-viewer-stage:fullscreen,
+.compare-viewer-stage.compare-viewer-fallback-fullscreen { width:100vw !important; height:100vh !important; max-width:none !important; max-height:none !important; border:0 !important; border-radius:0 !important; background:#090a0d; }
+.compare-viewer-stage.compare-viewer-fallback-fullscreen { position:fixed !important; inset:0 !important; z-index:1000 !important; }
+.compare-viewer-stage:fullscreen .compare-viewer-tools,
+.compare-viewer-stage.compare-viewer-fallback-fullscreen .compare-viewer-tools { right:22px; bottom:22px; transform:scale(1.08); transform-origin:right bottom; }
+.compare-viewer-stage:fullscreen .compare-viewer-label,
+.compare-viewer-stage.compare-viewer-fallback-fullscreen .compare-viewer-label { top:22px; }
+.compare-viewer-stage:fullscreen .compare-viewer-label.before,
+.compare-viewer-stage.compare-viewer-fallback-fullscreen .compare-viewer-label.before { left:22px; }
+.compare-viewer-stage:fullscreen .compare-viewer-label.after,
+.compare-viewer-stage.compare-viewer-fallback-fullscreen .compare-viewer-label.after { right:22px; }
+.compare-viewer-fullscreen-exit { display:none; }
+.compare-viewer-stage:fullscreen .compare-viewer-fullscreen-enter,
+.compare-viewer-stage.compare-viewer-fallback-fullscreen .compare-viewer-fullscreen-enter { display:none; }
+.compare-viewer-stage:fullscreen .compare-viewer-fullscreen-exit,
+.compare-viewer-stage.compare-viewer-fallback-fullscreen .compare-viewer-fullscreen-exit { display:inline; }
+

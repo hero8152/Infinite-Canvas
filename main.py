@@ -25,6 +25,7 @@ import math
 import shlex
 import functools
 import html
+import ipaddress
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple
 from threading import Lock, Thread
@@ -34,14 +35,49 @@ from io import BytesIO
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
+PROJECT_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_MODULE_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_MODULE_DIR)
+
+from canvas_core.paths import APP_PATHS
+from canvas_core.runtime import RUNTIME_OPTIONS, request_shutdown, run_uvicorn
+from canvas_core.storage_bootstrap import (
+    DATA_LAYOUT,
+    DATABASE,
+    MAINTENANCE_REPORT,
+    MIGRATION_REPORT,
+    SECRET_MIGRATION_REPORT,
+    SECRET_STORE,
+)
+from canvas_core.auth import AuthIdentity, AuthManager, SESSION_COOKIE
+from canvas_core.database import RevisionConflict
+from canvas_core.events import entity_changed
+from canvas_core.ecommerce import (
+    QUALITY_CHECKS as ECOMMERCE_QUALITY_CHECKS,
+    build_model_catalog as build_ecommerce_model_catalog,
+    build_prompt as build_ecommerce_prompt,
+    parse_garment_analysis as parse_ecommerce_garment_analysis,
+    parse_universal_reference_analysis as parse_ecommerce_universal_reference_analysis,
+    public_capabilities as ecommerce_public_capabilities,
+    resolve_generation_settings as resolve_ecommerce_generation_settings,
+    route_candidates as ecommerce_route_candidates,
+    safe_fallback_error as ecommerce_safe_fallback_error,
+    validate_input_roles as validate_ecommerce_input_roles,
+    validate_mode as validate_ecommerce_mode,
+    validate_operation as validate_ecommerce_operation,
+)
+
+AUTH_MANAGER = AuthManager(DATABASE, RUNTIME_OPTIONS.desktop_token)
+
 QUIET_ACCESS_PATHS = {
-    "/api/queue_status",
     "/api/canvases",
     "/api/canvases/trash",
+    "/api/auth/bootstrap",
+    "/api/runtime/shutdown",
 }
 QUIET_ACCESS_PREFIXES = (
     "/api/canvases/",
@@ -67,11 +103,43 @@ logging.getLogger("uvicorn.access").addFilter(QuietAccessLogFilter())
 
 app = FastAPI()
 
+PUBLIC_HTTP_PATHS = {
+    "/pair",
+    "/favicon.ico",
+    "/api/health",
+    "/api/auth/status",
+    "/api/auth/pair",
+    "/api/auth/bootstrap",
+    "/api/runtime/shutdown",
+}
+
+
+def request_access_token(request: Request) -> str:
+    bearer = AUTH_MANAGER.bearer_token(request.headers.get("authorization", ""))
+    return bearer or request.cookies.get(SESSION_COOKIE, "")
+
+
+@app.middleware("http")
+async def authentication_middleware(request: Request, call_next):
+    path = request.url.path.rstrip("/") or "/"
+    if request.method == "OPTIONS" or path in PUBLIC_HTTP_PATHS:
+        return await call_next(request)
+    identity = AUTH_MANAGER.authenticate(request_access_token(request))
+    if identity:
+        request.state.auth_identity = identity
+        return await call_next(request)
+    if path == "/" or not path.startswith("/api/") and "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse("/pair", status_code=307)
+    return JSONResponse({"detail": "设备尚未配对或会话已失效"}, status_code=401)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["null", "http://127.0.0.1:3000", "http://localhost:3000"],
+    allow_origin_regex=r"(?:chrome-extension://[a-z]{32}|uxp://[^/]+|https?://(?:127\.0\.0\.1|localhost)(?::\d+)?)",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Canvas-Client", "X-User-Id"],
 )
 
 # --- WebSocket 状态管理器 ---
@@ -80,11 +148,15 @@ class ConnectionManager:
         self.active_connections: List[WebSocket] = []
         self.user_connections: Dict[str, WebSocket] = {}
         self.connection_clients: Dict[WebSocket, str] = {}
+        self.connection_devices: Dict[WebSocket, str] = {}
 
-    async def connect(self, websocket: WebSocket, client_id: str = None):
-        await websocket.accept()
+    async def connect(self, websocket: WebSocket, client_id: str = None, identity: AuthIdentity = None, accept: bool = True):
+        if accept:
+            await websocket.accept()
         self.active_connections.append(websocket)
         self.connection_clients[websocket] = client_id or f"anon-{id(websocket)}"
+        if identity:
+            self.connection_devices[websocket] = identity.device_id
         if client_id:
             self.user_connections[client_id] = websocket
         print(f"WS Connected. Total: {len(self.active_connections)}, Online: {self.online_count()}")
@@ -94,10 +166,20 @@ class ConnectionManager:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
         self.connection_clients.pop(websocket, None)
+        self.connection_devices.pop(websocket, None)
         if client_id and self.user_connections.get(client_id) is websocket:
             del self.user_connections[client_id]
         print(f"WS Disconnected. Total: {len(self.active_connections)}, Online: {self.online_count()}")
         await self.broadcast_count()
+
+    async def disconnect_device(self, device_id: str):
+        targets = [ws for ws, current in self.connection_devices.items() if current == device_id]
+        for websocket in targets:
+            try:
+                await websocket.close(code=4403, reason="设备授权已撤销")
+            except Exception:
+                pass
+            await self.disconnect(websocket)
 
     def online_count(self):
         visible_clients = {
@@ -117,38 +199,23 @@ class ConnectionManager:
                 self.active_connections.remove(connection)
 
     async def broadcast_new_image(self, image_data: dict):
-        data = json.dumps({"type": "new_image", "data": image_data})
-        for connection in self.active_connections[:]:
-            try:
-                await connection.send_text(data)
-            except Exception as e:
-                print(f"Broadcast image error: {e}")
-                self.active_connections.remove(connection)
+        return None
 
     async def broadcast_canvas_updated(self, canvas_id: str, updated_at: int, client_id: str = ""):
-        data = json.dumps({
-            "type": "canvas_updated",
-            "canvas_id": canvas_id,
-            "updated_at": updated_at,
-            "client_id": client_id or "",
-        })
-        for connection in self.active_connections[:]:
-            try:
-                await connection.send_text(data)
-            except Exception as e:
-                print(f"Broadcast canvas error: {e}")
-                self.active_connections.remove(connection)
+        canvas = DATABASE.get_canvas(canvas_id) or {}
+        await self.broadcast_entity_changed("canvas", canvas_id, int(canvas.get("revision") or 0), client_id, updated_at)
 
     async def broadcast_asset_library_updated(self, updated_at: int = 0):
-        data = json.dumps({
-            "type": "asset_library_updated",
-            "updated_at": updated_at or now_ms(),
-        })
+        revision = DATABASE.next_revision("asset", "global")
+        await self.broadcast_entity_changed("asset", "global", revision, updated_at=updated_at)
+
+    async def broadcast_entity_changed(self, topic: str, entity_id: str, revision: int, actor_id: str = "", updated_at: int = 0):
+        data = json.dumps(entity_changed(topic, entity_id, revision, actor_id, updated_at).public(), ensure_ascii=False)
         for connection in self.active_connections[:]:
             try:
                 await connection.send_text(data)
             except Exception as e:
-                print(f"Broadcast asset library error: {e}")
+                print(f"Broadcast entity event error: {e}")
                 self.active_connections.remove(connection)
 
     async def send_personal_message(self, message: dict, client_id: str):
@@ -161,7 +228,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "2026.06.03"
+APP_VERSION = "1.0.16"
 GITHUB_REPO_URL = "https://github.com/hero8152/Infinite-Canvas"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1"
@@ -180,7 +247,7 @@ MODELSCOPE_TREE_URL = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infini
 async def startup_event():
     global GLOBAL_LOOP
     GLOBAL_LOOP = asyncio.get_running_loop()
-    sync_static_html_versions()
+    # 程序资源在桌面包内按只读处理；静态资源版本号只在构建阶段写入暂存副本。
     # 启动时整理资产库：给所有图片分组（含默认角色/场景）建好文件夹，并把根目录里的旧素材归整进去。
     try:
         await asyncio.to_thread(migrate_asset_library_into_dirs)
@@ -196,64 +263,105 @@ async def startup_event():
         await asyncio.to_thread(migrate_mislabeled_image_extensions)
     except Exception as exc:
         print(f"纠正图片扩展名失败: {exc}")
+    try:
+        report = await asyncio.to_thread(prune_removed_provider_presets_once)
+        if report.get("removed"):
+            print(f"已移除未使用的预置 API 平台：{', '.join(report['removed'])}")
+    except Exception as exc:
+        print(f"清理未使用预置 API 平台失败: {exc}")
+    try:
+        await asyncio.to_thread(seed_builtin_local_vision_secret_once)
+    except Exception as exc:
+        print(f"初始化内置视觉模型失败: {exc}")
+    try:
+        await asyncio.to_thread(load_online_image_tasks_from_disk)
+    except Exception as exc:
+        print(f"在线生图任务恢复失败: {exc}")
+    try:
+        await asyncio.to_thread(load_ecommerce_tasks_from_disk)
+    except Exception as exc:
+        print(f"电商专用任务恢复失败: {exc}")
 
+@app.websocket("/ws/events")
 @app.websocket("/ws/stats")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
-    await manager.connect(websocket, client_id)
+    await websocket.accept()
+    connected = False
     try:
+        raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+        try:
+            auth_message = json.loads(raw_auth)
+        except json.JSONDecodeError:
+            auth_message = {}
+        if auth_message.get("type") != "auth":
+            await websocket.send_text(json.dumps({"type": "auth.failed", "message": "首条消息必须完成鉴权"}))
+            await websocket.close(code=4401)
+            return
+        token = str(auth_message.get("token") or "").strip()
+        token = token or websocket.cookies.get(SESSION_COOKIE, "")
+        token = token or AUTH_MANAGER.bearer_token(websocket.headers.get("authorization", ""))
+        identity = AUTH_MANAGER.authenticate(token)
+        if not identity:
+            await websocket.send_text(json.dumps({"type": "auth.failed", "message": "设备尚未配对或授权已失效"}))
+            await websocket.close(code=4401)
+            return
+        client_id = str(auth_message.get("client_id") or client_id or "").strip()
+        await manager.connect(websocket, client_id, identity, accept=False)
+        connected = True
+        await websocket.send_text(json.dumps({"type": "auth.ok", "device": identity.public()}))
         while True:
             data = await websocket.receive_text()
-            if data == "ping":
+            if data == "ping" or data == '{"type":"ping"}':
                 await websocket.send_text(json.dumps({"type": "pong"}))
     except WebSocketDisconnect:
-        await manager.disconnect(websocket, client_id)
+        if connected:
+            await manager.disconnect(websocket, client_id)
+    except asyncio.TimeoutError:
+        await websocket.close(code=4401, reason="鉴权超时")
     except Exception as e:
         print(f"WS Error: {e}")
-        await manager.disconnect(websocket, client_id)
+        if connected:
+            await manager.disconnect(websocket, client_id)
 
 # --- 配置区域 ---
 
-CLIENT_ID = str(uuid.uuid4())
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKFLOW_DIR = os.path.join(BASE_DIR, "workflows")
-WORKFLOW_PATH = os.path.join(WORKFLOW_DIR, "Z-Image.json")
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+BASE_DIR = str(APP_PATHS.app_root)
+STATIC_DIR = str(APP_PATHS.web_root)
 STATIC_RUNNINGHUB_DIR = os.path.join(STATIC_DIR, "runninghub")
 STATIC_RUNNINGHUB_THUMBNAIL_DIR = os.path.join(STATIC_RUNNINGHUB_DIR, "thumbnails")
 STATIC_RUNNINGHUB_API_PROVIDERS_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "api_providers.json")
 STATIC_RUNNINGHUB_MODEL_REGISTRY_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "models_registry.json")
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-OUTPUT_INPUT_DIR = os.path.join(ASSETS_DIR, "input")
-OUTPUT_OUTPUT_DIR = os.path.join(ASSETS_DIR, "output")
-ASSET_LIBRARY_DIR = os.path.join(ASSETS_DIR, "library")
-LOCAL_UPLOAD_DIR = os.path.join(ASSETS_DIR, "uploads")
-HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
-API_ENV_FILE = os.path.join(BASE_DIR, "API", ".env")
-DATA_DIR = os.path.join(BASE_DIR, "data")
-CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
-CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
-MEDIA_PREVIEW_DIR = os.path.join(DATA_DIR, "media_previews")
-ASSET_LIBRARY_PATH = os.path.join(DATA_DIR, "asset_library.json")
-PROMPT_LIBRARY_PATH = os.path.join(DATA_DIR, "prompt_libraries.json")
-API_PROVIDERS_FILE = os.path.join(DATA_DIR, "api_providers.json")
-RUNNINGHUB_WORKFLOW_STORE_FILE = os.path.join(DATA_DIR, "runninghub_workflows.json")
-SHARED_FOLDERS_FILE = os.path.join(DATA_DIR, "shared_folders.json")
-GLOBAL_CONFIG_FILE = os.path.join(BASE_DIR, "global_config.json")
+OUTPUT_DIR = str(DATA_LAYOUT.exports)
+ASSETS_DIR = str(DATA_LAYOUT.media)
+OUTPUT_INPUT_DIR = str(DATA_LAYOUT.media_input)
+OUTPUT_OUTPUT_DIR = str(DATA_LAYOUT.media_generated)
+ASSET_LIBRARY_DIR = str(DATA_LAYOUT.media_library)
+LOCAL_UPLOAD_DIR = str(DATA_LAYOUT.media_uploads)
+HISTORY_FILE = ""
+API_ENV_FILE = str(DATA_LAYOUT.secret_env)
+DATA_DIR = str(APP_PATHS.data_root)
+CONVERSATION_DIR = ""
+CANVAS_DIR = ""
+MEDIA_PREVIEW_DIR = str(DATA_LAYOUT.cache_previews)
+ASSET_LIBRARY_PATH = ""
+PROMPT_LIBRARY_PATH = ""
+API_PROVIDERS_FILE = ""
+RUNNINGHUB_WORKFLOW_STORE_FILE = ""
+SHARED_FOLDERS_FILE = ""
+ONLINE_IMAGE_TASKS_FILE = ""
+GLOBAL_CONFIG_FILE = ""
 CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
 LOCAL_IMAGE_IMPORT_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 RUNNINGHUB_THUMBNAIL_EXTS = (".jpg",)
 
-QUEUE = []
-QUEUE_LOCK = Lock()
 HISTORY_LOCK = Lock()
 GLOBAL_CONFIG_LOCK = Lock()
 CONVERSATION_LOCK = Lock()
 CANVAS_LOCK = Lock()
-LOAD_LOCK = Lock()
 RUNNINGHUB_WORKFLOW_LOCK = Lock()
-NEXT_TASK_ID = 1
+ONLINE_IMAGE_TASK_LOCK = Lock()
+ECOMMERCE_TASK_LOCK = Lock()
 UPDATE_LOCK = Lock()
 JIMENG_LOGIN_SESSION = {
     "proc": None,
@@ -263,12 +371,34 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
 RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/models_registry.json"
 RUNNINGHUB_LLM_BASE_URL = "https://llm.runninghub.cn/v1"
+GRSAI_DEFAULT_BASE_URL = "https://grsaiapi.com"
+GRSAI_DEFAULT_IMAGE_MODELS = [
+    "nano-banana",
+    "nano-banana-fast",
+    "nano-banana-2",
+    "nano-banana-2-cl",
+    "nano-banana-2-2k-cl",
+    "nano-banana-2-4k-cl",
+    "nano-banana-pro",
+    "nano-banana-pro-vt",
+    "nano-banana-pro-cl",
+    "nano-banana-pro-vip",
+    "nano-banana-pro-4k-vip",
+    "gpt-image-2",
+    "gpt-image-2-vip",
+]
+SHIYING_DEFAULT_BASE_URL = "https://www.shiying-api.com"
+SHIYING_DEFAULT_IMAGE_MODELS = ["gemini-3-pro-image-preview"]
+LOCAL_VISION_DEFAULT_BASE_URL = "http://115.231.35.105:12345/v1"
+LOCAL_VISION_DEFAULT_MODEL = "qwen3.5-9b-vlm"
+LOCAL_VISION_BUILTIN_API_KEY = "sk-lm-VF0plfgx:ZdOB4jyCcB63K1N1tIQg"
+LOCAL_VISION_SECRET_SEED_SETTING = "local_vision_builtin_secret_v1"
 LINGJING_DEFAULT_BASE_URL = "https://apistudio.vip"
 RUNNINGHUB_LLM_MODELS_URLS = [
     "https://llm.runninghub.cn/v1/models",
@@ -299,6 +429,12 @@ JIMENG_DEFAULT_VIDEO_MODELS = [
     "3.0",
     "3.0fast",
 ]
+CODEX_DEFAULT_IMAGE_MODELS = ["$imagegen"]
+CODEX_DEFAULT_CHAT_MODELS = ["gpt-5.5"]
+try:
+    CODEX_DEFAULT_TIMEOUT = max(30, min(3600, int(os.getenv("CODEX_CLI_TIMEOUT", "900"))))
+except Exception:
+    CODEX_DEFAULT_TIMEOUT = 900
 AGNES_DEFAULT_VIDEO_MODELS = ["agnes-video-v2.0"]
 JIMENG_LEGACY_IMAGE_MODELS = {
     "jimeng-image-2k",
@@ -426,36 +562,13 @@ RUNNINGHUB_DEFAULT_WORKFLOWS = [
 ]
 
 def ensure_runtime_config_files():
-    """首次运行时提前创建配置目录，避免第一次保存 API Key 时才创建目录/文件。"""
-    try:
-        os.makedirs(os.path.dirname(API_ENV_FILE), exist_ok=True)
-        os.makedirs(DATA_DIR, exist_ok=True)
-        if not os.path.exists(API_ENV_FILE):
-            with open(API_ENV_FILE, "a", encoding="utf-8"):
-                pass
-    except Exception as e:
-        print(f"初始化 API 配置目录失败: {e}")
+    """配置目录由 data 布局创建；密钥只写 DPAPI 存储，不再创建明文 env。"""
+    os.makedirs(DATA_DIR, exist_ok=True)
 
 def load_env_file():
-    if not os.path.exists(API_ENV_FILE):
-        return
-    try:
-        with open(API_ENV_FILE, 'r', encoding='utf-8-sig') as f:
-            for raw_line in f.read().splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                os.environ.setdefault(key, value)
-    except Exception as e:
-        print(f"加载 API/.env 失败: {e}")
+    SECRET_STORE.load_into_environ()
 ensure_runtime_config_files()
 load_env_file()
-
-COMFYUI_INSTANCES = [s.strip() for s in os.getenv("COMFYUI_INSTANCES", "127.0.0.1:8188").split(",") if s.strip()]
-COMFYUI_ADDRESS = COMFYUI_INSTANCES[0]
 
 AI_BASE_URL = os.getenv("COMFLY_BASE_URL", "https://ai.comfly.chat").rstrip("/")
 AI_API_KEY = os.getenv("COMFLY_API_KEY", "")
@@ -512,10 +625,6 @@ MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "30"))
 AI_REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "1800"))
 IMAGE_POLL_INTERVAL = float(os.getenv("IMAGE_POLL_INTERVAL", "2"))
 IMAGE_TASK_TIMEOUT = float(os.getenv("IMAGE_TASK_TIMEOUT", str(AI_REQUEST_TIMEOUT)))
-COMFYUI_HISTORY_TIMEOUT = int(float(os.getenv("COMFYUI_HISTORY_TIMEOUT", "1800")))
-# 下载 ComfyUI 产物的 socket 超时（秒，作用于连接和每次 read）。没有它时一次网络卡顿会让 urlopen 永久挂起，
-# 导致 generate() 不返回、画布卡片一直转圈拿不到结果。给得足够大以容纳大视频/大图的正常下载。
-COMFYUI_DOWNLOAD_TIMEOUT = float(os.getenv("COMFYUI_DOWNLOAD_TIMEOUT", "120"))
 APIMART_IMAGE_TASK_TIMEOUT = float(os.getenv("APIMART_IMAGE_TASK_TIMEOUT", "1800"))
 APIMART_IMAGE_POLL_INTERVAL = float(os.getenv("APIMART_IMAGE_POLL_INTERVAL", "5"))
 APIMART_IMAGE_INITIAL_POLL_DELAY = float(os.getenv("APIMART_IMAGE_INITIAL_POLL_DELAY", "10"))
@@ -620,6 +729,8 @@ VIDEO_MODELS = model_list("VIDEO_MODELS", "veo3-fast", [
 def provider_key_env(provider_id):
     if provider_id == "comfly":
         return "COMFLY_API_KEY"
+    if provider_id == "grsai":
+        return "GRSAI_API_KEY"
     if provider_id == "modelscope":
         return "MODELSCOPE_API_KEY"
     if provider_id == "runninghub":
@@ -639,20 +750,7 @@ def volcengine_secret_key_env():
 
 def read_api_env_value(key: str) -> str:
     key = str(key or "").strip()
-    if not key or not os.path.exists(API_ENV_FILE):
-        return ""
-    try:
-        with open(API_ENV_FILE, "r", encoding="utf-8-sig") as f:
-            for raw_line in f.read().splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                env_key, value = line.split("=", 1)
-                if env_key.strip() == key:
-                    return value.strip().strip('"').strip("'")
-    except Exception:
-        return ""
-    return ""
+    return SECRET_STORE.get(key, "") if key else ""
 
 def provider_env_key_value(provider_id: str) -> str:
     provider_id = str(provider_id or "").strip().lower()
@@ -699,8 +797,12 @@ def bearer_auth_value(value):
     token = strip_auth_scheme(value, "Bearer")
     return f"Bearer {token}" if token else ""
 
-def default_api_providers():
-    # 独立入口平台强制保留，其他平台均可自定义增删
+REMOVED_PROVIDER_PRESET_IDS = {"modelscope", "runninghub", "volcengine", "lingjing", "codex"}
+PROVIDER_PRESET_CLEANUP_SETTING = "provider_preset_cleanup_grsai_v1"
+
+
+def api_provider_templates():
+    # 保留完整模板供协议兼容代码参考；默认平台列表只启用当前实际使用的 Grsai。
     return [
         {
             "id": "modelscope",
@@ -755,6 +857,57 @@ def default_api_providers():
             "volcengine_region": VOLCENGINE_DEFAULT_REGION,
         },
         {
+            "id": "grsai",
+            "name": "Grsai",
+            "base_url": GRSAI_DEFAULT_BASE_URL,
+            "protocol": "openai",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": GRSAI_DEFAULT_IMAGE_MODELS,
+            "chat_models": [],
+            "video_models": [],
+            "model_protocols": {},
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
+        {
+            "id": "shiying",
+            "name": "shiying",
+            "base_url": SHIYING_DEFAULT_BASE_URL,
+            "protocol": "openai",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": SHIYING_DEFAULT_IMAGE_MODELS,
+            "chat_models": [],
+            "video_models": [],
+            "model_protocols": {"gemini-3-pro-image-preview": "gemini"},
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
+        {
+            "id": "local-vision",
+            "name": "本地视觉模型",
+            "base_url": LOCAL_VISION_DEFAULT_BASE_URL,
+            "protocol": "openai",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": [],
+            "chat_models": [LOCAL_VISION_DEFAULT_MODEL],
+            "video_models": [],
+            "model_protocols": {},
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
+        {
             "id": "lingjing",
             "name": "灵境API",
             "base_url": LINGJING_DEFAULT_BASE_URL,
@@ -771,7 +924,27 @@ def default_api_providers():
             "ms_loras": [],
             "ms_defaults_version": 0,
         },
+        {
+            "id": "codex",
+            "name": "OpenAI CLI",
+            "base_url": "",
+            "protocol": "codex",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": CODEX_DEFAULT_IMAGE_MODELS,
+            "chat_models": CODEX_DEFAULT_CHAT_MODELS,
+            "video_models": [],
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
     ]
+
+
+def default_api_providers():
+    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision"}]
 
 def merge_default_api_providers(providers):
     merged = [dict(item) for item in providers]
@@ -832,6 +1005,44 @@ def merge_default_api_providers(providers):
             current["protocol"] = "volcengine"
             current["volcengine_project_name"] = str(current.get("volcengine_project_name") or VOLCENGINE_DEFAULT_PROJECT_NAME).strip() or VOLCENGINE_DEFAULT_PROJECT_NAME
             current["volcengine_region"] = str(current.get("volcengine_region") or VOLCENGINE_DEFAULT_REGION).strip() or VOLCENGINE_DEFAULT_REGION
+    grsai_default = next((d for d in default_api_providers() if d["id"] == "grsai"), None)
+    if grsai_default:
+        current = next((item for item in merged if item.get("id") == "grsai"), None)
+        if not current:
+            merged.append(grsai_default)
+        else:
+            if not current.get("base_url"):
+                current["base_url"] = grsai_default["base_url"]
+            if not current.get("protocol"):
+                current["protocol"] = "openai"
+            current["image_request_mode"] = normalize_image_request_mode(current.get("image_request_mode"))
+            current["image_models"] = model_list_from_values([*(current.get("image_models") or []), *(grsai_default.get("image_models") or [])])
+            current["chat_models"] = model_list_from_values(current.get("chat_models") or [])
+            current["video_models"] = model_list_from_values(current.get("video_models") or [])
+    shiying_default = next((d for d in default_api_providers() if d["id"] == "shiying"), None)
+    if shiying_default:
+        current = next((item for item in merged if item.get("id") == "shiying"), None)
+        if not current:
+            merged.append(shiying_default)
+        else:
+            if not current.get("base_url"):
+                current["base_url"] = shiying_default["base_url"]
+            current["image_models"] = model_list_from_values([*(current.get("image_models") or []), *SHIYING_DEFAULT_IMAGE_MODELS])
+            protocols = normalize_model_protocols(current.get("model_protocols"))
+            protocols.update(shiying_default["model_protocols"])
+            current["model_protocols"] = protocols
+    local_vision_default = next((d for d in default_api_providers() if d["id"] == "local-vision"), None)
+    if local_vision_default:
+        current = next((item for item in merged if item.get("id") == "local-vision"), None)
+        if not current:
+            merged.append(local_vision_default)
+        else:
+            current["name"] = str(current.get("name") or local_vision_default["name"])
+            current["base_url"] = str(current.get("base_url") or local_vision_default["base_url"])
+            current["protocol"] = "openai"
+            current["image_models"] = []
+            current["chat_models"] = model_list_from_values(current.get("chat_models") or local_vision_default["chat_models"])
+            current["video_models"] = []
     lingjing_default = next((d for d in default_api_providers() if d["id"] == "lingjing"), None)
     if lingjing_default:
         current = next((item for item in merged if item.get("id") == "lingjing"), None)
@@ -849,6 +1060,18 @@ def merge_default_api_providers(providers):
             protocols = normalize_model_protocols(current.get("model_protocols"))
             protocols.update(normalize_model_protocols(lingjing_default.get("model_protocols")))
             current["model_protocols"] = protocols
+    codex_default = next((d for d in default_api_providers() if d["id"] == "codex"), None)
+    if codex_default:
+        current = next((item for item in merged if item.get("id") == "codex"), None)
+        if not current:
+            merged.append(codex_default)
+        else:
+            current["protocol"] = "codex"
+            current["base_url"] = ""
+            current["image_request_mode"] = "openai"
+            current["image_models"] = model_list_from_values([*(current.get("image_models") or []), *CODEX_DEFAULT_IMAGE_MODELS])
+            current["chat_models"] = model_list_from_values([*(current.get("chat_models") or []), *CODEX_DEFAULT_CHAT_MODELS])
+            current["video_models"] = []
     # 即梦 CLI 不再是强制保留的默认平台：仅在用户已添加了即梦协议的平台时，规范化其默认模型/地址。
     for current in merged:
         if not is_jimeng_provider(current):
@@ -863,7 +1086,10 @@ def merge_default_api_providers(providers):
             *[item for item in (current.get("video_models") or []) if str(item or "").strip() not in JIMENG_LEGACY_VIDEO_MODELS],
             *JIMENG_DEFAULT_VIDEO_MODELS,
         ])
-    return merged
+    return [
+        item for item in merged
+        if str(item.get("id") or "").strip().lower() not in REMOVED_PROVIDER_PRESET_IDS
+    ]
 
 def normalize_model_list(values):
     return model_list_from_values(values)
@@ -1143,12 +1369,48 @@ def runninghub_openapi_url(provider, path=""):
     base = runninghub_openapi_base_url(provider)
     return f"{base}/{path}" if path else base
 
+def normalize_openai_compatible_base_url(value: str) -> str:
+    text = str(value or "").strip().replace("：", ":")
+    if not text:
+        return ""
+    if len(text) > 300 or re.search(r"\s", text):
+        raise HTTPException(status_code=400, detail="视觉模型请求地址不合法")
+    if not re.match(r"^https?://", text, re.I):
+        host_hint = text.split("/", 1)[0]
+        bare_host = host_hint.rsplit("@", 1)[-1]
+        if bare_host.startswith("["):
+            bare_host = bare_host[1:bare_host.find("]")] if "]" in bare_host else bare_host
+        elif bare_host.count(":") == 1:
+            bare_host = bare_host.split(":", 1)[0]
+        use_http = bare_host.lower() == "localhost"
+        try:
+            ipaddress.ip_address(bare_host)
+            use_http = True
+        except ValueError:
+            pass
+        text = f"{'http' if use_http else 'https'}://{text}"
+    parsed = urllib.parse.urlsplit(text)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="视觉模型请求地址不合法")
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="视觉模型端口不合法") from exc
+    if parsed.query or parsed.fragment:
+        raise HTTPException(status_code=400, detail="视觉模型请求地址不能包含查询参数或片段")
+    path = parsed.path.rstrip("/")
+    if not path:
+        path = "/v1"
+    return urllib.parse.urlunsplit((parsed.scheme.lower(), parsed.netloc, path, "", ""))
+
 def normalize_provider(item):
     provider_id = str(item.get("id") or "").strip().lower()
     if not PROVIDER_ID_RE.fullmatch(provider_id):
         raise HTTPException(status_code=400, detail=f"API 平台 ID 不合法：{provider_id or '(empty)'}")
     name = re.sub(r"\s+", " ", str(item.get("name") or provider_id).strip())[:60] or provider_id
     base_url = str(item.get("base_url") or "").strip().rstrip("/")
+    if provider_id == "local-vision":
+        base_url = normalize_openai_compatible_base_url(base_url or LOCAL_VISION_DEFAULT_BASE_URL)
     if base_url and not re.match(r"^https?://", base_url):
         raise HTTPException(status_code=400, detail=f"{name} 的 Base URL 需要以 http:// 或 https:// 开头")
     protocol = str(item.get("protocol") or "openai").strip().lower()
@@ -1167,9 +1429,15 @@ def normalize_provider(item):
     if provider_id == "jimeng":
         protocol = "jimeng"
         base_url = ""
+    if provider_id == "codex":
+        protocol = "codex"
+        base_url = ""
     if provider_id == "runninghub":
         protocol = "runninghub"
         base_url = base_url or RUNNINGHUB_DEFAULT_BASE_URL
+    if provider_id == "local-vision":
+        protocol = "openai"
+        image_request_mode = "openai"
     return {
         "id": provider_id,
         "name": name,
@@ -1180,9 +1448,9 @@ def normalize_provider(item):
         "image_edit_endpoint": image_edit_endpoint,
         "enabled": bool(item.get("enabled", True)),
         "primary": bool(item.get("primary", False)),
-        "image_models": model_list_from_values(item.get("image_models") or []),
+        "image_models": [] if provider_id == "local-vision" else model_list_from_values(item.get("image_models") or []),
         "chat_models": model_list_from_values(item.get("chat_models") or []),
-        "video_models": model_list_from_values(item.get("video_models") or []),
+        "video_models": [] if provider_id == "local-vision" else model_list_from_values(item.get("video_models") or []),
         "model_protocols": normalize_model_protocols(item.get("model_protocols")),
         "ms_loras": normalize_ms_loras(item.get("ms_loras") or []),
         "ms_defaults_version": int(item.get("ms_defaults_version") or 0),
@@ -1194,22 +1462,50 @@ def normalize_provider(item):
 
 def load_api_providers():
     defaults = default_api_providers()
-    if not os.path.exists(API_PROVIDERS_FILE):
+    raw = DATABASE.load_providers()
+    if not raw:
         return merge_default_api_providers(defaults)
     try:
-        with open(API_PROVIDERS_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        providers = [normalize_provider(item) for item in raw if isinstance(item, dict)]
+        providers = [
+            normalize_provider(item)
+            for item in raw
+            if isinstance(item, dict)
+            and str(item.get("id") or "").strip().lower() not in REMOVED_PROVIDER_PRESET_IDS
+        ]
         return merge_default_api_providers(providers or defaults)
     except Exception as e:
         print(f"加载 API 平台配置失败: {e}")
         return defaults
 
+def prune_removed_provider_presets_once() -> Dict[str, Any]:
+    marker = DATABASE.get_setting(PROVIDER_PRESET_CLEANUP_SETTING, {})
+    value = marker.get("value") if isinstance(marker, dict) else {}
+    if isinstance(value, dict) and value.get("done"):
+        return {"removed": [], "skipped": True}
+    raw = DATABASE.load_providers()
+    rows = [item for item in raw if isinstance(item, dict)]
+    removed = [
+        str(item.get("id") or "").strip().lower()
+        for item in rows
+        if str(item.get("id") or "").strip().lower() in REMOVED_PROVIDER_PRESET_IDS
+    ]
+    kept = [
+        item for item in rows
+        if str(item.get("id") or "").strip().lower() not in REMOVED_PROVIDER_PRESET_IDS
+    ]
+    if removed:
+        DATABASE.save_providers(kept)
+    DATABASE.save_setting(
+        PROVIDER_PRESET_CLEANUP_SETTING,
+        {"done": True, "removed": removed, "completed_at": int(time.time() * 1000)},
+        only_if_empty=True,
+    )
+    return {"removed": removed, "kept": [str(item.get("id") or "") for item in kept], "skipped": False}
+
 def save_api_providers(providers):
-    os.makedirs(DATA_DIR, exist_ok=True)
     with GLOBAL_CONFIG_LOCK:
-        with open(API_PROVIDERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(providers, f, ensure_ascii=False, indent=2)
+        DATABASE.save_providers(providers)
+    publish_entity_changed("platform", "global")
 
 def public_provider(provider):
     if provider.get("id") == "runninghub":
@@ -1310,33 +1606,29 @@ def env_quote(value):
     return text
 
 def update_env_values(updates):
-    os.makedirs(os.path.dirname(API_ENV_FILE), exist_ok=True)
-    lines = []
-    if os.path.exists(API_ENV_FILE):
-        with open(API_ENV_FILE, "r", encoding="utf-8-sig") as f:
-            lines = f.read().splitlines()
-    seen = set()
-    next_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in line:
-            next_lines.append(line)
-            continue
-        key = line.split("=", 1)[0].strip()
-        if key in updates:
-            next_lines.append(f"{key}={env_quote(updates[key])}")
-            os.environ[key] = str(updates[key] or "")
-            seen.add(key)
-        else:
-            next_lines.append(line)
+    SECRET_STORE.update({str(key): str(value or "") for key, value in updates.items()})
     for key, value in updates.items():
-        if key not in seen:
-            next_lines.append(f"{key}={env_quote(value)}")
-            os.environ[key] = str(value or "")
-    with open(API_ENV_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(next_lines).rstrip() + "\n")
+        if value:
+            os.environ[str(key)] = str(value)
+        else:
+            os.environ.pop(str(key), None)
 
-BACKEND_LOCAL_LOAD = {addr: 0 for addr in COMFYUI_INSTANCES}
+def seed_builtin_local_vision_secret_once() -> Dict[str, Any]:
+    marker = DATABASE.get_setting(LOCAL_VISION_SECRET_SEED_SETTING, {})
+    marker_value = marker.get("value") if isinstance(marker, dict) else {}
+    if isinstance(marker_value, dict) and marker_value.get("done"):
+        return {"seeded": False, "skipped": True}
+    key_env = provider_key_env("local-vision")
+    seeded = False
+    if not provider_env_key_value("local-vision"):
+        update_env_values({key_env: LOCAL_VISION_BUILTIN_API_KEY})
+        seeded = True
+    DATABASE.save_setting(
+        LOCAL_VISION_SECRET_SEED_SETTING,
+        {"done": True, "seeded": seeded, "completed_at": int(time.time() * 1000)},
+        only_if_empty=True,
+    )
+    return {"seeded": seeded, "skipped": False}
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
@@ -1344,19 +1636,20 @@ os.makedirs(OUTPUT_INPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_OUTPUT_DIR, exist_ok=True)
 os.makedirs(ASSET_LIBRARY_DIR, exist_ok=True)
 os.makedirs(LOCAL_UPLOAD_DIR, exist_ok=True)
-os.makedirs(STATIC_DIR, exist_ok=True)
-os.makedirs(WORKFLOW_DIR, exist_ok=True)
-os.makedirs(CONVERSATION_DIR, exist_ok=True)
-os.makedirs(CANVAS_DIR, exist_ok=True)
+# static 和内置 workflows 属于只读程序资源，不在运行时创建或改写。
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
+app.mount("/assets/input", StaticFiles(directory=OUTPUT_INPUT_DIR), name="assets-input")
+app.mount("/assets/output", StaticFiles(directory=OUTPUT_OUTPUT_DIR), name="assets-output")
+app.mount("/assets/library", StaticFiles(directory=ASSET_LIBRARY_DIR), name="assets-library")
+app.mount("/assets/uploads", StaticFiles(directory=LOCAL_UPLOAD_DIR), name="assets-uploads")
 app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 # --- Pydantic 模型 ---
 
 def current_app_version():
-    version_file = os.path.join(BASE_DIR, "VERSION")
+    version_file = str(APP_PATHS.version_file)
     try:
         if os.path.exists(version_file):
             with open(version_file, "r", encoding="utf-8") as f:
@@ -1641,6 +1934,8 @@ def app_info():
     version = current_app_version()
     return {
         "version": version,
+        "update_enabled": RUNTIME_OPTIONS.mode != "desktop",
+        "update_strategy": "replace-portable-package" if RUNTIME_OPTIONS.mode == "desktop" else "source-files",
         "repo_url": GITHUB_REPO_URL,
         "version_url": GITHUB_VERSION_URL,
         "tree_url": GITHUB_TREE_URL,
@@ -1662,6 +1957,172 @@ def app_info():
         },
         "update_notes": read_local_update_notes(version),
     }
+
+
+@app.get("/api/health")
+def health_check():
+    return {
+        "status": "ok",
+        "version": current_app_version(),
+        "pid": os.getpid(),
+        "runtime_mode": RUNTIME_OPTIONS.mode,
+        "database": "ok",
+        "schema_version": DATABASE.SCHEMA_VERSION,
+    }
+
+
+class PairDeviceRequest(BaseModel):
+    code: str
+    name: str = ""
+    client_type: str = "browser"
+
+
+PREFERENCE_KEYS = {
+    "theme",
+    "language",
+    "ui_scale",
+    "default_image_provider",
+    "default_image_model",
+    "default_video_provider",
+    "default_video_model",
+    "default_chat_provider",
+    "default_chat_model",
+    "ecommerce_settings",
+}
+
+
+class PreferencesUpdateRequest(BaseModel):
+    values: Dict[str, Any] = Field(default_factory=dict)
+    base_revision: int = 0
+    actor_id: str = ""
+    import_if_empty: bool = False
+
+
+@app.get("/pair")
+def pair_page():
+    return FileResponse(os.path.join(STATIC_DIR, "pair.html"), media_type="text/html")
+
+
+@app.get("/devices")
+def devices_page():
+    return FileResponse(os.path.join(STATIC_DIR, "devices.html"), media_type="text/html")
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    identity = AUTH_MANAGER.authenticate(request_access_token(request))
+    return {"authenticated": bool(identity), "device": identity.public() if identity else None}
+
+
+@app.get("/api/auth/bootstrap")
+def desktop_bootstrap(token: str = ""):
+    try:
+        session_token, _identity = AUTH_MANAGER.consume_desktop_token(token)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(SESSION_COOKIE, session_token, httponly=True, samesite="strict", path="/")
+    return response
+
+
+@app.post("/api/auth/pair")
+def pair_device(payload: PairDeviceRequest):
+    try:
+        access_token, identity = AUTH_MANAGER.pair(payload.code, payload.name, payload.client_type)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    response = JSONResponse({"ok": True, "access_token": access_token, "device": identity.public()})
+    response.set_cookie(
+        SESSION_COOKIE,
+        access_token,
+        max_age=365 * 24 * 60 * 60,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/auth/pair-code")
+def create_pair_code():
+    code, expires_at = AUTH_MANAGER.create_pair_code()
+    return {"code": code, "expires_at": expires_at, "ttl_seconds": 300}
+
+
+@app.get("/api/auth/devices")
+def paired_devices():
+    return {"devices": AUTH_MANAGER.list_devices()}
+
+
+@app.delete("/api/auth/devices/{device_id}")
+async def revoke_paired_device(device_id: str):
+    if not AUTH_MANAGER.revoke(device_id):
+        raise HTTPException(status_code=404, detail="设备不存在或已撤销")
+    await manager.disconnect_device(device_id)
+    return {"ok": True}
+
+
+@app.get("/api/preferences")
+def get_preferences():
+    record = DATABASE.get_setting("global_preferences", {})
+    values = record.get("value") if isinstance(record.get("value"), dict) else {}
+    return {"values": values, "revision": record["revision"], "updated_at": record["updated_at"]}
+
+
+@app.put("/api/preferences")
+def save_preferences(payload: PreferencesUpdateRequest):
+    clean = {key: value for key, value in payload.values.items() if key in PREFERENCE_KEYS and value not in (None, "")}
+    before = DATABASE.get_setting("global_preferences", {})
+    try:
+        record = DATABASE.save_setting(
+            "global_preferences",
+            clean,
+            base_revision=payload.base_revision,
+            only_if_empty=payload.import_if_empty,
+        )
+    except RevisionConflict as exc:
+        raise HTTPException(status_code=409, detail={
+            "message": "全局偏好已被其他设备修改",
+            "values": exc.value if isinstance(exc.value, dict) else {},
+            "revision": exc.revision,
+        }) from exc
+    if int(record["revision"]) != int(before["revision"]):
+        publish_entity_changed("preference", "global", int(record["revision"]), payload.actor_id, int(record["updated_at"]))
+    return {"values": record["value"], "revision": record["revision"], "updated_at": record["updated_at"]}
+
+
+@app.get("/api/runtime/info")
+def runtime_info():
+    data_writable = os.access(DATA_DIR, os.W_OK) if os.path.exists(DATA_DIR) else os.access(os.path.dirname(DATA_DIR), os.W_OK)
+    return {
+        "version": current_app_version(),
+        "pid": os.getpid(),
+        "host": RUNTIME_OPTIONS.host,
+        "port": RUNTIME_OPTIONS.port,
+        "runtime_mode": RUNTIME_OPTIONS.mode,
+        "parent_pid": RUNTIME_OPTIONS.parent_pid,
+        "data_writable": bool(data_writable),
+        "paths": APP_PATHS.public_summary(),
+        "data_layout": {
+            "database": str(DATA_LAYOUT.database_file),
+            "media": str(DATA_LAYOUT.media),
+            "logs": str(DATA_LAYOUT.logs),
+            "cache": str(DATA_LAYOUT.cache),
+        },
+        "database": DATABASE.pragma_summary(),
+        "migration": {key: value for key, value in MIGRATION_REPORT.items() if key != "moves"},
+        "secret_migration": SECRET_MIGRATION_REPORT,
+        "maintenance": MAINTENANCE_REPORT,
+    }
+
+
+@app.post("/api/runtime/shutdown")
+def runtime_shutdown(request: Request):
+    supplied = request.headers.get("x-desktop-token", "")
+    if not RUNTIME_OPTIONS.desktop_token or not hmac.compare_digest(supplied, RUNTIME_OPTIONS.desktop_token):
+        raise HTTPException(status_code=401, detail="桌面控制令牌无效")
+    request_shutdown()
+    return {"ok": True}
 
 def connectivity_probe(name: str, url: str, timeout: float = 5.0) -> Dict[str, Any]:
     started = time.time()
@@ -1785,6 +2246,15 @@ def version_gt(a: str, b: str) -> bool:
 def check_update():
     """服务端检测 GitHub 与 ModelScope 两个源的远端版本（走系统代理，避免浏览器跨域/被墙）。"""
     current = current_app_version()
+    if RUNTIME_OPTIONS.mode == "desktop":
+        return {
+            "current": current,
+            "latest": {},
+            "update_available": False,
+            "reachable": False,
+            "disabled": True,
+            "message": "便携版首版不提供自动更新；请退出软件后替换 Canvas.exe 与 app 目录。",
+        }
     # 并发检测两个源，避免串行 8s+8s 拖慢首屏更新提示
     holder: Dict[str, Dict[str, Any]] = {}
     def _probe(key: str, url: str):
@@ -1978,13 +2448,13 @@ def schedule_self_restart(delay_seconds: int = 3) -> bool:
                 "cd /d \"%APP_DIR%\"\r\n"
                 "if exist \"%LAUNCHER%\" (\r\n"
                 "  echo [%date% %time%] starting launcher: %LAUNCHER% >> \"%LOG_FILE%\"\r\n"
-                "  start \"ComfyUI-API-Modelscope\" /D \"%APP_DIR%\" cmd /k call \"%LAUNCHER%\"\r\n"
+                "  start \"Canvas\" /D \"%APP_DIR%\" cmd /k call \"%LAUNCHER%\"\r\n"
                 ") else (\r\n"
                 "  echo [%date% %time%] launcher missing, fallback to python main.py >> \"%LOG_FILE%\"\r\n"
                 "  if exist \"%APP_DIR%\\python\\python.exe\" (\r\n"
-                "    start \"ComfyUI-API-Modelscope\" /D \"%APP_DIR%\" cmd /k \"\"%APP_DIR%\\python\\python.exe\" main.py\"\r\n"
+                "    start \"Canvas\" /D \"%APP_DIR%\" cmd /k \"\"%APP_DIR%\\python\\python.exe\" main.py\"\r\n"
                 "  ) else (\r\n"
-                "    start \"ComfyUI-API-Modelscope\" /D \"%APP_DIR%\" cmd /k python main.py\r\n"
+                "    start \"Canvas\" /D \"%APP_DIR%\" cmd /k python main.py\r\n"
                 "  )\r\n"
                 ")\r\n"
                 "del \"%~f0\"\r\n"
@@ -2097,6 +2567,8 @@ def stage_update_from_source(source: str, staging_root: str) -> Tuple[List[str],
 
 @app.post("/api/update-from-github")
 def update_from_github(req: UpdateRequest = UpdateRequest()):
+    if RUNTIME_OPTIONS.mode == "desktop":
+        raise HTTPException(status_code=409, detail="便携版禁止覆盖程序资源；请退出后替换 Canvas.exe 与 app 目录")
     if not UPDATE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="正在更新中，请稍后再试")
     staging_root = ""
@@ -2269,6 +2741,8 @@ class RollbackRequest(BaseModel):
 
 @app.post("/api/update-rollback")
 def rollback_update(req: RollbackRequest):
+    if RUNTIME_OPTIONS.mode == "desktop":
+        raise HTTPException(status_code=409, detail="便携版不使用源码更新回滚")
     if not req.name:
         raise HTTPException(status_code=400, detail="缺少备份名称")
     if not UPDATE_LOCK.acquire(blocking=False):
@@ -2335,41 +2809,21 @@ def rollback_update(req: RollbackRequest):
     finally:
         UPDATE_LOCK.release()
 
-class GenerateRequest(BaseModel):
-    prompt: str = ""
-    width: int = 1024
-    height: int = 1024
-    workflow_json: str = "Z-Image.json"
-    params: Dict[str, Any] = {}
-    type: str = "zimage"
-    client_id: str = ""
-    convert_to_jpg: bool = False
-
 class DeleteHistoryRequest(BaseModel):
     timestamp: float
 
 class TokenRequest(BaseModel):
     token: str
 
-class CloudGenRequest(BaseModel):
-    prompt: str
-    api_key: str = ""
-    model: str = ""
-    resolution: str = "1024x1024"
-    type: str = "zimage"
-    image_urls: List[str] = []
-    loras: Optional[Any] = None
-    client_id: Optional[str] = None
-
-class CloudPollRequest(BaseModel):
-    task_id: str
-    api_key: str = ""
-    client_id: Optional[str] = None
 
 class AIReference(BaseModel):
     url: str = ""
     name: str = ""
     role: str = ""
+    reference_id: str = ""
+    reference_type: str = ""
+    label: str = ""
+    instruction: str = ""
     kind: str = ""
     mime: str = ""
 
@@ -2382,12 +2836,50 @@ class OnlineImageRequest(BaseModel):
     n: int = 1
     reference_images: List[AIReference] = []
 
+class EcommerceTaskRequest(BaseModel):
+    operation: str
+    mode: str = "standard"
+    inputs: List[AIReference] = Field(default_factory=list)
+    options: Dict[str, Any] = Field(default_factory=dict)
+    provider_id: str = ""
+    model: str = ""
+    aspect_ratio: str = "source"
+    resolution: str = "auto"
+    quality: str = "auto"
+    count: int = Field(default=0, ge=0, le=4)
+    parent_task_id: str = ""
+
+class EcommerceTaskStatusRequest(BaseModel):
+    ids: List[str] = Field(default_factory=list, max_length=2000)
+
+class EcommerceApprovalRequest(BaseModel):
+    output_index: int = 0
+    checks: Dict[str, bool] = Field(default_factory=dict)
+    note: str = Field(default="", max_length=1000)
+
+class WorkFavoriteRequest(BaseModel):
+    favorite: bool
+
+class WorkMetadataRequest(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=160)
+    favorite: Optional[bool] = None
+    trashed: Optional[bool] = None
+
 class ImageTaskQueryRequest(BaseModel):
     provider_id: str = "comfly"
     task_id: str = Field(min_length=1, max_length=240)
 
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_TASK_LOCK = Lock()
+ONLINE_IMAGE_TASKS: Dict[str, Dict[str, Any]] = {}
+ECOMMERCE_TASKS: Dict[str, Dict[str, Any]] = {}
+ECOMMERCE_MAX_CONCURRENCY = max(1, min(2000, int(os.getenv("ECOMMERCE_MAX_CONCURRENCY", "2000") or 2000)))
+ECOMMERCE_VISION_MAX_CONCURRENCY = max(1, min(256, int(os.getenv("ECOMMERCE_VISION_MAX_CONCURRENCY", "32") or 32)))
+ECOMMERCE_TASK_SEMAPHORE = asyncio.Semaphore(ECOMMERCE_MAX_CONCURRENCY)
+ECOMMERCE_VISION_SEMAPHORE = asyncio.Semaphore(ECOMMERCE_VISION_MAX_CONCURRENCY)
+ECOMMERCE_VISION_CACHE: Dict[str, Dict[str, Any]] = {}
+ECOMMERCE_VISION_CACHE_LOCK = Lock()
+ECOMMERCE_VISION_CACHE_LIMIT = 5000
 
 class CanvasVideoRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=VIDEO_PROMPT_MAX_LENGTH)
@@ -2434,6 +2926,9 @@ class RunningHubUploadAssetRequest(BaseModel):
     useWallet: bool = False
 
 class JimengHelpRequest(BaseModel):
+    command: str = ""
+
+class CodexHelpRequest(BaseModel):
     command: str = ""
 
 class JimengQueryMediaRequest(BaseModel):
@@ -2515,17 +3010,6 @@ def chat_system_prompt(payload):
     prompt = str(getattr(payload, "system_prompt", "") or "").strip()
     return prompt or SYSTEM_PROMPT
 
-class MsGenerateRequest(BaseModel):
-    prompt: str
-    api_key: str = ""
-    model: str = "black-forest-labs/FLUX.2-klein-9B"
-    image_urls: List[str] = []
-    width: int = 0
-    height: int = 0
-    size: str = ""
-    loras: Optional[Any] = None
-    client_id: Optional[str] = None
-
 class CanvasLLMRequest(BaseModel):
     message: str = Field(min_length=1, max_length=LLM_MESSAGE_MAX_LENGTH)
     system_prompt: str = ""
@@ -2574,6 +3058,7 @@ class CanvasSaveRequest(BaseModel):
     settings: Dict[str, Any] = {}
     client_id: str = ""
     base_updated_at: int = 0
+    base_revision: int = 0
 
 class CanvasAssetCheckRequest(BaseModel):
     urls: List[str] = []
@@ -2734,260 +3219,12 @@ class PromptLibraryCategoryRequest(BaseModel):
 
 # --- 负载均衡 ---
 
-def check_images_exist(backend_addr, images):
-    if not images: return True
-    for img in images:
-        try:
-            url = f"http://{backend_addr}/view?filename={urllib.parse.quote(img)}&type=input"
-            r = requests.get(url, stream=True, timeout=0.5)
-            r.close()
-            if r.status_code != 200: return False
-        except: return False
-    return True
-
-MEDIA_INPUT_KEYS = ("image", "video", "audio", "mask", "filename", "file")
-MEDIA_INPUT_EXT_RE = re.compile(r"\.(png|jpe?g|webp|gif|bmp|tiff?|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)(?:\?|$)", re.I)
-
-def is_comfy_input_media_value(input_name: str, value: Any) -> bool:
-    if not isinstance(value, str) or not value.strip():
-        return False
-    key = str(input_name or "").lower()
-    if any(token in key for token in MEDIA_INPUT_KEYS):
-        return True
-    return bool(MEDIA_INPUT_EXT_RE.search(value))
-
-def collect_required_comfy_media(params: Dict[str, Any]) -> List[str]:
-    required = []
-    for node_inputs in (params or {}).values():
-        if not isinstance(node_inputs, dict):
-            continue
-        for input_name, value in node_inputs.items():
-            if is_comfy_input_media_value(input_name, value):
-                required.append(value)
-    return list(dict.fromkeys(required))
-
-def get_best_backend(required_images: List[str] = None):
-    best_backend = COMFYUI_INSTANCES[0]
-    min_queue_size = float('inf')
-    backend_stats = {}
-
-    for addr in COMFYUI_INSTANCES:
-        try:
-            with urllib.request.urlopen(f"http://{addr}/queue", timeout=1) as response:
-                data = json.loads(response.read())
-                remote_load = len(data.get('queue_running', [])) + len(data.get('queue_pending', []))
-                with LOAD_LOCK:
-                    local_load = BACKEND_LOCAL_LOAD.get(addr, 0)
-                effective_load = max(remote_load, local_load)
-                has_images = check_images_exist(addr, required_images)
-                backend_stats[addr] = {"load": effective_load, "has_images": has_images}
-        except Exception as e:
-            print(f"Backend {addr} unreachable: {e}")
-            continue
-
-    if not backend_stats:
-        return COMFYUI_INSTANCES[0]
-
-    for addr, stats in backend_stats.items():
-        load = stats["load"]
-        if load < min_queue_size or (load == min_queue_size and stats.get("has_images") and not backend_stats.get(best_backend, {}).get("has_images")):
-            min_queue_size = load
-            best_backend = addr
-
-    return best_backend
-
-def reserve_best_backend(required_images: List[str] = None):
-    backend_stats = {}
-    for addr in COMFYUI_INSTANCES:
-        try:
-            with urllib.request.urlopen(f"http://{addr}/queue", timeout=1) as response:
-                data = json.loads(response.read())
-                remote_load = len(data.get('queue_running', [])) + len(data.get('queue_pending', []))
-                has_images = check_images_exist(addr, required_images)
-                backend_stats[addr] = {"remote_load": remote_load, "has_images": has_images}
-        except Exception as e:
-            print(f"Backend {addr} unreachable: {e}")
-            continue
-    with LOAD_LOCK:
-        best_backend = COMFYUI_INSTANCES[0]
-        min_load = float('inf')
-        if backend_stats:
-            for addr, stats in backend_stats.items():
-                load = max(stats["remote_load"], BACKEND_LOCAL_LOAD.get(addr, 0))
-                if load < min_load or (load == min_load and stats.get("has_images") and not backend_stats.get(best_backend, {}).get("has_images")):
-                    min_load = load
-                    best_backend = addr
-        BACKEND_LOCAL_LOAD[best_backend] = BACKEND_LOCAL_LOAD.get(best_backend, 0) + 1
-        return best_backend
-
-# --- 辅助工具 ---
-
-def download_image(comfy_address, comfy_url_path, prefix="studio_"):
-    filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
-    local_path = output_path_for(filename, "output")
-    full_url = f"http://{comfy_address}{comfy_url_path}"
-    try:
-        with urllib.request.urlopen(full_url, timeout=COMFYUI_DOWNLOAD_TIMEOUT) as response, open(local_path, 'wb') as out_file:
-            shutil.copyfileobj(response, out_file)
-        return output_url_for(filename, "output")
-    except Exception as e:
-        print(f"下载图片失败: {e}")
-        if comfy_url_path.startswith("/view"):
-            return comfy_url_path.replace("/view", "/api/view", 1)
-        return full_url
-
-def comfy_output_extension(item):
-    filename = str((item or {}).get("filename") or "")
-    ext = os.path.splitext(filename)[1].lower()
-    if ext in {
-        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff",
-        ".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv",
-        ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac",
-        ".txt", ".json", ".csv", ".srt", ".vtt", ".md",
-    }:
-        return ext
-    fmt = str((item or {}).get("format") or "").lower()
-    if "mpeg" in fmt or "mp3" in fmt:
-        return ".mp3"
-    if "wav" in fmt or "wave" in fmt:
-        return ".wav"
-    if "ogg" in fmt:
-        return ".ogg"
-    if "flac" in fmt:
-        return ".flac"
-    if "text" in fmt or "plain" in fmt:
-        return ".txt"
-    if "json" in fmt:
-        return ".json"
-    if "webm" in fmt:
-        return ".webm"
-    if "quicktime" in fmt or "mov" in fmt:
-        return ".mov"
-    if "mp4" in fmt or "h264" in fmt or "video" in fmt:
-        return ".mp4"
-    return ext or ".bin"
-
-def is_video_output_item(item):
-    ext = comfy_output_extension(item)
-    fmt = str((item or {}).get("format") or "").lower()
-    return ext in {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"} or "video" in fmt
-
-def comfy_output_kind(item):
-    ext = comfy_output_extension(item)
-    fmt = str((item or {}).get("format") or "").lower()
-    if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"} or "image" in fmt:
-        return "image"
-    if ext in {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"} or "video" in fmt:
-        return "video"
-    if ext in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"} or "audio" in fmt or "sound" in fmt:
-        return "audio"
-    if ext in {".txt", ".json", ".csv", ".srt", ".vtt", ".md"} or "text" in fmt or "json" in fmt:
-        return "text"
-    return "file"
-
-def download_comfy_output(comfy_address, item, prefix="studio_"):
-    ext = comfy_output_extension(item)
-    filename = f"{prefix}{uuid.uuid4().hex[:10]}{ext}"
-    local_path = output_path_for(filename, "output")
-    subfolder = urllib.parse.quote(str(item.get("subfolder") or ""))
-    file_type = urllib.parse.quote(str(item.get("type") or "output"))
-    comfy_url_path = f"/view?filename={urllib.parse.quote(str(item['filename']))}&subfolder={subfolder}&type={file_type}"
-    full_url = f"http://{comfy_address}{comfy_url_path}"
-    try:
-        with urllib.request.urlopen(full_url, timeout=COMFYUI_DOWNLOAD_TIMEOUT) as response, open(local_path, 'wb') as out_file:
-            shutil.copyfileobj(response, out_file)
-        return output_url_for(filename, "output")
-    except Exception as e:
-        print(f"下载 ComfyUI 输出失败: {e}")
-        if comfy_url_path.startswith("/view"):
-            return comfy_url_path.replace("/view", "/api/view", 1)
-        return full_url
-
-def save_comfy_text_output(value, prefix="studio_", name=""):
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
-    stem = sanitize_export_filename(name or "comfy_text.txt", "comfy_text.txt")
-    _, ext = os.path.splitext(stem)
-    if ext.lower() not in {".txt", ".json", ".csv", ".srt", ".vtt", ".md"}:
-        stem += ".txt"
-    filename = f"{prefix}{uuid.uuid4().hex[:10]}_{stem}"
-    path = output_path_for(filename, "output")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-    return output_url_for(filename, "output")
-
-def comfy_text_values_from_output(node_output):
-    values = []
-    text_keys = ("text", "texts", "prompt", "prompts", "string", "strings", "caption", "captions")
-    for key in text_keys:
-        if key not in node_output:
-            continue
-        value = node_output.get(key)
-        items = value if isinstance(value, list) else [value]
-        for item in items:
-            if isinstance(item, dict):
-                text = item.get("text") or item.get("prompt") or item.get("caption") or item.get("value")
-                name = item.get("filename") or item.get("name") or f"{key}.txt"
-            else:
-                text = item
-                name = f"{key}.txt"
-            if text is None:
-                continue
-            text = str(text)
-            if text.strip():
-                values.append((text, name))
-    return values
-
-def collect_comfy_file_items(node_output):
-    items = []
-    for key, value in (node_output or {}).items():
-        if key in {"text", "texts", "prompt", "prompts", "string", "strings", "caption", "captions"}:
-            continue
-        candidates = value if isinstance(value, list) else [value]
-        for item in candidates:
-            if isinstance(item, dict) and item.get("filename"):
-                items.append((key, item))
-    return items
-
-# 纯预览/对比类节点：其输出只用于界面展示（PreviewImage、rgthree 的 Image Comparer 等），
-# 工作流里通常还有 SaveImage 产出真正结果，故有正式产出时应丢弃这些冗余预览/对比图。
-COMFY_PREVIEW_CLASS_HINTS = ("previewimage", "comparer", "imagecompare", "image compare")
-# show/utility 类调试文本节点：ShowText、各种 *Anything、CR Text、MathExpression、note 等，
-# 它们的 ui 文本基本是调试信息，不应混进最终结果。
-COMFY_DEBUG_TEXT_CLASS_HINTS = (
-    "showtext", "show text", "showanything", "show any", "preview any", "previewany",
-    "displaytext", "display text", "display any", "anything everywhere", "convertanything",
-    "easy show", "note", "mathexpression", "cr text", "text multiline", "string function",
-    "debug",
-)
-
-def comfy_class_is_preview(class_type):
-    ct = str(class_type or "").lower()
-    return bool(ct) and any(h in ct for h in COMFY_PREVIEW_CLASS_HINTS)
-
-def comfy_class_is_debug_text(class_type):
-    ct = str(class_type or "").lower()
-    return bool(ct) and any(h in ct for h in COMFY_DEBUG_TEXT_CLASS_HINTS)
-
 def save_to_history(record):
     with HISTORY_LOCK:
-        history = []
-        if os.path.exists(HISTORY_FILE):
-            try:
-                with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                    history = json.load(f)
-            except: pass
         if "timestamp" not in record:
             record["timestamp"] = time.time()
-        history.insert(0, record)
-        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(history[:5000], f, ensure_ascii=False, indent=4)
-
-def get_comfy_history(comfy_address, prompt_id):
-    try:
-        with urllib.request.urlopen(f"http://{comfy_address}/history/{prompt_id}") as response:
-            return json.loads(response.read())
-    except Exception as e:
-        return {}
+        DATABASE.prepend_history(record, limit=5000)
+    publish_entity_changed("history", "global")
 
 def safe_user_id(user_id, request: Request):
     candidate = (user_id or "").strip()
@@ -2999,24 +3236,30 @@ def safe_user_id(user_id, request: Request):
     return candidate or "anonymous"
 
 def user_dir(user_id):
-    path = os.path.join(CONVERSATION_DIR, user_id)
-    os.makedirs(path, exist_ok=True)
-    return path
+    return str(user_id or "anonymous")
 
 def conversation_path(user_id, conversation_id):
     cleaned = re.sub(r"[^a-zA-Z0-9_-]", "", conversation_id or "")
     if not cleaned:
         raise HTTPException(status_code=400, detail="无效的对话 ID")
-    return os.path.join(user_dir(user_id), f"{cleaned}.json")
+    return cleaned
 
 def now_ms():
     return int(time.time() * 1000)
 
-def save_conversation(user_id, conversation):
+def publish_entity_changed(topic: str, entity_id: str = "global", revision: int = 0, actor_id: str = "", updated_at: int = 0):
+    event_revision = int(revision or DATABASE.next_revision(topic, entity_id))
+    if GLOBAL_LOOP and not GLOBAL_LOOP.is_closed():
+        asyncio.run_coroutine_threadsafe(
+            manager.broadcast_entity_changed(topic, entity_id, event_revision, actor_id, updated_at or now_ms()),
+            GLOBAL_LOOP,
+        )
+    return event_revision
+
+def save_conversation(user_id, conversation, actor_id=""):
     with CONVERSATION_LOCK:
-        path = conversation_path(user_id, conversation["id"])
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(conversation, f, ensure_ascii=False, indent=2)
+        DATABASE.save_conversation(user_id, conversation)
+    publish_entity_changed("session", conversation.get("id") or user_id, actor_id=actor_id)
 
 def new_conversation(user_id, title="新对话"):
     timestamp = now_ms()
@@ -3031,23 +3274,15 @@ def new_conversation(user_id, title="新对话"):
     return conversation
 
 def load_conversation(user_id, conversation_id):
-    path = conversation_path(user_id, conversation_id)
-    if not os.path.exists(path):
+    cleaned = conversation_path(user_id, conversation_id)
+    conversation = DATABASE.get_conversation(user_id, cleaned)
+    if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    return conversation
 
 def list_conversations(user_id):
     records = []
-    for filename in os.listdir(user_dir(user_id)):
-        if not filename.endswith(".json"):
-            continue
-        path = os.path.join(user_dir(user_id), filename)
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception:
-            continue
+    for data in DATABASE.list_conversations(user_id):
         messages = data.get("messages", [])
         last_message = next((m for m in reversed(messages) if m.get("role") != "system"), None)
         records.append({
@@ -3063,36 +3298,28 @@ def canvas_path(canvas_id):
     cleaned = re.sub(r"[^a-zA-Z0-9_-]", "", canvas_id or "")
     if not cleaned:
         raise HTTPException(status_code=400, detail="无效的画布 ID")
-    return os.path.join(CANVAS_DIR, f"{cleaned}.json")
+    return cleaned
 
-def save_canvas(canvas):
+def save_canvas(canvas, actor_id=""):
     canvas["updated_at"] = now_ms()
     with CANVAS_LOCK:
-        with open(canvas_path(canvas["id"]), 'w', encoding='utf-8') as f:
-            json.dump(canvas, f, ensure_ascii=False, indent=2)
+        canvas_path(canvas["id"])
+        DATABASE.save_canvas(canvas, touch=False)
+    publish_entity_changed("canvas", canvas["id"], int(canvas.get("revision") or 0), actor_id, int(canvas.get("updated_at") or 0))
 
 def normalize_canvas_kind(kind="classic"):
     return "smart" if str(kind or "").strip().lower() == "smart" else "classic"
 
 # ===== 项目（按项目分类管理画布）=====
-PROJECTS_PATH = os.path.join(DATA_DIR, "projects.json")
 DEFAULT_PROJECT_ID = "default"
 
 def load_projects():
-    try:
-        with open(PROJECTS_PATH, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        projects = data.get("projects") if isinstance(data, dict) else data
-        if isinstance(projects, list):
-            return [p for p in projects if isinstance(p, dict) and p.get("id")]
-    except Exception:
-        pass
-    return []
+    return [p for p in DATABASE.load_projects() if isinstance(p, dict) and p.get("id")]
 
 def save_projects(projects):
     with CANVAS_LOCK:
-        with open(PROJECTS_PATH, 'w', encoding='utf-8') as f:
-            json.dump({"projects": projects}, f, ensure_ascii=False, indent=2)
+        DATABASE.save_projects(projects)
+    publish_entity_changed("project", "global")
 
 def project_record(p):
     return {
@@ -3164,21 +3391,20 @@ def new_canvas(title="未命名画布", icon="layers", kind="classic", project=N
     return canvas
 
 def load_canvas(canvas_id):
-    path = canvas_path(canvas_id)
-    if not os.path.exists(path):
+    cleaned = canvas_path(canvas_id)
+    canvas = DATABASE.get_canvas(cleaned)
+    if not canvas:
         raise HTTPException(status_code=404, detail="画布不存在")
-    with open(path, 'r', encoding='utf-8') as f:
-        canvas = json.load(f)
     if canvas.get("deleted_at"):
         raise HTTPException(status_code=404, detail="画布已在回收站")
     return canvas
 
 def load_canvas_any(canvas_id):
-    path = canvas_path(canvas_id)
-    if not os.path.exists(path):
+    cleaned = canvas_path(canvas_id)
+    canvas = DATABASE.get_canvas(cleaned)
+    if not canvas:
         raise HTTPException(status_code=404, detail="画布不存在")
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    return canvas
 
 CANVAS_COLORS = {"", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink", "slate"}
 
@@ -3207,33 +3433,15 @@ def canvas_record(data):
 def cleanup_expired_canvas_trash():
     cutoff = now_ms() - CANVAS_TRASH_RETENTION_MS
     with CANVAS_LOCK:
-        for filename in os.listdir(CANVAS_DIR):
-            if not filename.endswith(".json"):
-                continue
-            path = os.path.join(CANVAS_DIR, filename)
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                deleted_at = int(data.get("deleted_at") or 0)
-                if deleted_at and deleted_at < cutoff:
-                    os.remove(path)
-            except Exception:
-                continue
+        for data in DATABASE.list_canvases(include_deleted=True):
+            deleted_at = int(data.get("deleted_at") or 0)
+            if deleted_at and deleted_at < cutoff:
+                DATABASE.purge_canvas(str(data.get("id") or ""))
 
 def iter_canvas_records(include_deleted=False):
     cleanup_expired_canvas_trash()
     records = []
-    for filename in os.listdir(CANVAS_DIR):
-        if not filename.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(CANVAS_DIR, filename), 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception:
-            continue
-        is_deleted = bool(data.get("deleted_at"))
-        if include_deleted != is_deleted:
-            continue
+    for data in DATABASE.list_canvases(include_deleted=bool(include_deleted)):
         records.append(canvas_record(data))
     return records
 
@@ -3361,16 +3569,7 @@ def canvas_assets_index():
     canvas_counts = {"all": 0, "smart": 0, "classic": 0}
     item_counts = {"all": 0, "smart": 0, "classic": 0}
     cleanup_expired_canvas_trash()
-    for filename in os.listdir(CANVAS_DIR):
-        if not filename.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(CANVAS_DIR, filename), "r", encoding="utf-8") as f:
-                canvas = json.load(f)
-        except Exception:
-            continue
-        if canvas.get("deleted_at"):
-            continue
+    for canvas in DATABASE.list_canvases(include_deleted=False):
         record = canvas_record(canvas)
         canvas_items = extract_canvas_assets(canvas)
         record["asset_count"] = len(canvas_items)
@@ -3484,7 +3683,7 @@ def looks_like_vision_chat_model(model):
     if not lc:
         return False
     vision_keys = [
-        "vision", "vl-", "-vl-", "internvl", "qvq", "qwen-vl",
+        "vision", "vl-", "-vl-", "vlm", "internvl", "qvq", "qwen-vl",
         "doubao-vision", "glm-4v", "minicpm-v",
     ]
     return any(key in lc for key in vision_keys)
@@ -3779,7 +3978,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
@@ -3833,8 +4032,290 @@ def is_volcengine_provider(provider):
 def is_runninghub_provider(provider):
     return provider_protocol(provider) == "runninghub" or str((provider or {}).get("id") or "").strip().lower() == "runninghub"
 
+def is_grsai_provider(provider):
+    provider_id = str((provider or {}).get("id") or "").strip().lower()
+    base_url = str((provider or {}).get("base_url") or "").strip().lower()
+    return provider_id == "grsai" or "grsaiapi.com" in base_url or "grsai.dakka.com.cn" in base_url
+
+def is_grsai_nano_model(model):
+    return str(model or "").strip().lower().startswith("nano-banana")
+
 def is_jimeng_provider(provider):
     return provider_protocol(provider) == "jimeng" or str((provider or {}).get("id") or "").strip().lower() == "jimeng"
+
+def is_codex_provider(provider):
+    return provider_protocol(provider) == "codex" or str((provider or {}).get("id") or "").strip().lower() == "codex"
+
+def codex_env_value(key):
+    return os.getenv(key, "") or read_api_env_value(key)
+
+def codex_cli_executable():
+    configured = str(codex_env_value("CODEX_BIN") or "").strip()
+    if configured:
+        return configured
+    return shutil.which("codex") or shutil.which("codex.exe") or shutil.which("codex.cmd") or ""
+
+def codex_timeout(default=CODEX_DEFAULT_TIMEOUT):
+    try:
+        return max(30, min(3600, int(os.getenv("CODEX_CLI_TIMEOUT", str(default)) or default)))
+    except Exception:
+        return default
+
+def codex_model_for_exec(model="", fallback=""):
+    value = str(model or fallback or "").strip()
+    low = value.lower()
+    if not value or low.startswith("$imagegen") or low.startswith("gpt-image"):
+        return ""
+    return value
+
+def codex_decode_output(stdout, stderr):
+    out_text = (stdout or b"").decode("utf-8", errors="replace").strip()
+    err_text = (stderr or b"").decode("utf-8", errors="replace").strip()
+    return out_text, err_text
+
+async def run_codex_cli(prompt, model="", image_paths=None, timeout=None, output_last_message=True):
+    exe = codex_cli_executable()
+    if not exe:
+        raise HTTPException(status_code=400, detail="未找到 OpenAI Codex CLI。请先运行 CLI/windows/openai/1-install_openai_codex_cli.bat，并完成 codex 登录。")
+    image_paths = [str(path) for path in (image_paths or []) if path and os.path.isfile(str(path))]
+    last_path = ""
+    args = [
+        exe,
+        "exec",
+        "--cd",
+        BASE_DIR,
+        "--sandbox",
+        "workspace-write",
+        "--skip-git-repo-check",
+    ]
+    exec_model = codex_model_for_exec(model)
+    if exec_model:
+        args.extend(["--model", exec_model])
+    for path in image_paths:
+        args.extend(["--image", path])
+    if output_last_message:
+        fd, last_path = tempfile.mkstemp(prefix="codex_last_", suffix=".txt", dir=OUTPUT_OUTPUT_DIR)
+        os.close(fd)
+        args.extend(["--output-last-message", last_path])
+    args.append("-")
+    prompt_bytes = str(prompt or "").encode("utf-8")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=BASE_DIR,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(input=prompt_bytes), timeout=timeout or codex_timeout())
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="OpenAI Codex CLI 执行超时。可设置 CODEX_CLI_TIMEOUT 增大等待时间。") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=f"未找到 OpenAI Codex CLI：{exe}") from exc
+    out_text, err_text = codex_decode_output(stdout, stderr)
+    last_text = ""
+    if last_path and os.path.exists(last_path):
+        try:
+            with open(last_path, "r", encoding="utf-8-sig") as f:
+                last_text = f.read().strip()
+        except Exception:
+            last_text = ""
+        try:
+            os.remove(last_path)
+        except Exception:
+            pass
+    if proc.returncode != 0:
+        message = err_text or out_text or last_text or f"exit={proc.returncode}"
+        raise HTTPException(status_code=502, detail=f"OpenAI Codex CLI 调用失败：{message[:1200]}")
+    return {"text": last_text or out_text, "_stdout": out_text, "_stderr": err_text}
+
+def codex_output_image_files(since_time=0):
+    exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+    root = os.path.abspath(OUTPUT_OUTPUT_DIR)
+    files = []
+    try:
+        for name in os.listdir(root):
+            path = os.path.join(root, name)
+            if not os.path.isfile(path):
+                continue
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in exts:
+                continue
+            mtime = os.path.getmtime(path)
+            if mtime + 1 < float(since_time or 0):
+                continue
+            files.append((mtime, path))
+    except Exception:
+        return []
+    return [path for _mtime, path in sorted(files, reverse=True)]
+
+def codex_output_url_from_path(path):
+    path = os.path.abspath(str(path or ""))
+    root = os.path.abspath(OUTPUT_OUTPUT_DIR)
+    try:
+        if os.path.commonpath([root, path]) == root:
+            return output_url_for(os.path.basename(path), "output")
+    except Exception:
+        return ""
+    return ""
+
+async def codex_prepare_local_media(ref_url):
+    text = str(ref_url or "").strip()
+    if not text:
+        return "", []
+    if text.startswith(("/output/", "/assets/")):
+        path = output_file_from_url(text)
+        if path:
+            return path, []
+        raise HTTPException(status_code=404, detail=f"OpenAI CLI 参考素材不存在：{text}")
+    if text.startswith("file://"):
+        path = urllib.parse.unquote(urllib.parse.urlparse(text).path)
+        if os.name == "nt" and re.match(r"^/[A-Za-z]:/", path):
+            path = path[1:]
+        if os.path.isfile(path):
+            return path, []
+    if os.path.isfile(text):
+        return text, []
+    temp_paths = []
+    suffix = ".png"
+    if text.startswith("data:"):
+        if ";base64," not in text:
+            raise HTTPException(status_code=400, detail="OpenAI CLI 参考素材 data URL 缺少 base64 数据")
+        header, encoded = text.split(";base64,", 1)
+        mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else ""
+        suffix = mimetypes.guess_extension(mime) or suffix
+        fd, path = tempfile.mkstemp(prefix="codex_ref_", suffix=suffix)
+        with os.fdopen(fd, "wb") as f:
+            f.write(base64.b64decode(encoded))
+        temp_paths.append(path)
+        return path, temp_paths
+    if text.startswith(("http://", "https://")):
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=300.0, write=60.0, pool=20.0), follow_redirects=True) as client:
+            response = await client.get(text)
+            response.raise_for_status()
+            clean_path = urllib.parse.urlparse(text).path
+            suffix = os.path.splitext(clean_path)[1] or mimetypes.guess_extension(response.headers.get("content-type", "")) or suffix
+            fd, path = tempfile.mkstemp(prefix="codex_ref_", suffix=suffix)
+            with os.fdopen(fd, "wb") as f:
+                f.write(response.content)
+            temp_paths.append(path)
+            return path, temp_paths
+    raise HTTPException(status_code=400, detail=f"OpenAI CLI 无法读取参考素材：{text[:120]}")
+
+async def codex_reference_paths(reference_images=None):
+    paths = []
+    temp_paths = []
+    try:
+        for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
+            url = ref.get("url") if isinstance(ref, dict) else getattr(ref, "url", "")
+            if not url:
+                continue
+            path, created = await codex_prepare_local_media(url)
+            if path:
+                paths.append(path)
+            temp_paths.extend(created)
+        return paths, temp_paths
+    except Exception:
+        for path in temp_paths:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        raise
+
+def codex_models_payload(raw=None):
+    all_models = [*CODEX_DEFAULT_IMAGE_MODELS, *CODEX_DEFAULT_CHAT_MODELS]
+    return {
+        "ok": True,
+        "protocol": "codex",
+        "status": 200,
+        "message": "OpenAI Codex CLI 可用，模型列表来自本机 CLI 默认配置。",
+        "model_count": len(all_models),
+        "total": len(all_models),
+        "image_models": CODEX_DEFAULT_IMAGE_MODELS,
+        "chat_models": CODEX_DEFAULT_CHAT_MODELS,
+        "video_models": [],
+        "all": all_models,
+        "raw": raw or {},
+    }
+
+async def generate_codex_provider_image(prompt, size, model, reference_images=None, provider=None):
+    ref_paths, temp_paths = await codex_reference_paths(reference_images)
+    since = time.time()
+    try:
+        image_prompt = (
+            "$imagegen\n\n"
+            f"任务：{prompt}\n\n"
+            f"尺寸/比例参考：{size or 'auto'}。\n"
+            f"请生成或编辑图片，并把最终图片文件保存到这个本地目录：{OUTPUT_OUTPUT_DIR}\n"
+            "只需要输出最终文件路径和一句简短说明；不要修改项目代码，不要创建额外文档。"
+        )
+        raw = await run_codex_cli(image_prompt, model="", image_paths=ref_paths, timeout=codex_timeout(), output_last_message=True)
+        files = codex_output_image_files(since)
+        urls = []
+        for path in files:
+            url = codex_output_url_from_path(path)
+            if url and url not in urls:
+                urls.append(url)
+        if not urls:
+            text = f"{raw.get('text') or raw.get('_stdout') or ''}\n{raw.get('_stderr') or ''}"
+            pattern = r"([A-Za-z]:\\[^\r\n\"'<>]+\.(?:png|jpe?g|webp|gif)|/[^\r\n\"'<>]+\.(?:png|jpe?g|webp|gif))"
+            for match in re.findall(pattern, text, flags=re.I):
+                url = codex_output_url_from_path(match.strip())
+                if url and url not in urls:
+                    urls.append(url)
+        if not urls:
+            status_text = (raw.get("text") or raw.get("_stdout") or raw.get("_stderr") or "")[:1200]
+            raise HTTPException(status_code=502, detail=f"OpenAI CLI 已返回，但没有在输出目录发现图片：{status_text}")
+        return {"type": "url", "value": urls[0]}, {"images": urls, "text": raw.get("text"), "provider": "codex"}
+    finally:
+        for path in temp_paths:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+def codex_chat_prompt(payload, history_messages=None):
+    parts = []
+    system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
+    if system_prompt:
+        parts.append(f"系统要求：\n{system_prompt}")
+    for item in (history_messages or [])[-MAX_HISTORY_MESSAGES:]:
+        role = str(item.get("role") or "").strip()
+        content = item.get("content")
+        if role in {"user", "assistant"} and content:
+            label = "用户" if role == "user" else "助手"
+            parts.append(f"{label}：\n{content}")
+    message = str(getattr(payload, "message", "") or "").strip()
+    parts.append(f"用户：\n{message}")
+    parts.append("请直接回答用户，输出纯文本，不要修改项目文件。")
+    return "\n\n".join(part for part in parts if part).strip()
+
+async def codex_chat_text(payload, history_messages=None):
+    image_paths = []
+    temp_paths = []
+    try:
+        image_values = []
+        if hasattr(payload, "images"):
+            image_values.extend([{"url": item} for item in (getattr(payload, "images", None) or []) if item])
+        if hasattr(payload, "reference_images"):
+            image_values.extend([ref.dict() for ref in (getattr(payload, "reference_images", None) or []) if getattr(ref, "url", "")])
+        image_paths, temp_paths = await codex_reference_paths(image_values)
+        raw = await run_codex_cli(
+            codex_chat_prompt(payload, history_messages),
+            model=getattr(payload, "model", "") or CODEX_DEFAULT_CHAT_MODELS[0],
+            image_paths=image_paths,
+            timeout=codex_timeout(),
+            output_last_message=True,
+        )
+        text = str(raw.get("text") or "").strip()
+        return text or "Codex CLI 返回了空回复。", raw
+    finally:
+        for path in temp_paths:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
 
 def is_yuli_provider(provider):
     # 玉玉API（yuli.host）的视频接口走自有格式（/v1/video/create + /v1/video/query），
@@ -4695,12 +5176,18 @@ def output_file_from_url(url):
     if not url or not (url.startswith("/output/") or url.startswith("/assets/")):
         return None
     clean = urllib.parse.unquote(url.split("?", 1)[0]).replace("\\", "/")
-    if clean.startswith("/assets/"):
-        root = ASSETS_DIR
-        rel = clean[len("/assets/"):]
-    else:
-        root = OUTPUT_DIR
-        rel = clean[len("/output/"):]
+    mappings = (
+        ("/assets/input/", OUTPUT_INPUT_DIR),
+        ("/assets/output/", OUTPUT_OUTPUT_DIR),
+        ("/assets/library/", ASSET_LIBRARY_DIR),
+        ("/assets/uploads/", LOCAL_UPLOAD_DIR),
+        ("/assets/", ASSETS_DIR),
+        ("/output/", OUTPUT_DIR),
+    )
+    prefix, root = next(((prefix, root) for prefix, root in mappings if clean.startswith(prefix)), ("", ""))
+    if not prefix:
+        return None
+    rel = clean[len(prefix):]
     rel = rel.lstrip("/")
     if not rel:
         return None
@@ -4709,6 +5196,27 @@ def output_file_from_url(url):
     if os.path.commonpath([output_root, path]) != output_root or not os.path.exists(path):
         return None
     return path
+
+def media_url_from_path(path: str):
+    absolute = os.path.abspath(path)
+    mappings = (
+        (OUTPUT_INPUT_DIR, "/assets/input"),
+        (OUTPUT_OUTPUT_DIR, "/assets/output"),
+        (ASSET_LIBRARY_DIR, "/assets/library"),
+        (LOCAL_UPLOAD_DIR, "/assets/uploads"),
+        (OUTPUT_DIR, "/output"),
+        (ASSETS_DIR, "/assets"),
+    )
+    for root, prefix in mappings:
+        root_abs = os.path.abspath(root)
+        try:
+            if os.path.commonpath([root_abs, absolute]) != root_abs:
+                continue
+        except ValueError:
+            continue
+        rel = os.path.relpath(absolute, root_abs).replace("\\", "/")
+        return f"{prefix}/{urllib.parse.quote(rel, safe='/')}"
+    return None
 
 def image_has_alpha(img: Image.Image) -> bool:
     if img.mode in ("RGBA", "LA"):
@@ -4838,9 +5346,9 @@ def local_media_file_by_basename(name: str):
     roots = [
         OUTPUT_OUTPUT_DIR,
         OUTPUT_INPUT_DIR,
-        os.path.join(ASSETS_DIR, "output"),
-        os.path.join(ASSETS_DIR, "input"),
-        os.path.join(ASSETS_DIR, "library"),
+        ASSET_LIBRARY_DIR,
+        LOCAL_UPLOAD_DIR,
+        OUTPUT_DIR,
     ]
     for root in roots:
         path = os.path.abspath(os.path.join(root, safe))
@@ -4859,7 +5367,7 @@ def fetch_remote_media_bytes(url: str, timeout: float = 30.0, max_bytes: int = 2
     parsed = urllib.parse.urlparse(text)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return None
-    with requests.get(text, stream=True, timeout=timeout, headers={"User-Agent": "ComfyUI-API-Modelscope/1.0"}) as response:
+    with requests.get(text, stream=True, timeout=timeout, headers={"User-Agent": "Canvas/1.0"}) as response:
         response.raise_for_status()
         content_type = response.headers.get("content-type") or "application/octet-stream"
         chunks = []
@@ -5013,13 +5521,13 @@ def migrate_asset_item_registrations(item):
         item.pop(key, None)
 
 def load_asset_library():
-    if not os.path.exists(ASSET_LIBRARY_PATH):
+    stored = DATABASE.get_library("asset_library", None)
+    if stored is None:
         lib = default_asset_library()
         save_asset_library(lib)
         return lib
     try:
-        with open(ASSET_LIBRARY_PATH, "r", encoding="utf-8") as f:
-            lib = json.load(f)
+        lib = stored
     except Exception:
         lib = default_asset_library()
     return normalize_asset_library(lib)
@@ -5375,11 +5883,8 @@ def save_asset_library(lib):
     lib = normalize_asset_library(lib)
     sort_asset_library_items(lib)
     lib["updated_at"] = now_ms()
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(ASSET_LIBRARY_PATH, "w", encoding="utf-8") as f:
-        json.dump(lib, f, ensure_ascii=False, indent=2)
-    if GLOBAL_LOOP:
-        asyncio.run_coroutine_threadsafe(manager.broadcast_asset_library_updated(int(lib["updated_at"])), GLOBAL_LOOP)
+    revision = DATABASE.save_library("asset_library", lib)
+    publish_entity_changed("asset", "global", revision, updated_at=int(lib["updated_at"]))
 
 def find_asset_category(lib, category_id):
     for cat in lib.get("categories", []):
@@ -5423,11 +5928,7 @@ SHARED_SCAN_MAX_ENTRIES = 8000
 SHARED_FOLDERS_LOCK = Lock()
 
 def shared_folders_load():
-    try:
-        with open(SHARED_FOLDERS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
+    data = DATABASE.get_library("shared_folders", {})
     if not isinstance(data, dict):
         data = {}
     folders = data.get("folders")
@@ -5436,9 +5937,7 @@ def shared_folders_load():
     return {"folders": [f for f in folders if isinstance(f, dict)]}
 
 def shared_folders_save(data):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(SHARED_FOLDERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    DATABASE.save_library("shared_folders", data)
 
 def shared_folder_by_id(folder_id):
     for entry in shared_folders_load().get("folders", []):
@@ -5448,16 +5947,16 @@ def shared_folder_by_id(folder_id):
 
 def shared_folder_abs(entry):
     rel = (entry or {}).get("rel") or ""
-    return os.path.normpath(os.path.join(BASE_DIR, rel))
+    return os.path.normpath(os.path.join(DATA_DIR, rel))
 
 def shared_resolve_register(path):
     """校验 path 必须位于项目目录内、是一个存在的子目录（非项目根）。返回 (abs, rel)。"""
     raw = (path or "").strip().strip('"').strip("'")
     if not raw:
         raise HTTPException(status_code=400, detail="请提供文件夹路径")
-    candidate = raw if os.path.isabs(raw) else os.path.join(BASE_DIR, raw)
+    candidate = raw if os.path.isabs(raw) else os.path.join(DATA_DIR, raw)
     abs_path = os.path.normpath(os.path.abspath(candidate))
-    base = os.path.normpath(os.path.abspath(BASE_DIR))
+    base = os.path.normpath(os.path.abspath(DATA_DIR))
     try:
         common = os.path.commonpath([abs_path, base])
     except ValueError:
@@ -5688,12 +6187,12 @@ def normalize_prompt_libraries(data):
     return {"active_library_id": active, "libraries": libraries, "updated_at": int(data.get("updated_at") or now_ms())}
 
 def load_prompt_libraries():
-    if not os.path.exists(PROMPT_LIBRARY_PATH):
+    stored = DATABASE.get_library("prompt_libraries", None)
+    if stored is None:
         data = default_prompt_libraries()
         return save_prompt_libraries(data)
     try:
-        with open(PROMPT_LIBRARY_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = stored
     except Exception:
         data = default_prompt_libraries()
     if not isinstance(data, dict):
@@ -5706,9 +6205,8 @@ def load_prompt_libraries():
 def save_prompt_libraries(data):
     data = normalize_prompt_libraries(data)
     data["updated_at"] = now_ms()
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(PROMPT_LIBRARY_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    revision = DATABASE.save_library("prompt_libraries", data)
+    publish_entity_changed("prompt", "global", revision, updated_at=int(data["updated_at"]))
     return data
 
 def public_prompt_libraries(data=None):
@@ -5823,13 +6321,7 @@ def convert_output_to_jpg(url, quality=88):
             else:
                 img = img.convert("RGB")
             img.save(jpg_path, "JPEG", quality=quality, optimize=True)
-        try:
-            root = ASSETS_DIR if os.path.commonpath([os.path.abspath(ASSETS_DIR), os.path.abspath(jpg_path)]) == os.path.abspath(ASSETS_DIR) else OUTPUT_DIR
-        except ValueError:
-            root = OUTPUT_DIR
-        rel = os.path.relpath(jpg_path, root).replace("\\", "/")
-        prefix = "/assets" if root == ASSETS_DIR else "/output"
-        return f"{prefix}/{rel}"
+        return media_url_from_path(jpg_path) or url
     except Exception as e:
         print(f"转换 JPG 失败: {e}")
         return url
@@ -7102,7 +7594,7 @@ async def save_remote_video_to_output(url, prefix="video_", category="output"):
     try:
         timeout = httpx.Timeout(connect=20.0, read=VIDEO_POLL_TIMEOUT, write=60.0, pool=20.0)
         headers = {
-            "User-Agent": "ComfyUI-API-Modelscope/1.0",
+            "User-Agent": "Canvas/1.0",
             "Accept": "video/*,application/octet-stream,*/*;q=0.8",
         }
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
@@ -7275,6 +7767,92 @@ def apimart_size_resolution(size):
     ratio = width / height
     best = min(common, key=lambda item: abs(ratio - item[0] / item[1]))
     return best[2], resolution
+
+def grsai_aspect_ratio(size, fallback="1:1"):
+    width, height = parse_size_pair(size)
+    if width and height:
+        divisor = math.gcd(width, height) or 1
+        return f"{width // divisor}:{height // divisor}"
+    raw = str(size or "").strip().lower()
+    if raw == "auto" or re.fullmatch(r"\d+\s*:\s*\d+", raw):
+        return raw.replace(" ", "")
+    return fallback
+
+def grsai_image_size(size, fallback="1K"):
+    width, height = parse_size_pair(size)
+    if width and height:
+        long_edge = max(width, height)
+        if long_edge >= 3200:
+            return "4K"
+        if long_edge >= 1400:
+            return "2K"
+        return "1K"
+    raw = str(size or "").strip().upper()
+    return raw if raw in {"1K", "2K", "4K"} else fallback
+
+def grsai_endpoint_url(provider, path):
+    return provider_endpoint_url(provider, "", path)
+
+def grsai_status(raw):
+    if not isinstance(raw, dict):
+        return ""
+    return str(raw.get("status") or "").strip().lower()
+
+async def wait_for_grsai_image_task(client, provider, task_id):
+    query_url = grsai_endpoint_url(provider, "/v1/api/result")
+    deadline = time.monotonic() + IMAGE_TASK_TIMEOUT
+    last_payload = None
+    while time.monotonic() < deadline:
+        await asyncio.sleep(IMAGE_POLL_INTERVAL)
+        response = await client.get(
+            query_url,
+            headers=api_headers(provider=provider),
+            params={"id": task_id},
+        )
+        response.raise_for_status()
+        raw = response.json()
+        last_payload = raw
+        status = grsai_status(raw)
+        if status == "succeeded":
+            return raw
+        if status in {"failed", "violation"}:
+            raise HTTPException(status_code=502, detail=f"Grsai 任务失败：{raw.get('error') or raw}")
+        try:
+            extract_image(raw)
+            return raw
+        except HTTPException:
+            pass
+    raise HTTPException(status_code=504, detail=f"Grsai 生图任务超时：{last_payload or task_id}")
+
+async def generate_grsai_nano_provider_image(prompt, size, model, reference_images=None, provider=None):
+    endpoint = grsai_endpoint_url(provider, "/v1/api/generate")
+    body = {
+        "model": model,
+        "prompt": prompt,
+        "images": [
+            reference_to_data_url(ref, max_size=1536)
+            for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
+            if ref.get("url")
+        ],
+        "aspectRatio": grsai_aspect_ratio(size),
+        "imageSize": grsai_image_size(size),
+        "replyType": "json",
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0)) as client:
+        response = await client.post(endpoint, headers=api_headers(provider=provider), json=body)
+        response.raise_for_status()
+        raw = response.json()
+        status = grsai_status(raw)
+        if status in {"failed", "violation"}:
+            raise HTTPException(status_code=502, detail=f"Grsai 生成失败：{raw.get('error') or raw}")
+        try:
+            return extract_image(raw), raw
+        except HTTPException:
+            task_id = extract_task_id(raw)
+            if not task_id:
+                raise
+        task_result = await wait_for_grsai_image_task(client, provider, task_id)
+        return extract_image(task_result), task_result
 
 VOLCENGINE_MIN_PIXELS = 3_686_400
 VOLCENGINE_MIN_EDGE = 1536
@@ -8625,14 +9203,27 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {"videos": local_urls, "task_id": task_id, "raw": result}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly"):
+async def generate_ai_image(
+    prompt,
+    size,
+    quality,
+    model,
+    reference_images=None,
+    provider_id="comfly",
+    allow_edit_endpoint_fallback=True,
+    semantic_mask=False,
+):
     provider = get_api_provider(provider_id)
     if provider["id"] == "modelscope":
         return await generate_modelscope_provider_image(prompt, size, model, reference_images, provider)
+    if is_codex_provider(provider):
+        return await generate_codex_provider_image(prompt, size, model, reference_images, provider)
     if is_jimeng_provider(provider):
         return await generate_jimeng_provider_image(prompt, size, model, reference_images, provider)
     if is_runninghub_provider(provider):
         return await generate_runninghub_provider_image(prompt, size, model, reference_images, provider)
+    if is_grsai_provider(provider) and is_grsai_nano_model(model):
+        return await generate_grsai_nano_provider_image(prompt, size, model, reference_images, provider)
     if effective_protocol(provider, model) == "gemini":
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
@@ -8650,8 +9241,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
     gen_url = provider_endpoint_url(provider, "image_generation_endpoint", "/v1/images/generations")
     edit_url = provider_endpoint_url(provider, "image_edit_endpoint", "/v1/images/edits")
     refs = [ref for ref in (reference_images or []) if ref.get("url")]
-    mask_refs = [ref for ref in refs if str(ref.get("role") or "").strip().lower() == "mask" or str(ref.get("name") or "").lower().endswith("_mask.png")]
-    image_refs = [ref for ref in refs if ref not in mask_refs]
+    mask_refs = [] if semantic_mask else [ref for ref in refs if str(ref.get("role") or "").strip().lower() == "mask" or str(ref.get("name") or "").lower().endswith("_mask.png")]
+    image_refs = refs if semantic_mask else [ref for ref in refs if ref not in mask_refs]
     image_request_mode = effective_image_request_mode(provider, model)
     request_timeout = httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0) if (is_gpt2 or is_apimart or image_request_mode == "openai-json") else AI_REQUEST_TIMEOUT
     async with httpx.AsyncClient(timeout=request_timeout) as client:
@@ -8734,10 +9325,12 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     fh.close()
             # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
             if response is None:
-                if is_gpt2:
+                if is_gpt2 or not allow_edit_endpoint_fallback:
+                    failure_status = edit_failed_status if isinstance(edit_failed_status, int) and edit_failed_status >= 400 else 502
+                    failure_prefix = "GPT-Image-2 编辑接口" if is_gpt2 else "图片编辑接口"
                     raise HTTPException(
-                        status_code=502,
-                        detail=f"GPT-Image-2 编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
+                        status_code=failure_status,
+                        detail=f"{failure_prefix} /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动补发，避免上游状态未知时重复扣费。"
                     )
                 print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
                 image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
@@ -8969,8 +9562,21 @@ async def decide_chat_agent_action(payload, conversation, refs):
         return fallback
 
 async def build_chat_text_reply(payload, conversation):
-    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     provider_cfg = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
+    if is_codex_provider(provider_cfg):
+        model = selected_model(payload.model, (provider_cfg.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
+        payload.model = model
+        text, raw = await codex_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+        return {
+            "id": uuid.uuid4().hex,
+            "role": "assistant",
+            "content": text,
+            "created_at": now_ms(),
+            "model": model,
+            "raw_usage": None,
+            "raw": raw,
+        }
+    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     is_apimart = is_apimart_provider(provider_cfg)
     upstream_messages = [{"role": "system", "content": chat_system_prompt(payload)}]
     for item in conversation["messages"][-MAX_HISTORY_MESSAGES:]:
@@ -9009,26 +9615,14 @@ async def index():
 
 @app.get("/api/view")
 def view_image(filename: str, type: str = "input", subfolder: str = ""):
-    # 先按原逻辑去各 ComfyUI 后端找
-    for addr in COMFYUI_INSTANCES:
-        try:
-            url = f"http://{addr}/view"
-            params = {"filename": filename, "type": type, "subfolder": subfolder}
-            r = requests.get(url, params=params, timeout=1)
-            if r.status_code == 200:
-                return Response(content=r.content, media_type=r.headers.get('Content-Type'))
-        except Exception:
-            continue
-    # 后端都拿不到时回退本地 assets/<input|output>/
-    # 适用场景：画布通过 /api/ai/upload 把参考图直接落到本地 assets/input/，
-    # 但 ComfyUI 的 input 可能因为重启/清理而丢失，导致 enhance/klein 等页面预览对比图 404
+    # 兼容旧素材链接，仅从 Canvas 自身的输入/输出目录读取。
     if not subfolder and type in ("input", "output"):
         safe_name = os.path.basename(filename or "")
         if safe_name:
             local_path = output_path_for(safe_name, "input" if type == "input" else "output")
             if os.path.isfile(local_path):
                 return FileResponse(local_path, media_type=content_type_for_path(local_path))
-    raise HTTPException(status_code=404, detail="Image not found on any available backend")
+    raise HTTPException(status_code=404, detail="Image not found")
 
 @app.get("/api/download-output")
 def download_output(request: Request, url: str, name: str = "", inline: bool = False):
@@ -9043,7 +9637,7 @@ def download_output(request: Request, url: str, name: str = "", inline: bool = F
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise HTTPException(status_code=400, detail="无效的下载地址")
     try:
-        upstream_headers = {"User-Agent": "ComfyUI-API-Modelscope/1.0"}
+        upstream_headers = {"User-Agent": "Canvas/1.0"}
         range_header = request.headers.get("range")
         if range_header:
             upstream_headers["Range"] = range_header
@@ -9077,33 +9671,6 @@ def download_output(request: Request, url: str, name: str = "", inline: bool = F
 
     return StreamingResponse(stream_remote(), media_type=content_type, headers=headers, status_code=upstream.status_code)
 
-@app.post("/api/upload")
-async def upload_image(files: List[UploadFile] = File(...)):
-    uploaded_files = []
-    files_content = []
-    for file in files:
-        content = await file.read()
-        files_content.append((file, content))
-
-    for file, content in files_content:
-        success_count = 0
-        last_result = None
-        for addr in COMFYUI_INSTANCES:
-            try:
-                files_data = {'image': (file.filename, content, file.content_type)}
-                response = requests.post(f"http://{addr}/upload/image", files=files_data, timeout=5)
-                if response.status_code == 200:
-                    last_result = response.json()
-                    success_count += 1
-            except Exception as e:
-                print(f"Upload error for {addr}: {e}")
-
-        if success_count > 0 and last_result:
-            uploaded_files.append({"comfy_name": last_result.get("name", file.filename)})
-        else:
-            raise HTTPException(status_code=500, detail="Failed to upload to any backend")
-
-    return {"files": uploaded_files}
 
 @app.post("/api/ai/upload")
 async def upload_ai_reference(files: List[UploadFile] = File(...)):
@@ -9181,35 +9748,6 @@ async def upload_ai_base64(payload: Base64UploadRequest):
         f.write(content)
     return {"files": [{"url": output_url_for(filename, "input"), "name": payload.name or filename, "kind": kind}]}
 
-@app.post("/api/comfyui/upload-base64")
-async def upload_comfyui_base64(payload: Base64UploadRequest):
-    """base64 方式把图片传到 ComfyUI 各后端的 input 目录，返回 comfy 用文件名（供 UXP 做 ComfyUI 图生图）。"""
-    raw = (payload.data or "").strip()
-    ct = (payload.content_type or "").split(";", 1)[0].strip().lower()
-    if raw.startswith("data:"):
-        header, _, raw = raw.partition(",")
-        if not ct:
-            ct = header[5:].split(";", 1)[0].strip().lower()
-    try:
-        content = base64.b64decode(raw, validate=False)
-    except Exception:
-        raise HTTPException(status_code=400, detail="数据无法解码")
-    if not content:
-        raise HTTPException(status_code=400, detail="内容为空")
-    _, ext = _local_upload_kind_ext(payload.name or "", ct or "image/png")
-    filename = f"dx_{uuid.uuid4().hex[:12]}{ext or '.png'}"
-    comfy_name = None
-    for addr in COMFYUI_INSTANCES:
-        try:
-            resp = requests.post(f"http://{addr}/upload/image",
-                                 files={'image': (filename, content, ct or 'image/png')}, timeout=10)
-            if resp.status_code == 200:
-                comfy_name = resp.json().get("name", filename)
-        except Exception as exc:
-            print(f"ComfyUI base64 upload error for {addr}: {exc}")
-    if not comfy_name:
-        raise HTTPException(status_code=502, detail="上传到 ComfyUI 失败")
-    return {"name": comfy_name}
 
 def _local_upload_kind_ext(filename, content_type):
     image_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -10155,6 +10693,67 @@ async def runninghub_upload_asset(payload: RunningHubUploadAssetRequest):
         return {"success": True, "data": {"fileName": raw["data"]["fileName"], "fileType": raw["data"].get("fileType") or content_type}}
     raise HTTPException(status_code=400, detail=(raw.get("msg") if isinstance(raw, dict) else "") or f"RunningHub 上传失败：{raw}")
 
+@app.get("/api/codex/status")
+async def codex_status():
+    exe = codex_cli_executable()
+    if not exe:
+        return {
+            "installed": False,
+            "logged_in": False,
+            "message": "未找到 OpenAI Codex CLI，请先安装。",
+        }
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            exe,
+            "--version",
+            cwd=BASE_DIR,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        out_text, err_text = codex_decode_output(stdout, stderr)
+        ok = proc.returncode == 0
+        return {
+            "installed": ok,
+            "logged_in": None,
+            "version": out_text or err_text,
+            "path": exe,
+            "message": "OpenAI Codex CLI 已安装。登录状态会在首次执行 codex exec 时由 CLI 校验。" if ok else (err_text or out_text or "Codex CLI 检测失败"),
+            "raw": {"stdout": out_text, "stderr": err_text, "returncode": proc.returncode},
+        }
+    except Exception as exc:
+        return {
+            "installed": False,
+            "logged_in": False,
+            "path": exe,
+            "message": f"Codex CLI 检测失败：{exc}",
+        }
+
+@app.post("/api/codex/help")
+async def codex_help(payload: CodexHelpRequest):
+    exe = codex_cli_executable()
+    if not exe:
+        raise HTTPException(status_code=400, detail="未找到 OpenAI Codex CLI。")
+    allowed = {"", "exec", "login", "logout", "doctor", "mcp", "app", "update"}
+    command = str(payload.command or "").strip()
+    if command not in allowed:
+        raise HTTPException(status_code=400, detail="不允许的 Codex CLI 命令")
+    args = [exe]
+    if command:
+        args.append(command)
+    args.append("--help")
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        cwd=BASE_DIR,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
+    out_text, err_text = codex_decode_output(stdout, stderr)
+    if proc.returncode != 0:
+        raise HTTPException(status_code=502, detail=(err_text or out_text or f"exit={proc.returncode}")[:1000])
+    return {"text": out_text or err_text, "raw": {"stdout": out_text, "stderr": err_text}}
+
 @app.get("/api/jimeng/status")
 async def jimeng_status():
     exe = jimeng_cli_executable()
@@ -10307,7 +10906,6 @@ async def ai_config():
         "chat_models": CHAT_MODELS,
         "image_models": IMAGE_MODELS,
         "video_models": VIDEO_MODELS,
-        "comfy_instances": COMFYUI_INSTANCES,
         "api_providers": providers,
         "has_api_key": bool(AI_API_KEY),
         "ms_chat_models": MODELSCOPE_CHAT_MODELS,
@@ -10386,18 +10984,7 @@ async def save_providers(payload: List[ApiProviderPayload]):
 
 @app.get("/api/config/token")
 async def get_global_token():
-    # 优先读 env，回退到 global_config.json（兼容旧数据）
-    saved_token = modelscope_api_key()
-    if saved_token:
-        return {"token": saved_token}
-    if os.path.exists(GLOBAL_CONFIG_FILE):
-        try:
-            with open(GLOBAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                return {"token": config.get("modelscope_token", "")}
-        except:
-            pass
-    return {"token": ""}
+    return {"configured": bool(modelscope_api_key())}
 
 # --- 在线生图 (COMFLY) ---
 
@@ -10416,6 +11003,8 @@ def protocol_from_payload(payload):
         return "runninghub"
     if provider_id == "jimeng":
         return "jimeng"
+    if provider_id == "codex":
+        return "codex"
     base_url = str(getattr(payload, "base_url", "") or "").strip().lower()
     if "runninghub.cn" in base_url or "runninghub.ai" in base_url:
         return "runninghub"
@@ -10631,6 +11220,15 @@ def apply_agnes_model_defaults(base_url, grouped, ids):
 async def test_provider_connection(payload: TestConnectionPayload):
     """测试请求地址是否可用：调上游 /v1/models。验证通过时同时把模型清单按类别返回，避免再调一次拉取接口。"""
     protocol = protocol_from_payload(payload)
+    if protocol == "codex":
+        status = await codex_status()
+        payload_models = codex_models_payload(raw={"status": status})
+        payload_models.update({
+            "ok": bool(status.get("installed")),
+            "status": 200 if status.get("installed") else 0,
+            "message": status.get("message") or ("OpenAI Codex CLI 可用" if status.get("installed") else "未找到 OpenAI Codex CLI"),
+        })
+        return payload_models
     if protocol == "jimeng":
         status = await jimeng_status()
         return {
@@ -10726,9 +11324,18 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
     """验证异步协议：用假 task_id 请求 GET /v1/tasks/{fake_id}。
     收到 400 Invalid task ID = 端点存在且 Key 有效；401/403 = Key 无效；404/连接失败 = 不支持异步端点。"""
     base_url = (payload.base_url or "").strip().rstrip("/")
+    protocol = protocol_from_payload(payload)
+    if protocol == "codex":
+        status = await codex_status()
+        return {
+            "ok": bool(status.get("installed")),
+            "protocol": "codex",
+            "status_code": 200 if status.get("installed") else 0,
+            "message": status.get("message") or "OpenAI Codex CLI 本机检测完成",
+            "raw": status,
+        }
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
-    protocol = protocol_from_payload(payload)
     api_key = api_key_from_payload(payload, protocol)
     if not api_key:
         raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
@@ -10852,6 +11459,11 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
 async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str = "openai", image_request_mode: str = "openai"):
     """从上游模型列表端点拉取模型，并按名称做轻量分类。"""
     protocol = protocol if protocol in SUPPORTED_PROVIDER_PROTOCOLS else "openai"
+    if protocol == "codex":
+        status = await codex_status()
+        payload = codex_models_payload(raw={"status": status})
+        payload["message"] = status.get("message") or payload["message"]
+        return payload
     if protocol == "jimeng":
         return {
             "total": len(JIMENG_DEFAULT_IMAGE_MODELS) + len(JIMENG_DEFAULT_VIDEO_MODELS),
@@ -10979,6 +11591,8 @@ async def fetch_upstream_models_from_payload(payload: TestConnectionPayload):
 async def fetch_upstream_models(provider_id: str):
     """从已保存的上游 OpenAI 兼容接口拉取 /v1/models 列表，按名称智能分类为 image/chat/video。"""
     provider = get_api_provider_exact(provider_id)
+    if is_codex_provider(provider):
+        return await fetch_models_from_upstream("", "", "codex", provider.get("image_request_mode") or "openai")
     api_key = os.getenv(runninghub_wallet_key_env(), "") if provider["id"] == "runninghub" else ""
     if not api_key:
         api_key = os.getenv(provider_key_env(provider["id"]), "")
@@ -10986,15 +11600,37 @@ async def fetch_upstream_models(provider_id: str):
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider_id} 未配置 API Key")
     return await fetch_models_from_upstream(provider.get("base_url") or "", api_key, provider_protocol(provider), provider.get("image_request_mode") or "openai")
 
-async def build_online_image_result(payload: OnlineImageRequest):
-    provider = get_api_provider(payload.provider_id)
+async def execute_ai_image_batch(
+    prompt: str,
+    provider_id: str,
+    model: str,
+    size: str,
+    quality: str,
+    references: List[Dict[str, Any]],
+    count: int,
+    prefix: str,
+    allow_edit_endpoint_fallback: bool = True,
+    semantic_mask: bool = False,
+) -> Dict[str, Any]:
+    provider = get_api_provider(provider_id)
     default_model = (provider.get("image_models") or [IMAGE_MODEL])[0]
-    model = selected_model(payload.model, default_model)
-    refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    resolved_model = selected_model(model, default_model)
+    refs = [dict(ref) for ref in references or [] if isinstance(ref, dict) and ref.get("url")]
     image_refs = image_references(refs)
-    count = max(1, min(8, int(payload.n or 1)))
+    safe_count = max(1, min(8, int(count or 1)))
+    generation_started_at = time.time()
+
     async def generate_one():
-        image_data, raw_item = await generate_ai_image(payload.prompt, payload.size, payload.quality, model, image_refs, provider["id"])
+        image_data, raw_item = await generate_ai_image(
+            prompt,
+            size,
+            quality,
+            resolved_model,
+            image_refs,
+            provider["id"],
+            allow_edit_endpoint_fallback=allow_edit_endpoint_fallback,
+            semantic_mask=semantic_mask,
+        )
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
@@ -11002,21 +11638,22 @@ async def build_online_image_result(payload: OnlineImageRequest):
         local_urls = []
         local_items = []
         for item in image_items:
-            local_url = await save_ai_image_to_output(item, prefix="online_")
+            local_url = await save_ai_image_to_output(item, prefix=prefix)
             if local_url:
                 local_urls.append(local_url)
                 local_items.append(image_output_meta(local_url, item))
         return local_urls, local_items, raw_item
+
     try:
-        generated = await asyncio.gather(*(generate_one() for _ in range(count)))
+        generated = await asyncio.gather(*(generate_one() for _ in range(safe_count)))
     except httpx.HTTPStatusError as exc:
-        log_net_error(f"生图 HTTP状态错误 provider={provider.get('id')} model={model} size={payload.size}", exc)
+        log_net_error(f"生图 HTTP状态错误 provider={provider.get('id')} model={resolved_model} size={size}", exc)
         text = exc.response.text or ''
-        friendly = friendly_image_error_detail(text, payload.size, model)
+        friendly = friendly_image_error_detail(text, size, resolved_model)
         detail = friendly or f"上游生图接口错误：{text[:300]}"
         raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
     except httpx.HTTPError as exc:
-        log_net_error(f"生图 网络/TLS错误 provider={provider.get('id')} model={model}", exc)
+        log_net_error(f"生图 网络/TLS错误 provider={provider.get('id')} model={resolved_model}", exc)
         raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
 
     local_urls = [url for urls, _items, _raw in generated for url in (urls or []) if url]
@@ -11026,18 +11663,55 @@ async def build_online_image_result(payload: OnlineImageRequest):
         provider_name = provider.get("name") or provider["id"]
         raw_text = json.dumps(raw, ensure_ascii=False)[:800] if isinstance(raw, (dict, list)) else str(raw)[:800]
         raise HTTPException(status_code=502, detail=f"{provider_name} 没有返回图片：{raw_text}")
-    result = {
-        "prompt": payload.prompt,
+    generation_completed_at = time.time()
+    generation_elapsed_seconds = round(max(0, generation_completed_at - generation_started_at), 3)
+    return {
+        "provider": provider,
+        "model": resolved_model,
+        "count": safe_count,
+        "references": refs,
         "images": local_urls,
         "image_items": local_items,
-        "timestamp": time.time(),
+        "raw": raw,
+        "generation_started_at": generation_started_at,
+        "generation_completed_at": generation_completed_at,
+        "generation_elapsed_seconds": generation_elapsed_seconds,
+    }
+
+async def build_online_image_result(payload: OnlineImageRequest):
+    batch = await execute_ai_image_batch(
+        prompt=payload.prompt,
+        provider_id=payload.provider_id,
+        model=payload.model,
+        size=payload.size,
+        quality=payload.quality,
+        references=[ref.dict() for ref in payload.reference_images if ref.url],
+        count=payload.n,
+        prefix="online_",
+    )
+    provider = batch["provider"]
+    model = batch["model"]
+    refs = batch["references"]
+    count = batch["count"]
+    raw = batch["raw"]
+    generation_started_at = batch["generation_started_at"]
+    generation_completed_at = batch["generation_completed_at"]
+    generation_elapsed_seconds = batch["generation_elapsed_seconds"]
+    result = {
+        "prompt": payload.prompt,
+        "images": batch["images"],
+        "image_items": batch["image_items"],
+        "timestamp": generation_completed_at,
         "type": "online",
         "model": model,
         "provider_id": provider["id"],
         "provider_name": provider.get("name") or provider["id"],
         "task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
         "request_id": raw.get("id") if isinstance(raw, dict) else None,
-        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs},
+        "generation_started_at": generation_started_at,
+        "generation_completed_at": generation_completed_at,
+        "generation_elapsed_seconds": generation_elapsed_seconds,
+        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "generation_elapsed_seconds": generation_elapsed_seconds},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
     save_to_history(result)
@@ -11048,6 +11722,796 @@ async def build_online_image_result(payload: OnlineImageRequest):
 @app.post("/api/online-image")
 async def online_image(payload: OnlineImageRequest):
     return await build_online_image_result(payload)
+
+ONLINE_IMAGE_ACTIVE_STATUSES = {"queued", "running"}
+ONLINE_IMAGE_TASK_RESTART_ERROR = "服务已重启，本地未完成任务已中断"
+ONLINE_IMAGE_TASK_RECOVERY_MESSAGE = "服务已重启，已保留云端任务 ID，可继续查询"
+
+def online_image_request_snapshot(payload: OnlineImageRequest) -> Dict[str, Any]:
+    refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    return {
+        "prompt": payload.prompt,
+        "provider_id": payload.provider_id,
+        "model": payload.model,
+        "size": payload.size,
+        "quality": payload.quality,
+        "n": max(1, min(8, int(payload.n or 1))),
+        "reference_images": refs,
+    }
+
+def write_online_image_tasks_locked():
+    tasks = sorted(
+        ONLINE_IMAGE_TASKS.values(),
+        key=lambda item: float(item.get("created_at") or 0),
+        reverse=True,
+    )[:500]
+    DATABASE.save_tasks("online_image", tasks)
+    publish_entity_changed("task", "online_image")
+
+def load_online_image_tasks_from_disk():
+    items = DATABASE.load_tasks("online_image")
+    if not isinstance(items, list):
+        return
+    now = time.time()
+    changed = False
+    restored = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("id") or item.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        task = dict(item)
+        task["id"] = task_id
+        task["task_id"] = task_id
+        if task.get("status") in ONLINE_IMAGE_ACTIVE_STATUSES:
+            recoverable_id = next((str(task.get(key) or "").strip() for key in (
+                "upstream_task_id", "submit_id", "taskId", "video_id", "asset_id"
+            ) if str(task.get(key) or "").strip()), "")
+            if recoverable_id:
+                task["status"] = "recovery_pending"
+                task["recovery_task_id"] = recoverable_id
+                task["message"] = ONLINE_IMAGE_TASK_RECOVERY_MESSAGE
+                task["error"] = ""
+            else:
+                task["status"] = "interrupted"
+                task["error"] = ONLINE_IMAGE_TASK_RESTART_ERROR
+            task["updated_at"] = now
+            changed = True
+        restored[task_id] = task
+    with ONLINE_IMAGE_TASK_LOCK:
+        ONLINE_IMAGE_TASKS.clear()
+        ONLINE_IMAGE_TASKS.update(restored)
+        if changed:
+            write_online_image_tasks_locked()
+
+def update_online_image_task(task_id: str, changes: Dict[str, Any]):
+    with ONLINE_IMAGE_TASK_LOCK:
+        task = ONLINE_IMAGE_TASKS.get(task_id)
+        if not task:
+            return
+        task.update(changes)
+        task["updated_at"] = time.time()
+        write_online_image_tasks_locked()
+
+def public_online_image_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    data = dict(task or {})
+    task_id = str(data.get("id") or data.get("task_id") or "")
+    data["id"] = task_id
+    data["task_id"] = task_id
+    return data
+
+async def run_online_image_task(task_id: str, payload: OnlineImageRequest):
+    update_online_image_task(task_id, {"status": "running", "error": ""})
+    try:
+        result = await build_online_image_result(payload)
+        update_online_image_task(task_id, {
+            "status": "succeeded",
+            "result": result,
+            "error": "",
+            "provider_id": result.get("provider_id") or payload.provider_id,
+            "model": result.get("model") or payload.model,
+        })
+    except JimengPendingError as exc:
+        info = jimeng_pending_payload(exc)
+        update_online_image_task(task_id, {
+            "status": "jimeng_pending",
+            "jimeng_pending": True,
+            "submit_id": exc.submit_id,
+            "kind": exc.kind,
+            "queue_info": exc.queue_info,
+            "message": info["message"],
+            "error": "",
+        })
+    except Exception as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        status_code = getattr(exc, "status_code", 500)
+        update_online_image_task(task_id, {
+            "status": "failed",
+            "error": str(detail),
+            "status_code": status_code,
+            "upstream_task_id": getattr(exc, "upstream_task_id", "") or extract_task_id_from_text(str(detail)),
+        })
+
+@app.post("/api/online-image-tasks")
+async def create_online_image_task(payload: OnlineImageRequest):
+    task_id = f"online_img_{uuid.uuid4().hex}"
+    snapshot = online_image_request_snapshot(payload)
+    now = time.time()
+    task = {
+        "id": task_id,
+        "task_id": task_id,
+        "type": "online-image",
+        "status": "queued",
+        "created_at": now,
+        "updated_at": now,
+        "result": None,
+        "error": "",
+        "queue_info": {},
+        "submit_id": "",
+        "message": "",
+        **snapshot,
+        "request": snapshot,
+    }
+    with ONLINE_IMAGE_TASK_LOCK:
+        ONLINE_IMAGE_TASKS[task_id] = task
+        write_online_image_tasks_locked()
+    asyncio.create_task(run_online_image_task(task_id, payload))
+    return public_online_image_task(task)
+
+@app.get("/api/online-image-tasks")
+async def list_online_image_tasks(limit: int = 50):
+    safe_limit = max(1, min(200, int(limit or 50)))
+    with ONLINE_IMAGE_TASK_LOCK:
+        tasks = sorted(
+            (public_online_image_task(task) for task in ONLINE_IMAGE_TASKS.values()),
+            key=lambda item: float(item.get("created_at") or 0),
+            reverse=True,
+        )[:safe_limit]
+    return {"tasks": tasks}
+
+@app.get("/api/online-image-tasks/{task_id}")
+async def get_online_image_task(task_id: str):
+    with ONLINE_IMAGE_TASK_LOCK:
+        task = public_online_image_task(ONLINE_IMAGE_TASKS.get(task_id) or {})
+    if not task.get("id"):
+        raise HTTPException(status_code=404, detail="在线生图任务不存在，可能服务已重启或任务已过期")
+    return task
+
+ECOMMERCE_ACTIVE_STATUSES = {"queued", "running"}
+ECOMMERCE_TASK_RESTART_ERROR = "服务已重启，未完成的电商任务已中断；为避免重复扣费，系统不会自动补发"
+ECOMMERCE_INPUT_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+ECOMMERCE_INPUT_MAX_BYTES = 50 * 1024 * 1024
+ECOMMERCE_INPUT_FORMAT_MIMES = {
+    "PNG": "image/png",
+    "JPEG": "image/jpeg",
+    "MPO": "image/jpeg",
+    "WEBP": "image/webp",
+}
+ECOMMERCE_GARMENT_ANALYSIS_PROMPT = """请只分析图片中的服装产品，输出严格 JSON，不要 Markdown、不要解释：
+{"category":"upper|lower|dress","garment_type":"具体服装名称","confidence":0.0,"reason":"简短判断依据"}
+category 只能是 upper（上装）、lower（下装）或 dress（连衣裙/连体衣）。如果图片中有模特，仍只判断需要试穿的主要服装。"""
+ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT = """请分析这张电商全能模式参考图。参考角色：{role}。用户标签：{label}。用户单图要求：{instruction}。
+输出严格 JSON，不要 Markdown、不要解释：
+{{"item_name":"具体主体/商品/场景名称","category":"服装/鞋/项链/包/手机/动作/场景等","interaction":"wear|put_on|hold|carry|place|use|pose|scene|style|identity","placement":"建议佩戴、手持、背挎、放置或场景位置","visual_details":"需要保留的颜色、材质、结构、Logo、文字和关键特征","confidence":0.0,"reason":"简短依据"}}
+interaction 选择规则：衣服/首饰/帽子/眼镜/腰带通常 wear；鞋子 put_on；手机、杯子、相机等小物 hold；手提包/托特包/背包 carry；家具/摆件 place；动作图 pose；场景图 scene；风格图 style；主体图 identity。"""
+
+def public_ecommerce_route(route: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: route.get(key)
+        for key in ("provider_id", "provider_name", "model", "supports_multi_reference", "supports_mask", "max_reference_images")
+        if key in route
+    }
+
+def public_ecommerce_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    data = dict(task or {})
+    task_id = str(data.get("id") or data.get("task_id") or "")
+    data["id"] = task_id
+    data["task_id"] = task_id
+    return data
+
+def write_ecommerce_task_locked(task: Dict[str, Any]):
+    if hasattr(DATABASE, "upsert_task"):
+        DATABASE.upsert_task("ecommerce", task)
+    else:
+        DATABASE.save_tasks("ecommerce", ECOMMERCE_TASKS.values())
+    publish_entity_changed("task", "ecommerce")
+
+def load_ecommerce_tasks_from_disk():
+    items = DATABASE.load_tasks("ecommerce")
+    if not isinstance(items, list):
+        return
+    now = time.time()
+    changed = False
+    restored = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("id") or item.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        task = dict(item)
+        task["id"] = task_id
+        task["task_id"] = task_id
+        if task.get("status") in ECOMMERCE_ACTIVE_STATUSES:
+            task.update({
+                "status": "interrupted",
+                "error": ECOMMERCE_TASK_RESTART_ERROR,
+                "updated_at": now,
+            })
+            changed = True
+        restored[task_id] = task
+    with ECOMMERCE_TASK_LOCK:
+        ECOMMERCE_TASKS.clear()
+        ECOMMERCE_TASKS.update(restored)
+        if changed:
+            if hasattr(DATABASE, "upsert_task"):
+                for task in restored.values():
+                    DATABASE.upsert_task("ecommerce", task)
+            else:
+                DATABASE.save_tasks("ecommerce", restored.values())
+            publish_entity_changed("task", "ecommerce")
+
+def update_ecommerce_task(task_id: str, changes: Dict[str, Any]):
+    with ECOMMERCE_TASK_LOCK:
+        task = ECOMMERCE_TASKS.get(task_id)
+        if not task:
+            return
+        task.update(changes)
+        task["updated_at"] = time.time()
+        write_ecommerce_task_locked(task)
+
+def configured_ecommerce_vision_route(providers: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, str]]:
+    candidates = []
+    preferred_provider_id = str(os.getenv("ECOMMERCE_VISION_PROVIDER_ID", "local-vision") or "").strip().lower()
+    for provider_index, provider in enumerate(providers if providers is not None else load_api_providers()):
+        if not isinstance(provider, dict) or not provider.get("enabled", True):
+            continue
+        provider_id = str(provider.get("id") or "").strip().lower()
+        if not provider_id or not provider_env_key_value(provider_id):
+            continue
+        provider_name = str(provider.get("name") or provider_id)
+        for model_index, model in enumerate(provider.get("chat_models") or []):
+            model_name = str(model or "").strip()
+            if not looks_like_vision_chat_model(model_name):
+                continue
+            name_hint = f"{provider_id} {provider_name}".lower()
+            candidates.append((
+                0 if provider_id == preferred_provider_id else 1,
+                0 if any(hint in name_hint for hint in ("vision", "视觉", "vlm")) else 1,
+                provider_index,
+                model_index,
+                {"provider_id": provider_id, "provider_name": provider_name, "model": model_name},
+            ))
+    candidates.sort(key=lambda item: item[:4])
+    return candidates[0][4] if candidates else None
+
+async def analyze_ecommerce_garment(inputs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    garment = next((item for item in inputs if str(item.get("role") or "").lower() == "garment"), None)
+    path = output_file_from_url((garment or {}).get("url") or "")
+    route = configured_ecommerce_vision_route()
+    if not path or not route:
+        return {"status": "skipped", "category": "auto", "garment_type": "", "confidence": 0.0, "reason": ""}
+    try:
+        text, resolved_model = await caption_image_with_provider(
+            path,
+            ECOMMERCE_GARMENT_ANALYSIS_PROMPT,
+            route["provider_id"],
+            route["model"],
+        )
+        analysis = parse_ecommerce_garment_analysis(text)
+        analysis.update({
+            "status": "succeeded" if analysis.get("category") != "auto" else "unrecognized",
+            "provider_id": route["provider_id"],
+            "provider_name": route["provider_name"],
+            "model": resolved_model,
+        })
+        return analysis
+    except Exception:
+        return {"status": "failed", "category": "auto", "garment_type": "", "confidence": 0.0, "reason": ""}
+
+def ecommerce_universal_analysis_prompt(item: Dict[str, Any]) -> str:
+    role = str(item.get("reference_type") or item.get("role") or "").strip()
+    label = str(item.get("label") or item.get("name") or "").strip()
+    instruction = str(item.get("instruction") or "").strip()
+    return ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT.format(
+        role=role or "unknown",
+        label=label or "无",
+        instruction=instruction or "无",
+    )
+
+def ecommerce_vision_cache_key(path: str, prompt: str, route: Dict[str, str]) -> str:
+    stat = os.stat(path)
+    identity = "|".join((
+        os.path.abspath(path), str(stat.st_mtime_ns), str(stat.st_size),
+        str(route.get("provider_id") or ""), str(route.get("model") or ""), prompt,
+    ))
+    return hashlib.sha256(identity.encode("utf-8", "ignore")).hexdigest()
+
+def get_cached_ecommerce_vision_analysis(cache_key: str) -> Optional[Dict[str, Any]]:
+    with ECOMMERCE_VISION_CACHE_LOCK:
+        cached = ECOMMERCE_VISION_CACHE.pop(cache_key, None)
+        if cached is None:
+            return None
+        ECOMMERCE_VISION_CACHE[cache_key] = cached
+        return dict(cached)
+
+def cache_ecommerce_vision_analysis(cache_key: str, analysis: Dict[str, Any]):
+    with ECOMMERCE_VISION_CACHE_LOCK:
+        ECOMMERCE_VISION_CACHE.pop(cache_key, None)
+        ECOMMERCE_VISION_CACHE[cache_key] = dict(analysis)
+        while len(ECOMMERCE_VISION_CACHE) > ECOMMERCE_VISION_CACHE_LIMIT:
+            ECOMMERCE_VISION_CACHE.pop(next(iter(ECOMMERCE_VISION_CACHE)))
+
+async def analyze_ecommerce_universal_reference(index: int, item: Dict[str, Any], route: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
+    reference_id = str(item.get("reference_id") or f"reference_{index + 1}")
+    path = output_file_from_url(item.get("url") or "")
+    if not path:
+        return reference_id, {"status": "skipped", "reason": "参考图不是本机素材"}
+    prompt = ecommerce_universal_analysis_prompt(item)
+    try:
+        cache_key = ecommerce_vision_cache_key(path, prompt, route)
+    except OSError:
+        return reference_id, {"status": "skipped", "reason": "参考图文件不存在"}
+    cached = get_cached_ecommerce_vision_analysis(cache_key)
+    if cached is not None:
+        cached["cached"] = True
+        return reference_id, cached
+    try:
+        async with ECOMMERCE_VISION_SEMAPHORE:
+            cached = get_cached_ecommerce_vision_analysis(cache_key)
+            if cached is not None:
+                cached["cached"] = True
+                return reference_id, cached
+            text, resolved_model = await caption_image_with_provider(
+                path,
+                prompt,
+                route["provider_id"],
+                route["model"],
+            )
+        analysis = parse_ecommerce_universal_reference_analysis(text)
+        analysis.update({
+            "status": "succeeded" if analysis.get("item_name") or analysis.get("category") else "unrecognized",
+            "provider_id": route["provider_id"],
+            "provider_name": route["provider_name"],
+            "model": resolved_model,
+        })
+        cache_ecommerce_vision_analysis(cache_key, analysis)
+        return reference_id, analysis
+    except Exception as exc:
+        return reference_id, {"status": "failed", "error": str(exc)[:240]}
+
+async def analyze_ecommerce_universal_references(inputs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    route = configured_ecommerce_vision_route()
+    if not route:
+        return {"status": "skipped", "reason": "未配置可用视觉模型", "items": {}}
+    analyzed = await asyncio.gather(*(
+        analyze_ecommerce_universal_reference(index, item, route)
+        for index, item in enumerate(inputs)
+    ))
+    items = dict(analyzed)
+    succeeded = sum(1 for analysis in items.values() if analysis.get("status") == "succeeded")
+    return {
+        "status": "succeeded" if succeeded else "failed",
+        "provider_id": route["provider_id"],
+        "provider_name": route["provider_name"],
+        "model": route["model"],
+        "succeeded": succeeded,
+        "total": len(inputs),
+        "items": items,
+    }
+
+async def enrich_ecommerce_snapshot_with_garment_analysis(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    working = {
+        **snapshot,
+        "inputs": [dict(item) for item in (snapshot.get("inputs") or [])],
+        "options": dict(snapshot.get("options") or {}),
+    }
+    if working.get("operation") != "try_on" or str(working["options"].get("garment_category") or "auto") != "auto":
+        return working, None
+    analysis = await analyze_ecommerce_garment(working["inputs"])
+    if analysis.get("category") in {"upper", "lower", "dress"}:
+        working["options"]["garment_category"] = analysis["category"]
+        working["options"]["garment_type"] = analysis.get("garment_type") or ""
+        working["prompt"] = build_ecommerce_prompt(working["operation"], working["inputs"], working["options"])
+    return working, analysis
+
+async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    working = {
+        **snapshot,
+        "inputs": [dict(item) for item in (snapshot.get("inputs") or [])],
+        "options": dict(snapshot.get("options") or {}),
+    }
+    if working.get("operation") != "universal":
+        return working, None
+    analysis = await analyze_ecommerce_universal_references(working["inputs"])
+    items = analysis.get("items") if isinstance(analysis, dict) else {}
+    if isinstance(items, dict) and any((value or {}).get("status") == "succeeded" for value in items.values() if isinstance(value, dict)):
+        working["options"]["reference_analysis"] = items
+    working["prompt"] = build_ecommerce_prompt(working["operation"], working["inputs"], working["options"])
+    return working, analysis
+
+def validate_ecommerce_local_inputs(inputs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Tuple[int, int]]:
+    checked = []
+    dimensions = {}
+    for item in inputs:
+        role = str(item.get("role") or "").strip().lower()
+        reference_type = str(item.get("reference_type") or role).strip().lower()
+        url = str(item.get("url") or "").strip()
+        path = output_file_from_url(url)
+        if not path:
+            raise HTTPException(status_code=400, detail=f"{role} 输入必须是已上传到本机素材目录的图片")
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in ECOMMERCE_INPUT_EXTS:
+            raise HTTPException(status_code=400, detail=f"{role} 仅支持 PNG、JPEG 或 WebP")
+        try:
+            size_bytes = os.path.getsize(path)
+            if size_bytes > ECOMMERCE_INPUT_MAX_BYTES:
+                raise HTTPException(status_code=400, detail=f"{role} 文件不能超过 50MB")
+            with Image.open(path) as image:
+                width, height = image.size
+                image_format = str(image.format or "").upper()
+                if image_format not in ECOMMERCE_INPUT_FORMAT_MIMES or width < 1 or height < 1:
+                    raise ValueError("unsupported image")
+                image.verify()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"{role} 不是有效的 PNG、JPEG 或 WebP 图片") from exc
+        dimension_key = str(item.get("reference_id") or role)
+        dimensions[dimension_key] = (width, height)
+        if reference_type in {"source", "subject"} and "source" not in dimensions:
+            dimensions["source"] = (width, height)
+        normalized = {
+            "role": role,
+            "url": url,
+            "name": str(item.get("name") or os.path.basename(path))[:240],
+            "kind": "image",
+            "mime": ECOMMERCE_INPUT_FORMAT_MIMES[image_format],
+        }
+        for key in ("reference_id", "reference_type", "label", "instruction"):
+            if item.get(key):
+                normalized[key] = item.get(key)
+        checked.append(normalized)
+    source_dimensions = dimensions.get("source")
+    if not source_dimensions:
+        raise HTTPException(status_code=400, detail="缺少源图尺寸信息")
+    if dimensions.get("mask") and dimensions["mask"] != source_dimensions:
+        raise HTTPException(status_code=400, detail="蒙版尺寸必须与原图完全一致")
+    return checked, source_dimensions
+
+def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
+    try:
+        operation = validate_ecommerce_operation(payload.operation)
+        mode = validate_ecommerce_mode(payload.mode)
+        options_json = json.dumps(payload.options or {}, ensure_ascii=False)
+        if len(options_json.encode("utf-8")) > 20 * 1024:
+            raise ValueError("功能参数过大")
+        options = json.loads(options_json)
+        normalized = validate_ecommerce_input_roles(
+            operation,
+            [item.dict() for item in payload.inputs],
+            options,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    inputs, source_dimensions = validate_ecommerce_local_inputs(normalized)
+    providers = configured_ecommerce_providers()
+    catalog = build_ecommerce_model_catalog(providers)
+    try:
+        candidates = ecommerce_route_candidates(catalog, mode, payload.provider_id, payload.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reference_count = len(inputs)
+    candidates = [route for route in candidates if int(route.get("max_reference_images") or 0) >= reference_count]
+    if not candidates:
+        if operation == "universal":
+            raise HTTPException(status_code=400, detail=f"所选模型无法同时处理 {reference_count} 张参考图，请减少图片或选择支持更多参考图的 Gemini 3 模型")
+        raise HTTPException(status_code=400, detail="没有找到兼容的图片编辑模型，请检查已启用平台和模型配置")
+    if payload.model:
+        candidates = candidates[:1]
+    parent_task_id = str(payload.parent_task_id or "").strip()
+    if parent_task_id:
+        with ECOMMERCE_TASK_LOCK:
+            parent = dict(ECOMMERCE_TASKS.get(parent_task_id) or {})
+        if not parent:
+            raise HTTPException(status_code=400, detail="父任务不存在，无法创建新版本")
+        if parent.get("operation") != operation:
+            raise HTTPException(status_code=400, detail="新版本必须与父任务使用相同功能")
+    try:
+        generation = resolve_ecommerce_generation_settings(
+            source_dimensions[0],
+            source_dimensions[1],
+            mode,
+            payload.aspect_ratio,
+            payload.resolution,
+            payload.quality,
+            payload.count,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    prompt = build_ecommerce_prompt(operation, inputs, options)
+    return {
+        "operation": operation,
+        "mode": mode,
+        "inputs": inputs,
+        "options": options,
+        "provider_id": str(payload.provider_id or "").strip().lower(),
+        "model": str(payload.model or "").strip(),
+        "parent_task_id": parent_task_id,
+        "source_dimensions": {"width": source_dimensions[0], "height": source_dimensions[1]},
+        **generation,
+        "prompt": prompt,
+        "route_candidates": [public_ecommerce_route(route) for route in candidates],
+    }
+
+async def run_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
+    async with ECOMMERCE_TASK_SEMAPHORE:
+        await execute_ecommerce_task(task_id, snapshot)
+
+async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
+    update_ecommerce_task(task_id, {"status": "running", "error": ""})
+    snapshot, garment_analysis = await enrich_ecommerce_snapshot_with_garment_analysis(snapshot)
+    snapshot, universal_analysis = await enrich_ecommerce_snapshot_with_universal_analysis(snapshot)
+    if garment_analysis is not None or universal_analysis is not None:
+        update_ecommerce_task(task_id, {
+            "options": snapshot["options"],
+            "prompt": snapshot["prompt"],
+            "garment_analysis": garment_analysis,
+            "universal_analysis": universal_analysis,
+            "request": snapshot,
+        })
+    routes = list(snapshot.get("route_candidates") or [])
+    failures = []
+    try:
+        for index, route in enumerate(routes):
+            try:
+                batch = await execute_ai_image_batch(
+                    prompt=snapshot["prompt"],
+                    provider_id=route["provider_id"],
+                    model=route["model"],
+                    size=snapshot["size"],
+                    quality=snapshot["quality"],
+                    references=snapshot["inputs"],
+                    count=snapshot["count"],
+                    prefix="ecommerce_",
+                    allow_edit_endpoint_fallback=False,
+                    semantic_mask=True,
+                )
+                raw = batch["raw"]
+                result = {
+                    "type": "ecommerce",
+                    "operation": snapshot["operation"],
+                    "mode": snapshot["mode"],
+                    "ecommerce_task_id": task_id,
+                    "parent_task_id": snapshot.get("parent_task_id") or "",
+                    "prompt": snapshot["prompt"],
+                    "inputs": snapshot["inputs"],
+                    "images": batch["images"],
+                    "image_items": batch["image_items"],
+                    "timestamp": batch["generation_completed_at"],
+                    "provider_id": batch["provider"]["id"],
+                    "provider_name": batch["provider"].get("name") or batch["provider"]["id"],
+                    "model": batch["model"],
+                    "size": snapshot["size"],
+                    "aspect_ratio": snapshot["aspect_ratio"],
+                    "resolution": snapshot["resolution"],
+                    "quality": snapshot["quality"],
+                    "candidate_count": len(batch["images"]),
+                    "garment_analysis": garment_analysis,
+                    "universal_analysis": universal_analysis,
+                    "upstream_task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
+                    "request_id": raw.get("id") if isinstance(raw, dict) else None,
+                    "generation_started_at": batch["generation_started_at"],
+                    "generation_completed_at": batch["generation_completed_at"],
+                    "generation_elapsed_seconds": batch["generation_elapsed_seconds"],
+                    "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
+                    "params": {
+                        "operation": snapshot["operation"],
+                        "mode": snapshot["mode"],
+                        "options": snapshot["options"],
+                        "provider_id": batch["provider"]["id"],
+                        "model": batch["model"],
+                        "size": snapshot["size"],
+                        "aspect_ratio": snapshot["aspect_ratio"],
+                        "resolution": snapshot["resolution"],
+                        "quality": snapshot["quality"],
+                        "n": snapshot["count"],
+                        "parameters": snapshot["parameters"],
+                        "reference_images": snapshot["inputs"],
+                    },
+                }
+                save_to_history(result)
+                if GLOBAL_LOOP:
+                    asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
+                update_ecommerce_task(task_id, {
+                    "status": "succeeded",
+                    "result": result,
+                    "error": "",
+                    "provider_id": result["provider_id"],
+                    "provider_name": result["provider_name"],
+                    "model": result["model"],
+                    "route_attempts": failures + [{"route": public_ecommerce_route(route), "status": "succeeded"}],
+                })
+                return
+            except Exception as exc:
+                detail = str(getattr(exc, "detail", None) or exc)
+                status_code = int(getattr(exc, "status_code", 500) or 500)
+                failures.append({
+                    "route": public_ecommerce_route(route),
+                    "status": "failed",
+                    "status_code": status_code,
+                    "error": detail[:500],
+                })
+                can_fallback = index < len(routes) - 1 and ecommerce_safe_fallback_error(status_code, detail)
+                if can_fallback:
+                    continue
+                raise
+    except Exception as exc:
+        detail = str(getattr(exc, "detail", None) or exc)
+        update_ecommerce_task(task_id, {
+            "status": "failed",
+            "error": detail,
+            "status_code": int(getattr(exc, "status_code", 500) or 500),
+            "route_attempts": failures,
+            "upstream_task_id": getattr(exc, "upstream_task_id", "") or extract_task_id_from_text(detail),
+        })
+
+def configured_ecommerce_providers() -> List[Dict[str, Any]]:
+    return [
+        provider for provider in load_api_providers()
+        if provider.get("enabled", True) and bool(provider_env_key_value(provider.get("id") or ""))
+    ]
+
+@app.get("/api/ecommerce/capabilities")
+async def get_ecommerce_capabilities():
+    return ecommerce_public_capabilities(configured_ecommerce_providers())
+
+@app.post("/api/ecommerce/tasks")
+async def create_ecommerce_task(payload: EcommerceTaskRequest):
+    snapshot = prepare_ecommerce_request(payload)
+    task_id = f"ecommerce_{uuid.uuid4().hex}"
+    now = time.time()
+    task = {
+        "id": task_id,
+        "task_id": task_id,
+        "type": "ecommerce",
+        "status": "queued",
+        "created_at": now,
+        "updated_at": now,
+        "result": None,
+        "error": "",
+        "approval": {"status": "pending", "output_index": None, "checks": {}, "note": ""},
+        **snapshot,
+        "request": snapshot,
+    }
+    with ECOMMERCE_TASK_LOCK:
+        ECOMMERCE_TASKS[task_id] = task
+        write_ecommerce_task_locked(task)
+        if len(ECOMMERCE_TASKS) > 5000:
+            removable = sorted(
+                (item for item in ECOMMERCE_TASKS.values() if item.get("status") not in ECOMMERCE_ACTIVE_STATUSES),
+                key=lambda item: float(item.get("updated_at") or 0),
+            )[:max(0, len(ECOMMERCE_TASKS) - 5000)]
+            for item in removable:
+                ECOMMERCE_TASKS.pop(str(item.get("id") or ""), None)
+            DATABASE.prune_tasks("ecommerce", 5000)
+    asyncio.create_task(run_ecommerce_task(task_id, snapshot))
+    return public_ecommerce_task(task)
+
+@app.get("/api/ecommerce/tasks")
+async def list_ecommerce_tasks(limit: int = 50, operation: str = ""):
+    safe_limit = max(1, min(2000, int(limit or 50)))
+    operation = str(operation or "").strip().lower()
+    if operation:
+        try:
+            validate_ecommerce_operation(operation)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with ECOMMERCE_TASK_LOCK:
+        tasks = sorted(
+            (
+                public_ecommerce_task(task)
+                for task in ECOMMERCE_TASKS.values()
+                if not operation or task.get("operation") == operation
+            ),
+            key=lambda item: float(item.get("created_at") or 0),
+            reverse=True,
+        )[:safe_limit]
+    return {"tasks": tasks}
+
+@app.post("/api/ecommerce/tasks/status")
+async def ecommerce_task_status(payload: EcommerceTaskStatusRequest):
+    ids = list(dict.fromkeys(str(item or "").strip() for item in payload.ids if str(item or "").strip()))[:2000]
+    tasks = []
+    missing = []
+    with ECOMMERCE_TASK_LOCK:
+        for task_id in ids:
+            task = ECOMMERCE_TASKS.get(task_id)
+            if not task:
+                missing.append(task_id)
+                continue
+            tasks.append({
+                "id": task_id,
+                "task_id": task_id,
+                "status": str(task.get("status") or "queued"),
+                "updated_at": float(task.get("updated_at") or 0),
+                "error": str(task.get("error") or "")[:500],
+            })
+    return {"tasks": tasks, "missing": missing}
+
+@app.get("/api/ecommerce/tasks/{task_id}")
+async def get_ecommerce_task(task_id: str):
+    with ECOMMERCE_TASK_LOCK:
+        task = public_ecommerce_task(ECOMMERCE_TASKS.get(task_id) or {})
+    if not task.get("id"):
+        raise HTTPException(status_code=404, detail="电商任务不存在或已过期")
+    return task
+
+@app.post("/api/ecommerce/tasks/{task_id}/approve")
+async def approve_ecommerce_task(task_id: str, payload: EcommerceApprovalRequest):
+    with ECOMMERCE_TASK_LOCK:
+        task = dict(ECOMMERCE_TASKS.get(task_id) or {})
+    if not task:
+        raise HTTPException(status_code=404, detail="电商任务不存在或已过期")
+    if task.get("status") != "succeeded" or not isinstance(task.get("result"), dict):
+        raise HTTPException(status_code=409, detail="只有生成成功的任务可以审核")
+    images = list(task["result"].get("images") or [])
+    output_index = int(payload.output_index)
+    if output_index < 0 or output_index >= len(images):
+        raise HTTPException(status_code=400, detail="所选候选不存在")
+    required_checks = ECOMMERCE_QUALITY_CHECKS.get(task.get("operation") or "", [])
+    missing = [item["id"] for item in required_checks if payload.checks.get(item["id"]) is not True]
+    if missing:
+        raise HTTPException(status_code=400, detail="必须完成全部人工质量检查后才能标记为上架成片")
+    approval = {
+        "status": "approved",
+        "output_index": output_index,
+        "output_url": images[output_index],
+        "checks": {item["id"]: True for item in required_checks},
+        "note": str(payload.note or "").strip(),
+        "approved_at": time.time(),
+        "export": None,
+    }
+    update_ecommerce_task(task_id, {"approval": approval})
+    return {"task_id": task_id, "approval": approval}
+
+@app.post("/api/ecommerce/tasks/{task_id}/export")
+async def export_ecommerce_task(task_id: str):
+    with ECOMMERCE_TASK_LOCK:
+        task = dict(ECOMMERCE_TASKS.get(task_id) or {})
+    if not task:
+        raise HTTPException(status_code=404, detail="电商任务不存在或已过期")
+    approval = dict(task.get("approval") or {})
+    if approval.get("status") != "approved" or not approval.get("output_url"):
+        raise HTTPException(status_code=409, detail="候选尚未通过完整人工审核，不能导出上架成片")
+    existing = dict(approval.get("export") or {})
+    if existing.get("url") and output_file_from_url(existing["url"]):
+        return {"task_id": task_id, "export": existing}
+    source = output_file_from_url(approval["output_url"])
+    if not source:
+        raise HTTPException(status_code=404, detail="已审核候选文件不存在")
+    extension = os.path.splitext(source)[1].lower()
+    if extension not in ECOMMERCE_INPUT_EXTS:
+        extension = ".png"
+    date_part = datetime.datetime.now().strftime("%Y-%m-%d")
+    export_dir = os.path.abspath(os.path.join(OUTPUT_DIR, "ecommerce", date_part))
+    output_root = os.path.abspath(OUTPUT_DIR)
+    if os.path.commonpath([output_root, export_dir]) != output_root:
+        raise HTTPException(status_code=500, detail="导出目录校验失败")
+    os.makedirs(export_dir, exist_ok=True)
+    filename = f"ecommerce_{task.get('operation')}_{datetime.datetime.now().strftime('%H%M%S')}_{uuid.uuid4().hex[:8]}{extension}"
+    destination = os.path.join(export_dir, filename)
+    await asyncio.to_thread(shutil.copy2, source, destination)
+    export_info = {
+        "url": media_url_from_path(destination),
+        "name": filename,
+        "exported_at": time.time(),
+        "kind": "official",
+    }
+    approval["export"] = export_info
+    update_ecommerce_task(task_id, {"approval": approval})
+    return {"task_id": task_id, "export": export_info}
 
 @app.post("/api/image-task-query")
 async def query_image_task(payload: ImageTaskQueryRequest):
@@ -11183,57 +12647,6 @@ async def get_canvas_image_task(task_id: str):
         raise HTTPException(status_code=404, detail="画布任务不存在，可能服务已重启或任务已过期")
     return task
 
-async def run_canvas_comfy_task(task_id: str, payload: GenerateRequest):
-    with CANVAS_TASK_LOCK:
-        if task_id in CANVAS_TASKS:
-            CANVAS_TASKS[task_id]["status"] = "running"
-            CANVAS_TASKS[task_id]["updated_at"] = time.time()
-    try:
-        result = await asyncio.to_thread(generate, payload)
-        if isinstance(result, dict) and result.get("error"):
-            raise RuntimeError(str(result.get("error") or "ComfyUI 生成失败"))
-        with CANVAS_TASK_LOCK:
-            CANVAS_TASKS[task_id].update({
-                "status": "succeeded",
-                "result": result,
-                "error": "",
-                "updated_at": time.time(),
-            })
-    except Exception as exc:
-        detail = getattr(exc, "detail", None) or str(exc)
-        status_code = getattr(exc, "status_code", 500)
-        with CANVAS_TASK_LOCK:
-            CANVAS_TASKS[task_id].update({
-                "status": "failed",
-                "error": str(detail),
-                "status_code": status_code,
-                "updated_at": time.time(),
-            })
-
-@app.post("/api/canvas-comfy-tasks")
-async def create_canvas_comfy_task(payload: GenerateRequest):
-    task_id = f"canvas_comfy_{uuid.uuid4().hex}"
-    with CANVAS_TASK_LOCK:
-        CANVAS_TASKS[task_id] = {
-            "id": task_id,
-            "type": "comfy",
-            "status": "queued",
-            "created_at": time.time(),
-            "updated_at": time.time(),
-            "result": None,
-            "error": "",
-            "workflow_json": payload.workflow_json,
-        }
-    asyncio.create_task(run_canvas_comfy_task(task_id, payload))
-    return {"task_id": task_id, "status": "queued"}
-
-@app.get("/api/canvas-comfy-tasks/{task_id}")
-async def get_canvas_comfy_task(task_id: str):
-    with CANVAS_TASK_LOCK:
-        task = dict(CANVAS_TASKS.get(task_id) or {})
-    if not task:
-        raise HTTPException(status_code=404, detail="ComfyUI 任务不存在，可能服务已重启或任务已过期")
-    return task
 
 # --- 图像生成参数 schema（供客户端动态渲染参数表单，避免把参数写死在前端） ---
 IMAGE_PARAM_RATIOS = [
@@ -12298,9 +13711,9 @@ async def get_conversation(conversation_id: str, request: Request, x_user_id: st
 @app.delete("/api/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str, request: Request, x_user_id: str = Header(default="")):
     user_id = safe_user_id(x_user_id, request)
-    path = conversation_path(user_id, conversation_id)
-    if os.path.exists(path):
-        os.remove(path)
+    cleaned = conversation_path(user_id, conversation_id)
+    DATABASE.delete_conversation(user_id, cleaned)
+    publish_entity_changed("session", cleaned)
     return {"ok": True}
 
 # --- 画布管理 ---
@@ -12342,22 +13755,10 @@ async def delete_project(project_id: str):
     projects = [p for p in projects if p.get("id") != project_id]
     save_projects(projects)
     # 把该项目下的画布迁回默认项目
-    moved = 0
     with CANVAS_LOCK:
-        for filename in os.listdir(CANVAS_DIR):
-            if not filename.endswith(".json"):
-                continue
-            path = os.path.join(CANVAS_DIR, filename)
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-            except Exception:
-                continue
-            if str(data.get("project") or "") == project_id:
-                data["project"] = DEFAULT_PROJECT_ID
-                with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                moved += 1
+        moved = DATABASE.reassign_project(project_id, DEFAULT_PROJECT_ID)
+    if moved:
+        publish_entity_changed("canvas", "global")
     return {"ok": True, "moved": moved}
 
 @app.get("/api/canvases/trash")
@@ -12401,8 +13802,8 @@ async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate):
     if payload.board_y is not None:
         canvas["board_y"] = float(payload.board_y)
     with CANVAS_LOCK:
-        with open(canvas_path(canvas["id"]), 'w', encoding='utf-8') as f:
-            json.dump(canvas, f, ensure_ascii=False, indent=2)
+        DATABASE.save_canvas(canvas, touch=False)
+    publish_entity_changed("canvas", canvas_id, int(canvas.get("revision") or 0), updated_at=int(canvas.get("updated_at") or 0))
     return {"canvas": canvas_record(canvas)}
 
 @app.get("/api/canvases/{canvas_id}")
@@ -13495,11 +14896,15 @@ async def batch_crop_asset_library_items(payload: AssetLibraryBatchCropRequest):
 async def update_canvas(canvas_id: str, payload: CanvasSaveRequest):
     canvas = load_canvas(canvas_id)
     current_updated_at = int(canvas.get("updated_at") or 0)
-    if payload.base_updated_at and current_updated_at and int(payload.base_updated_at) < current_updated_at:
+    current_revision = int(canvas.get("revision") or 0)
+    revision_conflict = payload.base_revision and current_revision and int(payload.base_revision) != current_revision
+    timestamp_conflict = payload.base_updated_at and current_updated_at and int(payload.base_updated_at) < current_updated_at
+    if revision_conflict or timestamp_conflict:
         raise HTTPException(status_code=409, detail={
             "message": "画布已被其他页面更新，已拒绝旧版本覆盖。",
             "canvas": canvas,
             "updated_at": current_updated_at,
+            "revision": current_revision,
         })
     canvas["title"] = (payload.title or canvas.get("title") or "未命名画布")[:80]
     canvas["icon"] = (payload.icon or canvas.get("icon") or "layers")[:32]
@@ -13512,8 +14917,7 @@ async def update_canvas(canvas_id: str, payload: CanvasSaveRequest):
         canvas["viewport"] = canvas.get("viewport") or {"x": 0, "y": 0, "scale": 1}
     canvas["logs"] = payload.logs[-500:]
     canvas["settings"] = payload.settings or {}
-    save_canvas(canvas)
-    await manager.broadcast_canvas_updated(canvas_id, int(canvas.get("updated_at") or now_ms()), payload.client_id)
+    save_canvas(canvas, payload.client_id)
     return {"canvas": canvas}
 
 @app.delete("/api/canvases/{canvas_id}")
@@ -13534,9 +14938,8 @@ async def restore_canvas(canvas_id: str):
 
 @app.delete("/api/canvases/{canvas_id}/purge")
 async def purge_canvas(canvas_id: str):
-    path = canvas_path(canvas_id)
-    if os.path.exists(path):
-        os.remove(path)
+    DATABASE.purge_canvas(canvas_path(canvas_id))
+    publish_entity_changed("canvas", canvas_id)
     return {"ok": True}
 
 # --- GPT 对话 ---
@@ -13594,6 +14997,24 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
         }
     else:
+        _codex_provider = get_api_provider(payload.provider)
+        if is_codex_provider(_codex_provider):
+            model = selected_model(payload.model, (_codex_provider.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
+            payload.model = model
+            text, raw = await codex_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+            assistant_message = {
+                "id": uuid.uuid4().hex,
+                "role": "assistant",
+                "content": text,
+                "created_at": now_ms(),
+                "model": model,
+                "raw_usage": None,
+                "raw": raw,
+            }
+            conversation["messages"].append(assistant_message)
+            conversation["updated_at"] = now_ms()
+            save_conversation(user_id, conversation)
+            return {"conversation": conversation, "message": assistant_message}
         chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
         _conv_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
         _conv_is_apimart = is_apimart_provider(_conv_provider)
@@ -13749,6 +15170,35 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
     conversation["updated_at"] = now_ms()
     save_conversation(user_id, conversation)
 
+    _codex_provider = get_api_provider(payload.provider)
+    if is_codex_provider(_codex_provider):
+        model = selected_model(payload.model, (_codex_provider.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
+        payload.model = model
+
+        async def codex_stream():
+            yield sse_event({"type": "meta", "conversation": conversation})
+            try:
+                text, raw = await codex_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+            except HTTPException as exc:
+                yield sse_event({"type": "error", "detail": exc.detail})
+                return
+            assistant_message = {
+                "id": uuid.uuid4().hex,
+                "role": "assistant",
+                "content": text,
+                "created_at": now_ms(),
+                "model": model,
+                "raw_usage": None,
+                "raw": raw,
+            }
+            conversation["messages"].append(assistant_message)
+            conversation["updated_at"] = now_ms()
+            save_conversation(user_id, conversation)
+            yield sse_event({"type": "delta", "delta": text})
+            yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
+
+        return StreamingResponse(codex_stream(), media_type="text/event-stream")
+
     chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     _stream_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
     history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
@@ -13815,62 +15265,283 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
 
 # --- 历史记录 ---
 
+def online_history_number(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+def online_history_first_value(*values):
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
+
+def online_history_timestamp_key(value):
+    number = online_history_number(value)
+    if number is None:
+        return ""
+    return f"{number:.6f}"
+
+def online_history_task_meta(task: Dict[str, Any]):
+    result = task.get("result") if isinstance(task, dict) else {}
+    if not isinstance(result, dict) or result.get("type") != "online":
+        return None
+    params = result.get("params") if isinstance(result.get("params"), dict) else {}
+    started_at = online_history_number(online_history_first_value(
+        result.get("generation_started_at"),
+        task.get("created_at"),
+    ))
+    completed_at = online_history_number(online_history_first_value(
+        result.get("generation_completed_at"),
+        result.get("timestamp"),
+        task.get("updated_at"),
+    ))
+    elapsed = online_history_number(online_history_first_value(
+        result.get("generation_elapsed_seconds"),
+        params.get("generation_elapsed_seconds"),
+    ))
+    if elapsed is None and started_at is not None and completed_at is not None:
+        elapsed = max(0, completed_at - started_at)
+    if elapsed is None:
+        return None
+    return {
+        "task_record_id": task.get("id") or task.get("task_id"),
+        "generation_started_at": started_at,
+        "generation_completed_at": completed_at,
+        "generation_elapsed_seconds": round(elapsed, 3),
+    }
+
+def online_history_task_meta_index():
+    by_timestamp = {}
+    by_image = {}
+    with ONLINE_IMAGE_TASK_LOCK:
+        tasks = list(ONLINE_IMAGE_TASKS.values())
+    for task in tasks:
+        meta = online_history_task_meta(task)
+        if not meta:
+            continue
+        result = task.get("result") if isinstance(task, dict) else {}
+        timestamp_key = online_history_timestamp_key(result.get("timestamp"))
+        if timestamp_key:
+            by_timestamp[timestamp_key] = meta
+        for url in result.get("images") or []:
+            if url:
+                by_image[str(url)] = meta
+    return by_timestamp, by_image
+
+def merge_online_history_meta(item: Dict[str, Any], meta: Dict[str, Any] = None):
+    if not isinstance(item, dict) or item.get("type") != "online":
+        return item
+    params = item.get("params") if isinstance(item.get("params"), dict) else {}
+    current_elapsed = online_history_number(online_history_first_value(
+        item.get("generation_elapsed_seconds"),
+        params.get("generation_elapsed_seconds"),
+    ))
+    if not meta and current_elapsed is None:
+        return item
+    merged = dict(item)
+    if meta:
+        for key, value in meta.items():
+            if value is not None and merged.get(key) in (None, ""):
+                merged[key] = value
+    merged_params = dict(params)
+    elapsed_value = online_history_first_value(
+        merged.get("generation_elapsed_seconds"),
+        merged_params.get("generation_elapsed_seconds"),
+    )
+    if elapsed_value is not None and elapsed_value != "" and merged_params.get("generation_elapsed_seconds") in (None, ""):
+        merged_params["generation_elapsed_seconds"] = elapsed_value
+    if merged_params:
+        merged["params"] = merged_params
+    return merged
+
+def enrich_online_history_generation_meta(items):
+    if not any(isinstance(item, dict) and item.get("type") == "online" for item in items):
+        return items
+    by_timestamp, by_image = online_history_task_meta_index()
+    enriched = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "online":
+            enriched.append(item)
+            continue
+        meta = by_timestamp.get(online_history_timestamp_key(item.get("timestamp")))
+        if not meta:
+            for url in item.get("images") or []:
+                meta = by_image.get(str(url))
+                if meta:
+                    break
+        enriched.append(merge_online_history_meta(item, meta))
+    return enriched
+
 @app.get("/api/history")
 async def get_history_api(type: str = None):
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if type:
-                    data = [item for item in data if item.get("type", "zimage") == type]
-                data = [item for item in data if item.get("images") and len(item["images"]) > 0]
+    data = DATABASE.list_history(type or "")
+    data = [item for item in data if item.get("images") and len(item["images"]) > 0]
+    return enrich_online_history_generation_meta(data)
 
-                def sort_key(item):
-                    ts = item.get("timestamp", 0)
-                    if isinstance(ts, (int, float)):
-                        return float(ts)
-                    return 0
 
-                data.sort(key=sort_key, reverse=True)
-                return data
-        except Exception as e:
-            print(f"读取历史文件失败: {e}")
-            return []
-    return []
+WORK_METADATA_LOCK = Lock()
 
-@app.get("/api/queue_status")
-async def get_queue_status(client_id: str):
-    with QUEUE_LOCK:
-        total = len(QUEUE)
-        positions = [i + 1 for i, t in enumerate(QUEUE) if t["client_id"] == client_id]
-        position = positions[0] if positions else 0
-    return {"total": total, "position": position}
+
+def work_metadata() -> Dict[str, Dict[str, Any]]:
+    value = DATABASE.get_document("works", "metadata", {})
+    return value if isinstance(value, dict) else {}
+
+
+def work_item_id(history_id: str, index: int, url: str) -> str:
+    identity = f"{history_id}\0{int(index)}\0{url}".encode("utf-8")
+    return "work_" + hashlib.sha256(identity).hexdigest()[:24]
+
+
+def history_reference_images(record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    params = record.get("params") if isinstance(record.get("params"), dict) else {}
+    values = record.get("inputs") or params.get("reference_images") or record.get("reference_images") or []
+    return [dict(item) for item in values if isinstance(item, dict) and str(item.get("url") or "").strip()]
+
+
+def generated_work_items(records: List[Dict[str, Any]], metadata: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    works = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        history_id = str(record.get("_history_id") or record.get("id") or "").strip()
+        if not history_id:
+            continue
+        images = [str(url).strip() for url in record.get("images") or [] if str(url).strip()]
+        image_items = record.get("image_items") if isinstance(record.get("image_items"), list) else []
+        references = history_reference_images(record)
+        source = next((item for item in references if item.get("role") == "source"), references[0] if references else {})
+        created_at = float(record.get("timestamp") or record.get("created_at") or 0)
+        params = record.get("params") if isinstance(record.get("params"), dict) else {}
+        for index, url in enumerate(images):
+            item_meta = image_items[index] if index < len(image_items) and isinstance(image_items[index], dict) else {}
+            item_id = work_item_id(history_id, index, url)
+            saved_meta = metadata.get(item_id) if isinstance(metadata.get(item_id), dict) else {}
+            original_name = os.path.basename(urllib.parse.unquote(urllib.parse.urlparse(url).path)) or f"作品-{index + 1}"
+            name = str(saved_meta.get("name") or original_name).strip()[:160] or original_name
+            works.append({
+                "id": item_id,
+                "history_id": history_id,
+                "output_index": index,
+                "name": name,
+                "original_name": original_name,
+                "url": url,
+                "kind": str(record.get("type") or "image"),
+                "operation": str(record.get("operation") or params.get("operation") or ""),
+                "created_at": created_at,
+                "prompt": str(record.get("prompt") or params.get("prompt") or ""),
+                "provider_id": str(record.get("provider_id") or params.get("provider_id") or ""),
+                "provider_name": str(record.get("provider_name") or ""),
+                "model": str(record.get("model") or params.get("model") or ""),
+                "width": int(item_meta.get("width") or 0),
+                "height": int(item_meta.get("height") or 0),
+                "task_id": str(record.get("ecommerce_task_id") or record.get("task_id") or ""),
+                "source_url": str(source.get("url") or ""),
+                "references": references,
+                "favorite": bool(saved_meta.get("favorite")),
+                "favorite_updated_at": float(saved_meta.get("favorite_updated_at") or saved_meta.get("updated_at") or 0),
+                "trashed": bool(saved_meta.get("trashed")),
+                "trashed_at": float(saved_meta.get("trashed_at") or 0),
+                "metadata_updated_at": float(saved_meta.get("updated_at") or 0),
+            })
+    works.sort(key=lambda item: (float(item.get("created_at") or 0), item["id"]), reverse=True)
+    return works
+
+
+def all_generated_works() -> List[Dict[str, Any]]:
+    records = DATABASE.list_history("")
+    return generated_work_items(records, work_metadata())
+
+
+@app.get("/api/works")
+async def list_generated_works(favorite: Optional[bool] = None, kind: str = "", search: str = "", limit: int = 500, include_trashed: bool = False):
+    works = all_generated_works()
+    if not include_trashed:
+        works = [item for item in works if not item.get("trashed")]
+    normalized_kind = str(kind or "").strip().lower()
+    normalized_search = str(search or "").strip().lower()
+    if favorite is not None:
+        works = [item for item in works if bool(item.get("favorite")) is bool(favorite)]
+    if normalized_kind:
+        works = [item for item in works if str(item.get("kind") or "").lower() == normalized_kind]
+    if normalized_search:
+        works = [item for item in works if normalized_search in " ".join((
+            str(item.get("name") or ""), str(item.get("prompt") or ""),
+            str(item.get("model") or ""), str(item.get("operation") or ""),
+        )).lower()]
+    safe_limit = max(1, min(1000, int(limit or 500)))
+    return {"works": works[:safe_limit], "total": len(works)}
+
+
+def update_work_metadata(work_id: str, *, name: Optional[str] = None, favorite: Optional[bool] = None, trashed: Optional[bool] = None) -> Tuple[Dict[str, Any], int]:
+    work_id = str(work_id or "").strip()
+    target = next((item for item in all_generated_works() if item.get("id") == work_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="作品不存在或对应文件记录已被移除")
+    now = time.time()
+    with WORK_METADATA_LOCK:
+        metadata = work_metadata()
+        entry = dict(metadata.get(work_id) or {})
+        if name is not None:
+            normalized_name = re.sub(r"[\r\n\t]+", " ", str(name)).strip()[:160]
+            if normalized_name and normalized_name != target.get("original_name"):
+                entry["name"] = normalized_name
+            else:
+                entry.pop("name", None)
+        if favorite is not None:
+            if favorite:
+                entry["favorite"] = True
+                entry["favorite_updated_at"] = now
+            else:
+                entry.pop("favorite", None)
+                entry.pop("favorite_updated_at", None)
+        if trashed is not None:
+            if trashed:
+                entry["trashed"] = True
+                entry["trashed_at"] = now
+            else:
+                entry.pop("trashed", None)
+                entry.pop("trashed_at", None)
+        entry["updated_at"] = now
+        meaningful_keys = {"name", "favorite", "favorite_updated_at", "trashed", "trashed_at"}
+        if any(key in entry for key in meaningful_keys):
+            metadata[work_id] = entry
+        else:
+            metadata.pop(work_id, None)
+        revision = DATABASE.put_document("works", "metadata", metadata)
+    publish_entity_changed("history", "works", revision)
+    refreshed = next((item for item in all_generated_works() if item.get("id") == work_id), target)
+    return refreshed, revision
+
+
+@app.put("/api/works/{work_id}/metadata")
+async def set_work_metadata(work_id: str, payload: WorkMetadataRequest):
+    if payload.name is None and payload.favorite is None and payload.trashed is None:
+        raise HTTPException(status_code=400, detail="没有需要修改的作品信息")
+    work, revision = update_work_metadata(
+        work_id,
+        name=payload.name,
+        favorite=payload.favorite,
+        trashed=payload.trashed,
+    )
+    return {"work": work, "revision": revision}
+
+
+@app.put("/api/works/{work_id}/favorite")
+async def set_work_favorite(work_id: str, payload: WorkFavoriteRequest):
+    work, revision = update_work_metadata(work_id, favorite=payload.favorite)
+    return {"work": work, "revision": revision}
+
 
 @app.post("/api/history/delete")
 async def delete_history(req: DeleteHistoryRequest):
-    if not os.path.exists(HISTORY_FILE):
-        return {"success": False, "message": "History file not found"}
     try:
         with HISTORY_LOCK:
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                history = json.load(f)
-            target_record = None
-            new_history = []
-            for item in history:
-                is_match = False
-                item_ts = item.get("timestamp", 0)
-                if isinstance(req.timestamp, (int, float)) and isinstance(item_ts, (int, float)):
-                    if abs(float(item_ts) - float(req.timestamp)) < 0.001:
-                        is_match = True
-                elif str(item_ts) == str(req.timestamp):
-                    is_match = True
-                if is_match:
-                    target_record = item
-                else:
-                    new_history.append(item)
-            if target_record:
-                with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(new_history, f, ensure_ascii=False, indent=4)
+            target_record = DATABASE.delete_history_timestamp(float(req.timestamp))
 
         if target_record:
             for img_url in target_record.get("images", []):
@@ -13880,6 +15551,7 @@ async def delete_history(req: DeleteHistoryRequest):
                         os.remove(file_path)
                     except Exception as e:
                         print(f"Failed to delete file {file_path}: {e}")
+            publish_entity_changed("history", "global")
             return {"success": True}
         else:
             return {"success": False, "message": "Record not found"}
@@ -13887,654 +15559,16 @@ async def delete_history(req: DeleteHistoryRequest):
         print(f"Delete history error: {e}")
         return {"success": False, "message": str(e)}
 
-# --- ModelScope 角度控制 ---
-
-@app.post("/api/angle/poll_status")
-async def poll_angle_cloud(req: CloudPollRequest):
-    api_root = modelscope_image_api_root()
-    clean_token = modelscope_api_key(req.api_key)
-    if not clean_token:
-        raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
-
-    headers = {
-        "Authorization": f"Bearer {clean_token}",
-        "Content-Type": "application/json",
-        "X-ModelScope-Async-Mode": "true"
-    }
-    task_id = req.task_id
-    print(f"Resuming polling for Angle Task: {task_id}")
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            for i in range(300):
-                await asyncio.sleep(2)
-                result = await client.get(
-                    f"{api_root}/tasks/{task_id}",
-                    headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
-                )
-                result.raise_for_status()
-                data = result.json()
-                status = str(data.get("task_status") or "").upper()
-
-                if status == "SUCCEED":
-                    img_url = data["output_images"][0]
-                    local_path = ""
-                    try:
-                        async with httpx.AsyncClient() as dl_client:
-                            img_res = await dl_client.get(img_url)
-                            if img_res.status_code == 200:
-                                filename = f"cloud_angle_{int(time.time())}.png"
-                                file_path = output_path_for(filename, "output")
-                                with open(file_path, "wb") as f:
-                                    f.write(img_res.content)
-                                local_path = output_url_for(filename, "output")
-                            else:
-                                local_path = img_url
-                    except Exception:
-                        local_path = img_url
-
-                    record = {"timestamp": time.time(), "prompt": f"Resumed {task_id}", "images": [local_path], "type": "angle"}
-                    save_to_history(record)
-                    if req.client_id:
-                        await manager.send_personal_message({"type": "cloud_status", "status": "SUCCEED", "task_id": task_id}, req.client_id)
-                    return {"url": local_path}
-
-                elif status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}:
-                    if req.client_id:
-                        await manager.send_personal_message({"type": "cloud_status", "status": "FAILED", "task_id": task_id}, req.client_id)
-                    raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
-
-                if i % 5 == 0 and req.client_id:
-                    await manager.send_personal_message({
-                        "type": "cloud_status", "status": f"{status} ({i}/300)",
-                        "task_id": task_id, "progress": i, "total": 300
-                    }, req.client_id)
-
-            if req.client_id:
-                await manager.send_personal_message({"type": "cloud_status", "status": "TIMEOUT", "task_id": task_id}, req.client_id)
-            return {"status": "timeout", "task_id": task_id, "message": "Task still pending"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Angle polling error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/api/angle/generate")
-async def generate_angle_cloud(req: CloudGenRequest):
-    api_root = modelscope_image_api_root()
-    clean_token = modelscope_api_key(req.api_key)
-    if not clean_token:
-        raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
-
-    headers = {
-        "Authorization": f"Bearer {clean_token}",
-        "Content-Type": "application/json",
-        "X-ModelScope-Async-Mode": "true"
-    }
-    model = selected_model(req.model, "Qwen/Qwen-Image-Edit-2511")
-    payload = {
-        "model": model,
-        "prompt": req.prompt.strip(),
-        "image_url": [modelscope_image_url(url, max_size=1536) for url in req.image_urls]
-    }
-    if req.resolution:
-        payload["size"] = modelscope_size(req.resolution)
-    if req.loras is not None:
-        payload["loras"] = req.loras
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            submit_res = await client.post(f"{api_root}/images/generations", headers=headers, json=payload)
-            if submit_res.status_code != 200:
-                try:
-                    detail = submit_res.json()
-                except:
-                    detail = submit_res.text
-                raise HTTPException(status_code=submit_res.status_code, detail=detail)
-
-            task_id = submit_res.json().get("task_id")
-            print(f"Angle Task submitted, ID: {task_id}")
-
-            for i in range(300):
-                await asyncio.sleep(2)
-                result = await client.get(
-                    f"{api_root}/tasks/{task_id}",
-                    headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
-                )
-                result.raise_for_status()
-                data = result.json()
-                status = str(data.get("task_status") or "").upper()
-
-                if status == "SUCCEED":
-                    img_url = data["output_images"][0]
-                    local_path = ""
-                    try:
-                        async with httpx.AsyncClient() as dl_client:
-                            img_res = await dl_client.get(img_url)
-                            if img_res.status_code == 200:
-                                filename = f"cloud_angle_{int(time.time())}.png"
-                                file_path = output_path_for(filename, "output")
-                                with open(file_path, "wb") as f:
-                                    f.write(img_res.content)
-                                local_path = output_url_for(filename, "output")
-                            else:
-                                local_path = img_url
-                    except Exception:
-                        local_path = img_url
-
-                    record = {"timestamp": time.time(), "prompt": req.prompt, "images": [local_path], "type": "angle"}
-                    save_to_history(record)
-                    if req.client_id:
-                        await manager.send_personal_message({"type": "cloud_status", "status": "SUCCEED", "task_id": task_id}, req.client_id)
-                    if GLOBAL_LOOP:
-                        asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(record), GLOBAL_LOOP)
-                    return {"url": local_path, "task_id": task_id}
-
-                elif status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}:
-                    if req.client_id:
-                        await manager.send_personal_message({"type": "cloud_status", "status": "FAILED", "task_id": task_id}, req.client_id)
-                    raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
-
-                if i % 5 == 0 and req.client_id:
-                    await manager.send_personal_message({
-                        "type": "cloud_status", "status": f"{status} ({i}/300)",
-                        "task_id": task_id, "progress": i, "total": 300
-                    }, req.client_id)
-
-            if req.client_id:
-                await manager.send_personal_message({"type": "cloud_status", "status": "TIMEOUT", "task_id": task_id}, req.client_id)
-            return {"status": "timeout", "task_id": task_id, "message": "Task still pending"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Angle generation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-# --- ModelScope Z-Image 云端生图 ---
-
-@app.post("/generate")
-async def generate_cloud(req: CloudGenRequest):
-    api_root = modelscope_image_api_root()
-    clean_token = modelscope_api_key(req.api_key)
-    if not clean_token:
-        raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
-
-    headers = {
-        "Authorization": f"Bearer {clean_token}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": "Tongyi-MAI/Z-Image-Turbo",
-        "prompt": req.prompt.strip(),
-        "size": modelscope_size(req.resolution),
-        "n": 1
-    }
-    if req.loras is not None:
-        payload["loras"] = req.loras
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            submit_res = await client.post(
-                f"{api_root}/images/generations",
-                headers={**headers, "X-ModelScope-Async-Mode": "true"},
-                json=payload
-            )
-            if submit_res.status_code != 200:
-                try:
-                    detail = submit_res.json()
-                except:
-                    detail = submit_res.text
-                raise HTTPException(status_code=submit_res.status_code, detail=detail)
-
-            task_id = submit_res.json().get("task_id")
-            print(f"Z-Image Task submitted, ID: {task_id}")
-
-            for i in range(200):
-                await asyncio.sleep(3)
-                result = await client.get(
-                    f"{api_root}/tasks/{task_id}",
-                    headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
-                )
-                result.raise_for_status()
-                data = result.json()
-                status = str(data.get("task_status") or "").upper()
-
-                if i % 5 == 0:
-                    print(f"Task {task_id} status check {i}: {status}")
-
-                if status == "SUCCEED":
-                    img_url = data["output_images"][0]
-                    local_path = ""
-                    try:
-                        async with httpx.AsyncClient() as dl_client:
-                            img_res = await dl_client.get(img_url)
-                            if img_res.status_code == 200:
-                                filename = f"cloud_{int(time.time())}.png"
-                                file_path = output_path_for(filename, "output")
-                                with open(file_path, "wb") as f:
-                                    f.write(img_res.content)
-                                local_path = output_url_for(filename, "output")
-                            else:
-                                local_path = img_url
-                    except Exception as dl_e:
-                        print(f"Download error: {dl_e}")
-                        local_path = img_url
-
-                    record = {"timestamp": time.time(), "prompt": req.prompt, "images": [local_path], "type": "cloud"}
-                    save_to_history(record)
-                    try:
-                        await manager.broadcast_new_image(record)
-                    except Exception:
-                        pass
-                    return {"url": local_path}
-
-                elif status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}:
-                    raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
-
-            raise Exception("Cloud generation timeout")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Cloud generation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-# --- ModelScope 通用图片生成（支持图生图） ---
-
-@app.post("/api/ms/generate")
-async def ms_generate(req: MsGenerateRequest):
-    api_root = modelscope_image_api_root()
-    clean_token = modelscope_api_key(req.api_key)
-    if not clean_token:
-        raise HTTPException(status_code=400, detail="未配置 ModelScope API Key，请在 API 设置中填写，或重新保存 ModelScope Token。")
-
-    headers = {
-        "Authorization": f"Bearer {clean_token}",
-        "Content-Type": "application/json",
-        "X-ModelScope-Async-Mode": "true"
-    }
-    payload = {
-        "model": req.model,
-        "prompt": req.prompt.strip(),
-    }
-    if req.width and req.height:
-        payload["width"] = req.width
-        payload["height"] = req.height
-        payload["size"] = modelscope_size(req.size or f"{req.width}x{req.height}")
-    elif req.size:
-        payload["size"] = modelscope_size(req.size)
-    if req.image_urls:
-        payload["image_url"] = [modelscope_image_url(url, max_size=1536) for url in req.image_urls]
-    if req.loras is not None:
-        payload["loras"] = req.loras
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            submit_res = await client.post(
-                f"{api_root}/images/generations",
-                headers=headers,
-                json=payload
-            )
-            if submit_res.status_code != 200:
-                try:
-                    detail = submit_res.json()
-                except:
-                    detail = submit_res.text
-                raise HTTPException(status_code=submit_res.status_code, detail=detail)
-
-            task_id = submit_res.json().get("task_id")
-            print(f"MS Generate Task submitted ({req.model}), ID: {task_id}")
-
-            TERMINAL_FAILED_STATUSES = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}
-
-            for i in range(300):
-                await asyncio.sleep(2)
-                try:
-                    result = await client.get(
-                        f"{api_root}/tasks/{task_id}",
-                        headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
-                    )
-                    data = result.json()
-                    status = data.get("task_status")
-                    print(f"MS Task {task_id} poll {i}: status={status}")
-
-                    if status == "SUCCEED":
-                        img_url = data["output_images"][0]
-                        local_path = ""
-                        try:
-                            async with httpx.AsyncClient() as dl_client:
-                                img_res = await dl_client.get(img_url)
-                                if img_res.status_code == 200:
-                                    filename = f"ms_{req.model.replace('/', '_').replace(':', '_')}_{int(time.time())}.png"
-                                    file_path = output_path_for(filename, "output")
-                                    with open(file_path, "wb") as f:
-                                        f.write(img_res.content)
-                                    local_path = output_url_for(filename, "output")
-                                else:
-                                    local_path = img_url
-                        except Exception:
-                            local_path = img_url
-
-                        record = {
-                            "timestamp": time.time(),
-                            "prompt": req.prompt,
-                            "images": [local_path],
-                            "type": "klein",
-                            "model": req.model,
-                        }
-                        save_to_history(record)
-                        if GLOBAL_LOOP:
-                            asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(record), GLOBAL_LOOP)
-                        return {"url": local_path, "task_id": task_id}
-
-                    elif status in TERMINAL_FAILED_STATUSES:
-                        error_info = data.get("error_info") or data.get("message") or data.get("detail") or str(data)
-                        raise HTTPException(status_code=502, detail=f"MS task {status}: {error_info}")
-
-                except HTTPException:
-                    raise
-                except Exception as loop_e:
-                    print(f"MS polling error: {loop_e}")
-                    continue
-
-            raise HTTPException(status_code=504, detail="MS 生图超时")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"MS generate error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-# --- 本地 ComfyUI 生图 ---
-
-@app.post("/api/generate")
-def generate(req: GenerateRequest):
-    global NEXT_TASK_ID
-    current_task = None
-    target_backend = None
-    with QUEUE_LOCK:
-        task_id = NEXT_TASK_ID
-        NEXT_TASK_ID += 1
-        current_task = {"task_id": task_id, "client_id": req.client_id}
-        QUEUE.append(current_task)
-
-    try:
-        required_images = collect_required_comfy_media(req.params)
-
-        target_backend = reserve_best_backend(required_images)
-
-        for image_name in required_images:
-            need_sync = False
-            try:
-                check_url = f"http://{target_backend}/view?filename={urllib.parse.quote(image_name)}&type=input"
-                resp = requests.get(check_url, stream=True, timeout=0.5)
-                resp.close()
-                if resp.status_code != 200:
-                    need_sync = True
-            except:
-                need_sync = True
-
-            if need_sync:
-                image_content = None
-                image_type = "image/png"
-                for addr in COMFYUI_INSTANCES:
-                    if addr == target_backend: continue
-                    try:
-                        src_url = f"http://{addr}/view?filename={urllib.parse.quote(image_name)}&type=input"
-                        r = requests.get(src_url, timeout=5)
-                        if r.status_code == 200:
-                            image_content = r.content
-                            image_type = r.headers.get("Content-Type", "image/png")
-                            break
-                    except: continue
-
-                if image_content:
-                    try:
-                        files = {'image': (image_name, image_content, image_type)}
-                        requests.post(f"http://{target_backend}/upload/image", files=files, timeout=10)
-                    except Exception as e:
-                        print(f"Sync upload failed: {e}")
-
-        workflow_path = os.path.join(WORKFLOW_DIR, req.workflow_json)
-        if not os.path.exists(workflow_path) and req.workflow_json == "Z-Image.json":
-            workflow_path = WORKFLOW_PATH
-        if not os.path.exists(workflow_path):
-            raise Exception(f"Workflow file not found: {req.workflow_json}")
-
-        with open(workflow_path, 'r', encoding='utf-8') as f:
-            workflow = json.load(f)
-
-        seed = random.randint(1, 4294967295)
-
-        if "23" in workflow and req.prompt:
-            workflow["23"]["inputs"]["text"] = req.prompt
-        if "144" in workflow:
-            workflow["144"]["inputs"]["width"] = req.width
-            workflow["144"]["inputs"]["height"] = req.height
-        if "22" in workflow:
-            workflow["22"]["inputs"]["seed"] = seed
-        if "158" in workflow:
-            workflow["158"]["inputs"]["noise_seed"] = seed
-        for node_id in ["146", "181"]:
-            if node_id in workflow and "inputs" in workflow[node_id] and "seed" in workflow[node_id]["inputs"]:
-                workflow[node_id]["inputs"]["seed"] = seed
-        if "184" in workflow and "inputs" in workflow["184"] and "seed" in workflow["184"]["inputs"]:
-            workflow["184"]["inputs"]["seed"] = seed
-        if "172" in workflow and "inputs" in workflow["172"] and "seed" in workflow["172"]["inputs"]:
-            workflow["172"]["inputs"]["seed"] = seed
-        if "14" in workflow and "inputs" in workflow["14"] and "seed" in workflow["14"]["inputs"]:
-            workflow["14"]["inputs"]["seed"] = seed
-
-        for node_id, node_inputs in req.params.items():
-            if node_id in workflow:
-                if "inputs" not in workflow[node_id]:
-                    workflow[node_id]["inputs"] = {}
-                for input_name, value in node_inputs.items():
-                    workflow[node_id]["inputs"][input_name] = value
-
-        p = {"prompt": workflow, "client_id": CLIENT_ID}
-        data = json.dumps(p).encode('utf-8')
-        try:
-            post_req = urllib.request.Request(f"http://{target_backend}/prompt", data=data)
-            prompt_id = json.loads(urllib.request.urlopen(post_req, timeout=10).read())['prompt_id']
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode('utf-8')
-            raise Exception(f"HTTP Error {e.code}: {error_body}")
-
-        history_data = None
-        for i in range(COMFYUI_HISTORY_TIMEOUT):
-            try:
-                res = get_comfy_history(target_backend, prompt_id)
-                if prompt_id in res:
-                    history_data = res[prompt_id]
-                    break
-            except Exception:
-                pass
-            time.sleep(1)
-
-        if not history_data:
-            raise Exception("ComfyUI 渲染超时")
-
-        local_images = []
-        local_videos = []
-        local_audios = []
-        local_texts = []
-        local_files = []
-        local_items = []
-        local_urls = []
-        current_timestamp = time.time()
-        if 'outputs' in history_data:
-            # 先把所有节点的输出收集为候选（带上 class_type），再决定下载哪些，
-            # 避免把冗余的预览/对比图、调试文本一起下载进结果（后端层过滤，历史记录也更干净）。
-            workflow_nodes = workflow if isinstance(workflow, dict) else {}
-            def _class_type_of(nid):
-                node_def = workflow_nodes.get(str(nid))
-                return str(node_def.get("class_type") or "") if isinstance(node_def, dict) else ""
-            file_candidates = []   # (node_id, class_type, output_key, item, kind)
-            text_candidates = []   # (node_id, class_type, text, name)
-            for node_id in history_data['outputs']:
-                node_output = history_data['outputs'][node_id]
-                class_type = _class_type_of(node_id)
-                for output_key, item in collect_comfy_file_items(node_output):
-                    file_candidates.append((node_id, class_type, output_key, item, comfy_output_kind(item)))
-                for text, name in comfy_text_values_from_output(node_output):
-                    text_candidates.append((node_id, class_type, text, name))
-
-            # 只要存在“非预览节点”产出的图片，就把 PreviewImage/对比节点的图片视为冗余丢弃；
-            # 若整个工作流只有预览图（没有 SaveImage 等），则保留预览图作为唯一结果，避免零输出。
-            has_primary_image = any(
-                kind == "image" and not comfy_class_is_preview(ct)
-                for (_nid, ct, _ok, _it, kind) in file_candidates
-            )
-            prefix = f"{req.type}_{int(current_timestamp)}_"
-            for node_id, class_type, output_key, item, kind in file_candidates:
-                if kind == "image" and has_primary_image and comfy_class_is_preview(class_type):
-                    continue  # 跳过冗余的预览/对比图
-                local_path = download_comfy_output(target_backend, item, prefix=prefix)
-                if kind == "image" and req.convert_to_jpg:
-                    local_path = convert_output_to_jpg(local_path)
-                name = os.path.basename(str(item.get("filename") or "")) or os.path.basename(str(local_path).split("?", 1)[0])
-                entry = {
-                    "url": local_path,
-                    "kind": kind,
-                    "name": name,
-                    "node_id": str(node_id),
-                    "output_key": str(output_key),
-                    "class_type": class_type,
-                }
-                if kind == "image":
-                    local_images.append(local_path)
-                elif kind == "video":
-                    local_videos.append(local_path)
-                elif kind == "audio":
-                    local_audios.append(local_path)
-                elif kind == "text":
-                    local_texts.append(local_path)
-                else:
-                    local_files.append(local_path)
-                local_items.append(entry)
-                local_urls.append(local_path)
-
-            # 默认抑制 show/utility 类节点的调试文本，避免 .txt 噪声混入结果。
-            for node_id, class_type, text, name in text_candidates:
-                if comfy_class_is_debug_text(class_type):
-                    continue
-                local_path = save_comfy_text_output(text, prefix=prefix, name=name)
-                entry = {
-                    "url": local_path,
-                    "kind": "text",
-                    "name": os.path.basename(str(local_path).split("?", 1)[0]),
-                    "node_id": str(node_id),
-                    "output_key": "text",
-                    "class_type": class_type,
-                }
-                local_texts.append(local_path)
-                local_items.append(entry)
-                local_urls.append(local_path)
-
-        result = {
-            "prompt": req.prompt if req.prompt else "Detail Enhance",
-            "images": local_images,
-            "videos": local_videos,
-            "audios": local_audios,
-            "texts": local_texts,
-            "files": local_files,
-            "items": local_items,
-            "outputs": local_urls,
-            "seed": seed,
-            "timestamp": current_timestamp,
-            "type": req.type,
-            "workflow_json": req.workflow_json,
-            "task_id": task_id,
-            "prompt_id": prompt_id,
-            "backend": target_backend,
-            "params": req.params
-        }
-        save_to_history(result)
-        if GLOBAL_LOOP:
-            asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
-        return result
-
-    except Exception as e:
-        return {"images": [], "error": str(e)}
-    finally:
-        if target_backend:
-            with LOAD_LOCK:
-                if BACKEND_LOCAL_LOAD.get(target_backend, 0) > 0:
-                    BACKEND_LOCAL_LOAD[target_backend] -= 1
-        if current_task:
-            with QUEUE_LOCK:
-                if current_task in QUEUE:
-                    QUEUE.remove(current_task)
-
-# --- ComfyUI 工作流管理 ---
-
-BUILTIN_WORKFLOWS = {"Z-Image.json", "Z-Image-Enhance.json", "2511.json", "klein-enhance.json", "Flux2-Klein.json", "upscale.json"}
-CUSTOM_WORKFLOW_FOLDER = "custom"
-LEGACY_CUSTOM_WORKFLOW_FOLDER = "自定义"
-WORKFLOW_NAME_RE = re.compile(rf"^(?:(?:{CUSTOM_WORKFLOW_FOLDER}|{LEGACY_CUSTOM_WORKFLOW_FOLDER})/)?[a-zA-Z0-9_一-龥\.\-]+\.json$")
-
-class WorkflowField(BaseModel):
-    id: str
-    node: str = ""
-    input: str = ""
-    name: str = ""
-    type: str = "text"
-    default: Any = None
-    min: Optional[float] = None
-    max: Optional[float] = None
-    step: Optional[float] = None
-    options: List[str] = []
-    random_enabled: bool = False
-
-class WorkflowConfig(BaseModel):
-    title: str = ""
-    fields: List[WorkflowField] = []
-    mini_cards: Dict[str, Any] = {}
-
-class WorkflowUploadRequest(BaseModel):
-    name: str
-    workflow: Dict[str, Any]
-
-class WorkflowRunRequest(BaseModel):
-    fields: Dict[str, Any] = {}
-    config: WorkflowConfig
-    client_id: str = ""
-
-def workflow_path_from_name(name: str) -> str:
-    if not WORKFLOW_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="Invalid workflow name")
-    path = os.path.abspath(os.path.join(WORKFLOW_DIR, *name.split("/")))
-    workflow_root = os.path.abspath(WORKFLOW_DIR)
-    if os.path.commonpath([workflow_root, path]) != workflow_root:
-        raise HTTPException(status_code=400, detail="Invalid workflow name")
-    return path
-
-def workflow_config_path(name: str) -> str:
-    return workflow_path_from_name(name).replace(".json", ".config.json")
-
-def is_builtin_workflow(name: str) -> bool:
-    return "/" not in name and os.path.basename(name) in BUILTIN_WORKFLOWS
-
 def runninghub_workflow_store_path() -> str:
-    return RUNNINGHUB_WORKFLOW_STORE_FILE
+    return str(DATA_LAYOUT.database_file)
 
 def load_runninghub_workflow_store():
-    if not os.path.exists(RUNNINGHUB_WORKFLOW_STORE_FILE):
-        return {}
-    try:
-        with open(RUNNINGHUB_WORKFLOW_STORE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    data = DATABASE.get_library("runninghub_workflows", {})
+    return data if isinstance(data, dict) else {}
 
 def save_runninghub_workflow_store(store):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(RUNNINGHUB_WORKFLOW_STORE_FILE, "w", encoding="utf-8") as f:
-        json.dump(store, f, ensure_ascii=False, indent=2)
+    revision = DATABASE.save_library("runninghub_workflows", store)
+    publish_entity_changed("workflow", "runninghub", revision)
 
 def runninghub_workflow_config_has_payload(cfg):
     if not isinstance(cfg, dict):
@@ -14881,193 +15915,8 @@ def runninghub_collect_workflow_fields(workflow_json):
             })
     return fields
 
-class ComfyInstancesPayload(BaseModel):
-    instances: List[str] = []
-
-@app.get("/api/comfyui/instances")
-def get_comfyui_instances():
-    return {"instances": COMFYUI_INSTANCES}
-
-@app.put("/api/comfyui/instances")
-def save_comfyui_instances(payload: ComfyInstancesPayload):
-    # 宽容校验：去前后空白、去 http(s):// 前缀、去尾部斜杠；要求形如 host:port
-    cleaned = []
-    for item in payload.instances:
-        s = str(item or "").strip()
-        if not s:
-            continue
-        s = re.sub(r"^https?://", "", s)
-        s = s.rstrip("/")
-        if ":" not in s:
-            raise HTTPException(status_code=400, detail=f"地址缺少端口号：{item}（应为 host:port，例如 127.0.0.1:8188）")
-        host, _, port = s.rpartition(":")
-        if not host or not port.isdigit():
-            raise HTTPException(status_code=400, detail=f"地址不合法：{item}（应为 host:port，例如 127.0.0.1:8188）")
-        if s in cleaned:
-            continue
-        cleaned.append(s)
-    if not cleaned:
-        raise HTTPException(status_code=400, detail="至少保留一个 ComfyUI 后端地址")
-    # 写入 env 文件
-    try:
-        update_env_values({"COMFYUI_INSTANCES": ",".join(cleaned)})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"写入 env 失败：{e}")
-    # 更新进程中的全局变量
-    global COMFYUI_INSTANCES, COMFYUI_ADDRESS, BACKEND_LOCAL_LOAD
-    COMFYUI_INSTANCES = cleaned
-    COMFYUI_ADDRESS = cleaned[0]
-    new_load = {addr: 0 for addr in cleaned}
-    for addr, n in (BACKEND_LOCAL_LOAD or {}).items():
-        if addr in new_load:
-            new_load[addr] = n
-    BACKEND_LOCAL_LOAD = new_load
-    return {"instances": COMFYUI_INSTANCES}
-
-@app.get("/api/workflows")
-def list_workflows():
-    if not os.path.isdir(WORKFLOW_DIR):
-        return {"workflows": []}
-    items = []
-    for root, dirs, files in os.walk(WORKFLOW_DIR):
-        if os.path.abspath(root) == os.path.abspath(WORKFLOW_DIR):
-            dirs[:] = [d for d in dirs if d in {CUSTOM_WORKFLOW_FOLDER, LEGACY_CUSTOM_WORKFLOW_FOLDER}]
-        for fn in sorted(files):
-            if not fn.endswith(".json") or fn.endswith(".config.json"):
-                continue
-            rel = os.path.relpath(os.path.join(root, fn), WORKFLOW_DIR).replace("\\", "/")
-            if is_builtin_workflow(rel):
-                continue
-            cfg = {}
-            cfg_path = workflow_config_path(rel)
-            if os.path.exists(cfg_path):
-                try:
-                    with open(cfg_path, "r", encoding="utf-8") as f:
-                        cfg = json.load(f) or {}
-                except Exception:
-                    cfg = {}
-            items.append({
-                "name": rel,
-                "title": cfg.get("title") or fn.replace(".json", ""),
-                "builtin": False,
-                "field_count": len(cfg.get("fields") or []),
-            })
-    items.sort(key=lambda item: (0 if item["name"].startswith(f"{CUSTOM_WORKFLOW_FOLDER}/") else 1, item["title"]))
-    return {"workflows": items}
-
-@app.get("/api/workflows/{name:path}")
-def get_workflow(name: str):
-    if not WORKFLOW_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="Invalid workflow name")
-    workflow_path = workflow_path_from_name(name)
-    if not os.path.exists(workflow_path):
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    with open(workflow_path, "r", encoding="utf-8") as f:
-        workflow = json.load(f)
-    cfg = {"title": name.replace(".json", ""), "fields": []}
-    cfg_path = workflow_config_path(name)
-    if os.path.exists(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f) or cfg
-        except Exception:
-            pass
-    return {"name": name, "workflow": workflow, "config": cfg, "builtin": is_builtin_workflow(name)}
-
-@app.post("/api/workflows")
-def upload_workflow(payload: WorkflowUploadRequest):
-    name = os.path.basename(payload.name.strip())
-    if not name.endswith(".json"):
-        name = name + ".json"
-    if not WORKFLOW_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="工作流名称不合法，请使用中文/英文/数字/_-.")
-    if not isinstance(payload.workflow, dict) or not payload.workflow:
-        raise HTTPException(status_code=400, detail="工作流 JSON 为空")
-    # 简单校验：是 API 格式（节点 id 为 key，含 class_type）
-    sample = next(iter(payload.workflow.values()), None)
-    if not isinstance(sample, dict) or "class_type" not in sample:
-        raise HTTPException(status_code=400, detail="不是有效的 ComfyUI API 工作流 JSON（需包含 class_type）")
-    custom_dir = os.path.join(WORKFLOW_DIR, CUSTOM_WORKFLOW_FOLDER)
-    os.makedirs(custom_dir, exist_ok=True)
-    stored_name = f"{CUSTOM_WORKFLOW_FOLDER}/{name}"
-    path = workflow_path_from_name(stored_name)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload.workflow, f, ensure_ascii=False, indent=2)
-    return {"name": stored_name}
-
-@app.put("/api/workflows/{name:path}/config")
-def save_workflow_config(name: str, payload: WorkflowConfig):
-    if not WORKFLOW_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="Invalid workflow name")
-    workflow_path = workflow_path_from_name(name)
-    if not os.path.exists(workflow_path):
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    cfg_path = workflow_config_path(name)
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        json.dump(payload.dict(), f, ensure_ascii=False, indent=2)
-    return {"config": payload.dict()}
-
-@app.delete("/api/workflows/{name:path}")
-def delete_workflow(name: str):
-    if not WORKFLOW_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="Invalid workflow name")
-    if is_builtin_workflow(name):
-        raise HTTPException(status_code=400, detail="内置工作流不可删除")
-    workflow_path = workflow_path_from_name(name)
-    cfg_path = workflow_config_path(name)
-    if not os.path.exists(workflow_path):
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    os.remove(workflow_path)
-    if os.path.exists(cfg_path):
-        os.remove(cfg_path)
-    return {"ok": True}
-
-@app.post("/api/workflows/{name:path}/run")
-def run_workflow(name: str, payload: WorkflowRunRequest):
-    if not WORKFLOW_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="Invalid workflow name")
-    if not os.path.exists(workflow_path_from_name(name)):
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    # 根据 config 的字段把值映射成 params 节点覆盖
-    params: Dict[str, Dict[str, Any]] = {}
-    for field in payload.config.fields:
-        if not field.node or not field.input:
-            continue
-        if field.id in payload.fields:
-            value = payload.fields[field.id]
-            # 类型转换
-            if field.type in ("number", "slider"):
-                try:
-                    value = float(value) if (field.step and field.step < 1) else int(float(value))
-                except Exception:
-                    pass
-            elif field.type == "boolean":
-                value = bool(value)
-            elif field.type == "dropdown":
-                # 下拉值如果看起来是数字（如 "1024" / "2048" / "0.8"），自动转成 int/float
-                if isinstance(value, str):
-                    s = value.strip()
-                    try:
-                        if s and ('.' in s or 'e' in s.lower()):
-                            value = float(s)
-                        elif s and (s.lstrip('-').isdigit()):
-                            value = int(s)
-                    except (ValueError, TypeError):
-                        pass
-            params.setdefault(field.node, {})[field.input] = value
-    req = GenerateRequest(
-        prompt="",
-        workflow_json=name,
-        params=params,
-        type="workflow-test",
-        client_id=payload.client_id or str(uuid.uuid4()),
-    )
-    return generate(req)
-
 if __name__ == "__main__":
-    import uvicorn
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
     # 默认 20s ping/20s 超时会把这些连接每隔一会儿就踢掉造成"频繁断连"。
     # 客户端有自己的应用层心跳 + 断线重连兜底，这里禁用协议 ping 更稳。
-    uvicorn.run(app, host="0.0.0.0", port=3000,
-                ws_ping_interval=None, ws_ping_timeout=None)
+    run_uvicorn(app)
