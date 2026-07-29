@@ -1,0 +1,22 @@
+services:
+  infinite-canvas:
+    image: "${INFINITE_CANVAS_IMAGE:-ghcr.io/hero8152/infinite-canvas:latest}"
+    build:
+      context: .
+    container_name: infinite-canvas
+    restart: unless-stopped
+    ports:
+      - "${INFINITE_CANVAS_PORT:-13200}:3000"
+    environment:
+      # Inside Docker, 127.0.0.1 means the container itself. Use host.docker.internal
+      # to reach ComfyUI running on the Docker host, or replace with a LAN IP.
+      COMFYUI_INSTANCES: "${COMFYUI_INSTANCES:-host.docker.internal:8188}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./docker-data/API:/app/API
+      - ./docker-data/assets:/app/assets
+      - ./docker-data/data:/app/data
+      - ./docker-data/dreamina-cli:/home/appuser/.dreamina_cli
+      - ./docker-data/output:/app/output
+      - ./docker-data/workflows-custom:/app/workflows/custom

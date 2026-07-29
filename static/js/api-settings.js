@@ -28,6 +28,10 @@ const jimengLoginBox = document.getElementById('jimengLoginBox');
 const jimengHelpOverlay = document.getElementById('jimengHelpOverlay');
 const jimengHelpCommand = document.getElementById('jimengHelpCommand');
 const jimengHelpOutput = document.getElementById('jimengHelpOutput');
+const jimengLogoutOverlay = document.getElementById('jimengLogoutOverlay');
+const jimengLogoutStatus = document.getElementById('jimengLogoutStatus');
+const jimengLogoutOutput = document.getElementById('jimengLogoutOutput');
+const jimengLogoutConfirmBtn = document.getElementById('jimengLogoutConfirmBtn');
 const codexCliPanel = document.getElementById('codexCliPanel');
 const codexCliStatus = document.getElementById('codexCliStatus');
 const codexCliInfo = document.getElementById('codexCliInfo');
@@ -68,6 +72,11 @@ const msLoraBlock = document.getElementById('msLoraBlock');
 const msLoraList = document.getElementById('msLoraList');
 const recommendApiOverlay = document.getElementById('recommendApiOverlay');
 const recommendApiList = document.getElementById('recommendApiList');
+const jimengInstallOverlay = document.getElementById('jimengInstallOverlay');
+const jimengInstallSubtitle = document.getElementById('jimengInstallSubtitle');
+const jimengInstallStatus = document.getElementById('jimengInstallStatus');
+const jimengInstallOutput = document.getElementById('jimengInstallOutput');
+const jimengInstallStartBtn = document.getElementById('jimengInstallStartBtn');
 const VOLCENGINE_DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 const VOLCENGINE_DEFAULT_PROJECT_NAME = 'default';
 const VOLCENGINE_DEFAULT_REGION = 'cn-beijing';
@@ -151,6 +160,8 @@ let rhWorkflowEditorState = { open:false, index:-1, entry:null, config:null, exp
 let rhEditorMode = 'workflow';
 let recommendInlineOpen = false;
 let providerDragId = '';
+let jimengLoginState = { sessionId:'', url:'', pollTimer:null };
+let jimengInstallState = { sessionId:'', pollTimer:null, closed:false };
 // category: 'allround'（全能）| 'value'（性价比）| 'free'（免费），推荐面板按分组分节展示
 const RECOMMENDED_APIS = [
     {
@@ -2643,17 +2654,6 @@ function setJimengStatus(text, ok=null){
     jimengCliStatus.classList.toggle('ok', ok === true);
     jimengCliStatus.classList.toggle('bad', ok === false);
 }
-function renderJimengLoginBox(data){
-    if(!jimengLoginBox) return;
-    const text = data?.text || '';
-    const qrUrl = data?.qr_url || '';
-    const qrHtml = qrUrl && qrUrl.startsWith('http')
-        ? `<img class="jimeng-qr-img" src="${escapeHtml(qrUrl)}" alt="即梦登录二维码">`
-        : '';
-    jimengLoginBox.hidden = false;
-    jimengLoginBox.innerHTML = `${qrHtml}<pre>${escapeHtml(text || '等待 CLI 输出登录二维码...')}</pre>`;
-}
-let jimengLoginTimer = null;
 async function refreshJimengStatus(showCredit=true){
     if(!jimengCliPanel || jimengCliPanel.hidden) return;
     setJimengStatus('检测中...');
@@ -2668,45 +2668,6 @@ async function refreshJimengStatus(showCredit=true){
     } catch(e){
         setJimengStatus('检测失败', false);
         if(jimengCredit) jimengCredit.textContent = e.message || String(e);
-    }
-}
-async function startJimengLogin(){
-    setJimengStatus('等待扫码...');
-    if(jimengCredit) jimengCredit.textContent = '';
-    try {
-        const data = await fetch('/api/jimeng/login/start', {method:'POST'}).then(async r => {
-            const json = await r.json();
-            if(!r.ok) throw new Error(json.detail || '启动登录失败');
-            return json;
-        });
-        renderJimengLoginBox(data);
-        clearInterval(jimengLoginTimer);
-        jimengLoginTimer = setInterval(pollJimengLogin, 2500);
-        refreshIcons();
-    } catch(e){
-        setJimengStatus('登录失败', false);
-        if(jimengLoginBox){
-            jimengLoginBox.hidden = false;
-            jimengLoginBox.innerHTML = `<pre>${escapeHtml(e.message || String(e))}</pre>`;
-        }
-    }
-}
-async function pollJimengLogin(){
-    try {
-        const data = await fetch('/api/jimeng/login/status').then(r => r.json());
-        renderJimengLoginBox(data);
-        if(data.logged_in){
-            clearInterval(jimengLoginTimer);
-            setJimengStatus('已登录', true);
-            if(jimengCredit) jimengCredit.textContent = jimengCreditText(data.raw);
-        } else if(data.running){
-            setJimengStatus('等待扫码...');
-        } else {
-            setJimengStatus('未登录', false);
-        }
-    } catch(e){
-        clearInterval(jimengLoginTimer);
-        setJimengStatus('登录检测失败', false);
     }
 }
 async function refreshJimengCredit(){
@@ -2724,8 +2685,35 @@ async function refreshJimengCredit(){
         if(jimengCredit) jimengCredit.textContent = e.message || String(e);
     }
 }
-async function logoutJimeng(){
-    if(!confirm('确认退出即梦 CLI 登录？')) return;
+function openJimengLogoutModal(){
+    if(jimengLogoutStatus){
+        jimengLogoutStatus.textContent = '确认要登出当前即梦账号吗？';
+        jimengLogoutStatus.style.color = 'var(--text)';
+    }
+    if(jimengLogoutOutput) jimengLogoutOutput.textContent = '命令：dreamina logout';
+    if(jimengLogoutConfirmBtn){
+        jimengLogoutConfirmBtn.disabled = false;
+        jimengLogoutConfirmBtn.textContent = '确认登出';
+    }
+    if(jimengLogoutOverlay) jimengLogoutOverlay.style.display = 'flex';
+    refreshIcons();
+}
+function closeJimengLogoutModal(){
+    if(jimengLogoutOverlay) jimengLogoutOverlay.style.display = 'none';
+}
+function logoutJimeng(){
+    openJimengLogoutModal();
+}
+async function performJimengLogout(){
+    if(jimengLogoutConfirmBtn){
+        jimengLogoutConfirmBtn.disabled = true;
+        jimengLogoutConfirmBtn.textContent = '登出中...';
+    }
+    if(jimengLogoutStatus){
+        jimengLogoutStatus.textContent = '正在执行 dreamina logout...';
+        jimengLogoutStatus.style.color = 'var(--text)';
+    }
+    showVerifyResult(`<span style="color:var(--muted);font-size:11px;font-weight:700">正在执行 dreamina logout...</span>`);
     try {
         const data = await fetch('/api/jimeng/logout', {method:'POST'}).then(async r => {
             const json = await r.json();
@@ -2735,9 +2723,26 @@ async function logoutJimeng(){
         setJimengStatus('已退出', false);
         if(jimengCredit) jimengCredit.textContent = prettyJson(data.raw);
         if(jimengLoginBox) jimengLoginBox.hidden = true;
+        if(jimengLogoutStatus){
+            jimengLogoutStatus.textContent = data.message || '即梦 CLI 已登出';
+            jimengLogoutStatus.style.color = '#15803d';
+        }
+        if(jimengLogoutOutput) jimengLogoutOutput.textContent = prettyJson(data.raw);
+        showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 即梦 CLI 已登出</span>`);
+        setTimeout(closeJimengLogoutModal, 700);
     } catch(e){
         setJimengStatus('退出失败', false);
         if(jimengCredit) jimengCredit.textContent = e.message || String(e);
+        if(jimengLogoutStatus){
+            jimengLogoutStatus.textContent = e.message || String(e);
+            jimengLogoutStatus.style.color = '#b45309';
+        }
+        showVerifyResult(`<div style="font-size:11px;font-weight:800;color:#b45309">⚠ ${escapeHtml(e.message || String(e))}</div>`);
+    } finally {
+        if(jimengLogoutConfirmBtn){
+            jimengLogoutConfirmBtn.disabled = false;
+            jimengLogoutConfirmBtn.textContent = '确认登出';
+        }
     }
 }
 function openJimengHelp(){
@@ -2875,6 +2880,187 @@ function currentProviderApiKey(item){
     }
     return keyInput.value.trim();
 }
+function renderJimengLoginBox(data){
+    if(!data) return;
+    jimengLoginState.sessionId = data.session_id || jimengLoginState.sessionId || '';
+    jimengLoginState.url = data.verification_url || jimengLoginState.url || '';
+    if(!jimengLoginBox) return;
+    const parts = [];
+    if(data.message) parts.push(data.message);
+    if(data.user_code) parts.push(`user_code: ${data.user_code}`);
+    if(data.expires_at) parts.push(`expires_at: ${data.expires_at}`);
+    const output = [parts.join(' · '), data.output || ''].filter(Boolean).join('\n\n');
+    const loginLink = jimengLoginState.url
+        ? `<a class="action-btn save-btn" href="${escapeHtml(jimengLoginState.url)}" target="_blank" rel="noopener"><i data-lucide="external-link" class="w-3.5 h-3.5"></i><span>打开登录页</span></a>`
+        : '';
+    jimengLoginBox.hidden = false;
+    jimengLoginBox.innerHTML = `${loginLink}<pre>${escapeHtml(output || '等待 CLI 输出登录地址...')}</pre>`;
+    refreshIcons();
+}
+function stopJimengLoginPolling(){
+    if(jimengLoginState.pollTimer){
+        clearInterval(jimengLoginState.pollTimer);
+        jimengLoginState.pollTimer = null;
+    }
+}
+async function pollJimengLoginOnce(){
+    const sessionId = jimengLoginState.sessionId;
+    if(!sessionId) return;
+    try {
+        const data = await fetch(`/api/jimeng/login/${encodeURIComponent(sessionId)}/status`).then(async r => {
+            if(!r.ok) throw new Error((await r.json()).detail || '查询登录状态失败');
+            return r.json();
+        });
+        renderJimengLoginBox(data);
+        if(data.status === 'success'){
+            stopJimengLoginPolling();
+            setJimengStatus('已登录', true);
+            refreshJimengCredit();
+        } else if(data.status === 'starting' || data.status === 'waiting'){
+            setJimengStatus('等待扫码...');
+        } else if(data.status === 'failed'){
+            stopJimengLoginPolling();
+            setJimengStatus('登录失败', false);
+        } else if(data.status === 'finished'){
+            stopJimengLoginPolling();
+            refreshJimengStatus(true);
+        }
+    } catch(e){
+        stopJimengLoginPolling();
+        setJimengStatus('登录检测失败', false);
+        if(jimengCredit) jimengCredit.textContent = e.message || String(e);
+    }
+}
+function startJimengLoginPolling(){
+    stopJimengLoginPolling();
+    jimengLoginState.pollTimer = setInterval(pollJimengLoginOnce, 1000);
+}
+async function startJimengLogin(){
+    setJimengStatus('等待扫码...');
+    if(jimengCredit) jimengCredit.textContent = '';
+    try {
+        stopJimengLoginPolling();
+        jimengLoginState = { sessionId:'', url:'', pollTimer:null };
+        const data = await fetch('/api/jimeng/login/start', {method:'POST'}).then(async r => {
+            const json = await r.json();
+            if(!r.ok) throw new Error(json.detail || '启动登录失败');
+            return json;
+        });
+        renderJimengLoginBox(data);
+        startJimengLoginPolling();
+        if(data.status === 'success'){
+            stopJimengLoginPolling();
+            setJimengStatus('已登录', true);
+            refreshJimengCredit();
+        }
+        refreshIcons();
+    } catch(e){
+        setJimengStatus('登录失败', false);
+        if(jimengLoginBox){
+            jimengLoginBox.hidden = false;
+            jimengLoginBox.innerHTML = `<pre>${escapeHtml(e.message || String(e))}</pre>`;
+        }
+    }
+}
+function renderJimengInstallState(data){
+    const color = data?.status === 'success' ? '#15803d' : data?.status === 'failed' ? '#b45309' : 'var(--muted)';
+    const message = data?.message || '正在安装即梦 CLI...';
+    if(jimengInstallSubtitle){
+        jimengInstallSubtitle.textContent = data?.status === 'success'
+            ? '安装完成，请继续登录即梦 CLI。'
+            : data?.status === 'failed'
+            ? '安装未完成，可以重试或稍后手动处理。'
+            : data?.status === 'running'
+            ? '正在下载并安装官方原生 CLI，请保持窗口打开。'
+            : '未检测到本机 dreamina CLI，可下载官方原生版本。';
+    }
+    if(jimengInstallStatus){
+        jimengInstallStatus.textContent = message;
+        jimengInstallStatus.style.color = color;
+    }
+    if(jimengInstallOutput){
+        const output = (data?.output || data?.managed_path) ? (data?.output || `安装位置：${data.managed_path}`) : '';
+        jimengInstallOutput.textContent = output;
+        jimengInstallOutput.style.display = output ? 'block' : 'none';
+    }
+    if(jimengInstallStartBtn){
+        const running = data?.status === 'running';
+        const success = data?.status === 'success';
+        jimengInstallStartBtn.disabled = running;
+        jimengInstallStartBtn.textContent = running ? '安装中...' : data?.status === 'success' ? '安装完成' : data?.status === 'failed' ? '重试安装' : '下载并安装';
+        jimengInstallStartBtn.onclick = success ? closeJimengInstallModal : startJimengInstall;
+    }
+    showVerifyResult(`<div style="font-size:11px;font-weight:800;color:${color}">${escapeHtml(message)}</div>`);
+    refreshIcons();
+}
+function openJimengInstallModal(data={}){
+    jimengInstallState.closed = false;
+    if(jimengInstallOverlay) jimengInstallOverlay.style.display = 'flex';
+    renderJimengInstallState({
+        status: data.status || 'idle',
+        message: data.message || '未检测到即梦 CLI。是否下载并安装官方原生 CLI？',
+        managed_path: data.managed_path || '',
+        output: data.managed_path ? `安装位置：${data.managed_path}` : '',
+    });
+}
+function stopJimengInstallPolling(){
+    if(jimengInstallState.pollTimer){
+        clearInterval(jimengInstallState.pollTimer);
+        jimengInstallState.pollTimer = null;
+    }
+}
+function closeJimengInstallModal(){
+    jimengInstallState.closed = true;
+    stopJimengInstallPolling();
+    if(jimengInstallOverlay) jimengInstallOverlay.style.display = 'none';
+}
+async function pollJimengInstallOnce(){
+    const sessionId = jimengInstallState.sessionId;
+    if(!sessionId || jimengInstallState.closed) return;
+    try {
+        const data = await fetch(`/api/jimeng/install/${encodeURIComponent(sessionId)}/status`).then(async r => {
+            if(!r.ok) throw new Error((await r.json()).detail || '查询安装状态失败');
+            return r.json();
+        });
+        renderJimengInstallState(data);
+        if(data.status === 'success'){
+            stopJimengInstallPolling();
+            showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 即梦 CLI 安装完成，请点击“登录即梦”完成授权。</span>`);
+        } else if(data.status === 'failed'){
+            stopJimengInstallPolling();
+        }
+    } catch(e){
+        stopJimengInstallPolling();
+        showVerifyResult(`<div style="font-size:11px;font-weight:800;color:#b45309">⚠ ${escapeHtml(e.message || String(e))}</div>`);
+    }
+}
+async function startJimengInstall(){
+    jimengInstallState.closed = false;
+    if(jimengInstallOverlay) jimengInstallOverlay.style.display = 'flex';
+    showVerifyResult(`<span style="color:var(--muted);font-size:11px;font-weight:700">正在准备安装即梦 CLI...</span>`);
+    renderJimengInstallState({status:'running', message:'正在准备安装即梦 CLI...'});
+    try {
+        stopJimengInstallPolling();
+        jimengInstallState.sessionId = '';
+        const data = await fetch('/api/jimeng/install/start', {method:'POST'}).then(async r => {
+            if(!r.ok) throw new Error((await r.json()).detail || '启动即梦 CLI 安装失败');
+            return r.json();
+        });
+        renderJimengInstallState(data);
+        if(data.status === 'success'){
+            showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 即梦 CLI 已安装，请点击“登录即梦”完成授权。</span>`);
+            return;
+        }
+        jimengInstallState.sessionId = data.session_id || '';
+        if(jimengInstallState.sessionId){
+            jimengInstallState.pollTimer = setInterval(pollJimengInstallOnce, 1000);
+        }
+    } catch(e){
+        renderJimengInstallState({status:'failed', message:e.message || String(e)});
+        showVerifyResult(`<div style="font-size:11px;font-weight:800;color:#b45309">⚠ ${escapeHtml(e.message || String(e))}</div>`);
+    }
+}
+
 function normalizeImageRequestMode(value){
     const mode = String(value || '').trim().toLowerCase();
     return ['openai', 'openai-json', 'openai-video-proxy', 'openai-responses'].includes(mode) ? mode : 'openai';
@@ -3107,6 +3293,10 @@ async function testConnection(){
                 : imageModeNote;
             showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 地址验证通过 · 找到 ${data.model_count} 个模型${runninghubNote}</span>${volcengineNote}${jimengNote}${codexNote}${geminiCliNote}`);
         } else {
+            if(isJimeng && data.installed === false && data.install_supported !== false){
+                openJimengInstallModal(data);
+                return;
+            }
             showVerifyResult(`
                 <div style="font-size:11px;font-weight:800;color:#b45309">⚠ 地址验证未通过 (HTTP ${data.status})</div>
                 <div style="font-size:11px;color:var(--muted);font-weight:600;margin-top:3px">${escapeHtml((data.message || '').slice(0,200))}</div>`);

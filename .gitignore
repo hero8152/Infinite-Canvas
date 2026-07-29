@@ -1,0 +1,34 @@
+# ide
+.idea/
+*.iml
+
+# ai
+.claude/
+
+# Python/runtime cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+python/
+
+# Build artifacts
+build/
+dist/
+*.spec
+packaging/*/payload/app-base.zip
+
+# Local agent/workflow state
+#.workflow/
+
+# Local Docker runtime data
+docker-data/
+
+# Application runtime data
+API/
+assets/
+data/
+output/
+history.json
+global_config.json
+_self_restart.*

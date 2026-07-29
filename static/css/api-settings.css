@@ -244,6 +244,11 @@ html.studio-theme-dark body .action-btn.danger-btn:hover { background:#7f1d1d; c
 .action-btn.save-btn { background:var(--accent); color:var(--bg); border-color:var(--accent); }
 .action-btn.save-btn:hover { transform:translateY(-1px); box-shadow:0 6px 16px rgba(15,23,42,.15); background:var(--accent); color:var(--bg); border-color:var(--accent); }
 .action-btn.save-btn.is-saved { background:#16a34a; color:#fff; border-color:#16a34a; box-shadow:0 8px 18px rgba(22,163,74,.22); }
+.jimeng-login-modal { max-width:560px; }
+.jimeng-login-body { padding:16px 18px; display:flex; flex-direction:column; gap:12px; }
+.jimeng-login-status { padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--soft); color:var(--text); font-size:12px; font-weight:800; }
+.jimeng-login-output { margin:0; max-height:160px; overflow:auto; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--soft); color:var(--muted); font-size:10.5px; white-space:pre-wrap; word-break:break-all; }
+.jimeng-install-detail { color:var(--muted); font-size:11px; line-height:1.7; font-weight:700; }
 body.studio-theme-dark .action-btn.save-btn,
 html.studio-theme-dark body .action-btn.save-btn { background:#f5f6f8; color:#0e1014; border-color:#f5f6f8; box-shadow:0 8px 18px rgba(0,0,0,.22); }
 body.studio-theme-dark .action-btn.save-btn:hover,
