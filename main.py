@@ -2734,6 +2734,7 @@ class OnlineImageRequest(BaseModel):
 class ImageTaskQueryRequest(BaseModel):
     provider_id: str = "comfly"
     task_id: str = Field(min_length=1, max_length=240)
+    reference_images: List[AIReference] = []
 
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_TASK_LOCK = Lock()
@@ -5927,6 +5928,8 @@ async def jimeng_pending_exception_handler(request: Request, exc: JimengPendingE
     # 轮询超时但任务还在云端排队：返回 202 + submit_id，让前端保持「排队中」卡片并续查
     return JSONResponse(status_code=202, content=jimeng_pending_payload(exc))
 
+JIMENG_PENDING_SOURCE_NAMES = {}
+
 def jimeng_failure_reason(raw):
     found = []
     def visit(value):
@@ -6143,7 +6146,7 @@ def jimeng_video_ref_url(ref):
         url = ref.get("url", url)
     return str(url or "").strip()
 
-def jimeng_local_output_url(path, kind="image"):
+def jimeng_local_output_url(path, kind="image", source_names=None):
     path = os.path.abspath(str(path or ""))
     if not os.path.isfile(path):
         return ""
@@ -6159,12 +6162,15 @@ def jimeng_local_output_url(path, kind="image"):
         ct = content_type_for_path(path)
         ext = ".mp4" if ct.startswith("video/") else ".png"
     prefix = "jimeng_video_" if kind == "video" else "jimeng_"
-    filename = f"{prefix}{uuid.uuid4().hex[:10]}{ext}"
+    if kind == "image" and source_names:
+        filename = generated_output_filename(prefix, ext, "output", source_names)
+    else:
+        filename = f"{prefix}{uuid.uuid4().hex[:10]}{ext}"
     dest = output_path_for(filename, "output")
     shutil.copyfile(path, dest)
     return output_url_for(filename, "output")
 
-async def jimeng_store_output_value(value, kind="image"):
+async def jimeng_store_output_value(value, kind="image", source_names=None):
     text = str(value or "").strip()
     if not text:
         return ""
@@ -6179,9 +6185,9 @@ async def jimeng_store_output_value(value, kind="image"):
     if text.startswith(("http://", "https://")):
         if kind == "video":
             return await save_remote_video_to_output(text, prefix="jimeng_video_")
-        return await save_ai_image_to_output({"type": "url", "value": text}, prefix="jimeng_")
+        return await save_ai_image_to_output({"type": "url", "value": text}, prefix="jimeng_", source_names=source_names)
     if os.path.isfile(text):
-        return jimeng_local_output_url(text, kind)
+        return jimeng_local_output_url(text, kind, source_names=source_names)
     return ""
 
 async def jimeng_query_result(submit_id, kind="image"):
@@ -6192,23 +6198,28 @@ async def jimeng_query_result(submit_id, kind="image"):
     ]
     return await run_jimeng_cli(args, timeout=min(300, jimeng_poll_seconds() + 60))
 
-async def jimeng_store_outputs(raw, kind="image", allow_query=True):
+async def jimeng_store_outputs(raw, kind="image", allow_query=True, source_names=None):
     failure = jimeng_failure_reason(raw)
     if failure:
         raise HTTPException(status_code=502, detail=f"即梦生成失败：{failure}")
     values = jimeng_output_values(raw)
     urls = []
     for value in values:
-        local_url = await jimeng_store_output_value(value, kind)
+        local_url = await jimeng_store_output_value(value, kind, source_names=source_names)
         if local_url and local_url not in urls:
             urls.append(local_url)
     if urls:
+        submit_id = jimeng_submit_id(raw)
+        if submit_id:
+            JIMENG_PENDING_SOURCE_NAMES.pop(str(submit_id), None)
         return urls
     submit_id = jimeng_submit_id(raw)
     if submit_id and allow_query:
+        if source_names:
+            JIMENG_PENDING_SOURCE_NAMES[str(submit_id)] = list(source_names)
         queried = await jimeng_query_result(submit_id, kind)
         try:
-            return await jimeng_store_outputs(queried, kind, allow_query=False)
+            return await jimeng_store_outputs(queried, kind, allow_query=False, source_names=source_names)
         except HTTPException as exc:
             if getattr(exc, "status_code", None) == 502:
                 status_text = json.dumps(queried, ensure_ascii=False)[:800] if isinstance(queried, (dict, list)) else str(queried)[:800]
@@ -6216,6 +6227,8 @@ async def jimeng_store_outputs(raw, kind="image", allow_query=True):
             raise
     status_text = json.dumps(raw, ensure_ascii=False)[:800] if isinstance(raw, (dict, list)) else str(raw)[:800]
     if submit_id:
+        if source_names:
+            JIMENG_PENDING_SOURCE_NAMES[str(submit_id)] = list(source_names)
         raise JimengPendingError(submit_id, kind, jimeng_queue_info(raw), raw)
     raise HTTPException(status_code=502, detail=f"即梦 CLI 未返回可用媒体结果：{status_text}")
 
@@ -6264,6 +6277,7 @@ async def jimeng_prepare_local_media(ref_url, kind="image"):
 
 async def generate_jimeng_provider_image(prompt, size, model, reference_images=None, provider=None):
     refs = [ref for ref in (reference_images or []) if ref.get("url")]
+    source_names = generated_output_source_names(refs)
     temp_paths = []
     try:
         args = []
@@ -6295,7 +6309,7 @@ async def generate_jimeng_provider_image(prompt, size, model, reference_images=N
             if model_version:
                 args.append(f"--model_version={model_version}")
         raw = await run_jimeng_cli(args, timeout=jimeng_poll_seconds() + 120)
-        urls = await jimeng_store_outputs(raw, "image")
+        urls = await jimeng_store_outputs(raw, "image", source_names=source_names)
         return {"type": "url", "value": urls[0]}, raw
     finally:
         for path in temp_paths:
@@ -6312,6 +6326,7 @@ def jimeng_normalize_upscale_resolution(value):
 
 async def generate_jimeng_upscale_image(reference_images, resolution_type):
     refs = [ref for ref in (reference_images or []) if ref.get("url")]
+    source_names = generated_output_source_names(refs)
     if not refs:
         raise HTTPException(status_code=400, detail="请先选择要放大的图片")
     temp_paths = []
@@ -6324,7 +6339,7 @@ async def generate_jimeng_upscale_image(reference_images, resolution_type):
             f"--resolution_type={jimeng_normalize_upscale_resolution(resolution_type)}",
             f"--poll={jimeng_poll_seconds()}",
         ], timeout=jimeng_poll_seconds() + 120)
-        urls = await jimeng_store_outputs(raw, "image")
+        urls = await jimeng_store_outputs(raw, "image", source_names=source_names)
         return {"type": "url", "value": urls[0]}, raw
     finally:
         for path in temp_paths:
@@ -9124,16 +9139,85 @@ async def upload_local_video_to_cloud(ref_url: str, service: str = "auto") -> Di
 async def upload_local_video_to_temp_sh(ref_url: str) -> Dict[str, str]:
     return await upload_local_video_to_cloud(ref_url, "auto")
 
-async def save_ai_image_to_output(image_data, prefix="online_", category="output"):
-    filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
+def strip_export_timestamp_suffix(name: str) -> str:
+    text = str(name or "").strip(" ._-")
+    previous = None
+    while text and text != previous:
+        previous = text
+        text = re.sub(r"[-_ ]+\d{8}-\d{4}(?:\d{2})?(?:[-_][0-9a-f]{6,12})?(?:-\d+)?$", "", text, flags=re.I).strip(" ._-")
+        text = re.sub(r"[-_ ][0-9a-f]{6,12}$", "", text, flags=re.I).strip(" ._-")
+    return text
+
+def generated_output_name_hash(source_names=None, generated_at=None):
+    clean_names = [strip_export_timestamp_suffix(name) for name in (source_names or [])]
+    payload = json.dumps(
+        {"names": clean_names, "generated_at": generated_at},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:6]
+
+def generated_output_source_stem(source_names=None):
+    names = [strip_export_timestamp_suffix(name) for name in (source_names or [])]
+    names = [name for name in names if name]
+    if not names:
+        return "asset"
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return "_".join(names[:2])
+    return f"{names[0]}_{names[1]}_等{len(names)}图"
+
+def generated_output_source_names(reference_images=None):
+    names = []
+    for ref in (reference_images or [])[:20]:
+        if isinstance(ref, dict):
+            raw_name = str(ref.get("name") or "").strip()
+            raw_url = str(ref.get("url") or ref.get("source_url") or ref.get("original_url") or "").strip()
+        else:
+            raw_name = str(getattr(ref, "name", "") or "").strip()
+            raw_url = str(getattr(ref, "url", "") or getattr(ref, "source_url", "") or getattr(ref, "original_url", "") or "").strip()
+        name = raw_name or filename_from_media_url(raw_url, "")
+        if not name:
+            continue
+        safe = sanitize_export_filename(name, "").replace(".", "_") if name.startswith(".") else sanitize_export_filename(name, "")
+        stem = strip_export_timestamp_suffix(os.path.splitext(safe)[0])
+        if stem:
+            names.append(stem)
+    return names
+
+def generated_output_filename(prefix="online_", ext=".png", category="output", source_names=None, generated_at=None):
+    clean_ext = str(ext or ".png").lower()
+    if not clean_ext.startswith("."):
+        clean_ext = "." + clean_ext
+    if source_names:
+        generated_at = time.time() if generated_at is None else generated_at
+        joined = sanitize_export_filename(generated_output_source_stem(source_names), "asset").strip(" ._-") or "asset"
+        stem = joined[:160].rstrip(" ._-") or "asset"
+        stamp = export_filename_timestamp(generated_at)
+        digest = generated_output_name_hash(source_names, generated_at)
+        filename = f"{stem}-{stamp}-{digest}{clean_ext}"
+    else:
+        filename = f"{prefix}{uuid.uuid4().hex[:10]}{clean_ext}"
+    name, suffix = os.path.splitext(filename)
+    candidate = filename
+    index = 2
+    while os.path.exists(output_path_for(candidate, category)):
+        candidate = f"{name}-{index}{suffix}"
+        index += 1
+    return candidate
+
+async def save_ai_image_to_output(image_data, prefix="online_", category="output", source_names=None, generated_at=None):
+    generated_at = time.time() if generated_at is None else generated_at
+    filename = generated_output_filename(prefix, ".png", category, source_names, generated_at)
     path = output_path_for(filename, category)
     if image_data["type"] == "b64":
         mime_type = str(image_data.get("mime_type") or "").lower()
         if "jpeg" in mime_type or "jpg" in mime_type:
-            filename = filename[:-4] + ".jpg"
+            filename = generated_output_filename(prefix, ".jpg", category, source_names, generated_at)
             path = output_path_for(filename, category)
         elif "webp" in mime_type:
-            filename = filename[:-4] + ".webp"
+            filename = generated_output_filename(prefix, ".webp", category, source_names, generated_at)
             path = output_path_for(filename, category)
         with open(path, "wb") as f:
             f.write(base64.b64decode(image_data["value"]))
@@ -9149,10 +9233,10 @@ async def save_ai_image_to_output(image_data, prefix="online_", category="output
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "")
             if "jpeg" in content_type or "jpg" in content_type:
-                filename = filename[:-4] + ".jpg"
+                filename = generated_output_filename(prefix, ".jpg", category, source_names, generated_at)
                 path = output_path_for(filename, category)
             elif "webp" in content_type:
-                filename = filename[:-4] + ".webp"
+                filename = generated_output_filename(prefix, ".webp", category, source_names, generated_at)
                 path = output_path_for(filename, category)
             with open(path, "wb") as f:
                 f.write(response.content)
@@ -12763,8 +12847,9 @@ async def jimeng_query_media(payload: JimengQueryMediaRequest):
     if kind not in ("image", "video", "audio"):
         kind = "image"
     queried = await jimeng_query_result(submit_id, kind)
+    source_names = JIMENG_PENDING_SOURCE_NAMES.get(submit_id, []) if kind == "image" else None
     try:
-        urls = await jimeng_store_outputs(queried, kind, allow_query=False)
+        urls = await jimeng_store_outputs(queried, kind, allow_query=False, source_names=source_names)
         return {"status": "succeeded", "submit_id": submit_id, "kind": kind, "urls": urls}
     except JimengPendingError as exc:
         return {"status": "pending", "submit_id": submit_id, "kind": kind, "queue_info": exc.queue_info, "message": jimeng_pending_payload(exc)["message"]}
@@ -13522,6 +13607,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
     request_size = snap_size_to_multiple(payload.size, 16)
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
+    source_names = generated_output_source_names(image_refs)
     count = max(1, min(8, int(payload.n or 1)))
     operation = str(payload.operation or "").strip().lower()
     if operation == "upscale":
@@ -13545,7 +13631,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         local_urls = []
         local_items = []
         for item in image_items:
-            local_url = await save_ai_image_to_output(item, prefix="online_")
+            local_url = await save_ai_image_to_output(item, prefix="online_", source_names=source_names)
             if local_url:
                 local_urls.append(local_url)
                 local_items.append(image_output_meta(local_url, item))
@@ -13676,10 +13762,11 @@ async def query_image_task(payload: ImageTaskQueryRequest):
     except HTTPException:
         image_items = []
     if image_items:
+        source_names = generated_output_source_names([ref.dict() for ref in payload.reference_images if ref.url])
         local_urls = []
         local_items = []
         for item in image_items:
-            local_url = await save_ai_image_to_output(item, prefix="online_")
+            local_url = await save_ai_image_to_output(item, prefix="online_", source_names=source_names)
             if local_url:
                 local_urls.append(local_url)
                 local_items.append(image_output_meta(local_url, item))
@@ -15539,6 +15626,25 @@ def sanitize_export_filename(name: str, fallback: str) -> str:
     base = re.sub(r'[\\/:*?"<>|]+', "_", base)
     return base or fallback
 
+def export_filename_timestamp(value: Any = None, fallback: str = "") -> str:
+    if fallback and value in (None, ""):
+        return fallback
+    try:
+        if value not in (None, ""):
+            ts = float(value)
+            if ts > 10_000_000_000:
+                ts = ts / 1000
+            return time.strftime("%Y%m%d-%H%M", time.localtime(ts))
+    except (TypeError, ValueError, OSError, OverflowError):
+        pass
+    return fallback or time.strftime("%Y%m%d-%H%M")
+
+def timestamped_export_filename(filename: str, stamp: str = "") -> str:
+    safe = sanitize_export_filename(filename, "asset")
+    name, ext = os.path.splitext(safe)
+    name = strip_export_timestamp_suffix(name) or "asset"
+    generated_at = stamp or time.time()
+    return f"{name}-{stamp or export_filename_timestamp(generated_at)}-{generated_output_name_hash([name], generated_at)}{ext}"
 def canvas_workflow_collect_resource_refs(value, found=None):
     if found is None:
         found = []
@@ -16607,6 +16713,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
 
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
+    source_names = generated_output_source_names(image_refs)
     user_message = {
         "id": uuid.uuid4().hex,
         "role": "user",
@@ -16627,7 +16734,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
         image_size = chat_prompt_size_override(payload.message, payload.size) or payload.size
         try:
             image_data, raw = await generate_ai_image(payload.message, image_size, payload.quality, model, image_refs, provider["id"])
-            local_url = await save_ai_image_to_output(image_data, prefix="chat_")
+            local_url = await save_ai_image_to_output(image_data, prefix="chat_", source_names=source_names)
         except httpx.HTTPStatusError as exc:
             text = exc.response.text or ""
             detail = friendly_image_error_detail(text, image_size, model) or f"上游生图接口错误：{text[:300]}"
@@ -16760,6 +16867,7 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
         action = "generate_image"
 
     if action in {"generate_image", "edit_image"}:
+        source_names = generated_output_source_names(tool_refs)
         image_provider = pick_chat_image_provider(payload.image_provider or payload.provider, payload.provider)
         default_model = (image_provider.get("image_models") or [IMAGE_MODEL])[0]
         model = selected_model(payload.image_model or default_model, default_model)
@@ -16773,7 +16881,7 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
         try:
             for item_prompt in prompts:
                 image_data, raw = await generate_ai_image(item_prompt, image_size, payload.quality, model, tool_refs, image_provider["id"])
-                local_urls.append(await save_ai_image_to_output(image_data, prefix="chat_"))
+                local_urls.append(await save_ai_image_to_output(image_data, prefix="chat_", source_names=source_names))
                 raw_items.append(raw)
         except httpx.HTTPStatusError as exc:
             text = exc.response.text or ""
