@@ -6660,7 +6660,7 @@ function extensionForMediaItem(item, fallback='.png'){
     if(kind === 'text') return '.txt';
     return fallback;
 }
-function downloadNameForMediaItem(item, fallbackPrefix='canvas-output'){
+function baseDownloadNameForMediaItem(item, fallbackPrefix='canvas-output'){
     const localName = fileNameFromUrl(item?.url || '');
     const preferred = localName || item?.name || '';
     const ext = extensionForMediaItem(item);
@@ -6668,6 +6668,65 @@ function downloadNameForMediaItem(item, fallbackPrefix='canvas-output'){
     let name = safeExportFileName(preferred || randomName, randomName);
     if(!/\.[a-z0-9]{2,8}$/i.test(name)) name += ext;
     return name;
+}
+function exportTimestampForMediaItem(item){
+    const raw = item?.generated_at || item?.created_at || item?.createdAt || Date.now();
+    const n = Number(raw);
+    const date = Number.isFinite(n) ? new Date(n > 10000000000 ? n : n * 1000) : new Date();
+    const valid = Number.isFinite(date.getTime()) ? date : new Date();
+    const pad = value => String(value).padStart(2, '0');
+    return `${valid.getFullYear()}${pad(valid.getMonth() + 1)}${pad(valid.getDate())}-${pad(valid.getHours())}${pad(valid.getMinutes())}`;
+}
+function stripExportTimestampSuffix(name){
+    let text = String(name || '').trim().replace(/[ ._-]+$/, '');
+    let previous = null;
+    while(text && text !== previous){
+        previous = text;
+        text = text.replace(/[-_ ]+\d{8}-\d{4}(?:\d{2})?(?:[-_][0-9a-f]{6,12})?(?:-\d+)?$/i, '').replace(/[ ._-]+$/, '');
+        text = text.replace(/[-_ ][0-9a-f]{6,12}$/i, '').replace(/[ ._-]+$/, '');
+    }
+    return text;
+}
+function exportNameHash(parts, generatedAt=Date.now()){
+    const input = JSON.stringify({names:(parts || []).map(stripExportTimestampSuffix), generated_at:generatedAt});
+    let hash = 2166136261;
+    for(let i = 0; i < input.length; i++){
+        hash ^= input.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0').slice(0, 6);
+}
+function exportStemForNames(names, fallbackPrefix='asset'){
+    const clean = (names || []).map(stripExportTimestampSuffix).filter(Boolean);
+    if(clean.length === 1) return clean[0];
+    if(clean.length === 2) return `${clean[0]}_${clean[1]}`;
+    if(clean.length > 2) return `${clean[0]}_${clean[1]}_等${clean.length}图`;
+    return fallbackPrefix;
+}
+function downloadNameForMediaItem(item, fallbackPrefix='canvas-output'){
+    const name = baseDownloadNameForMediaItem(item, fallbackPrefix);
+    const generatedAt = Date.now();
+    const stamp = exportTimestampForMediaItem({created_at:generatedAt});
+    const dot = name.lastIndexOf('.');
+    const rawStem = dot > 0 ? name.slice(0, dot) : name;
+    const stem = stripExportTimestampSuffix(rawStem) || fallbackPrefix;
+    const digest = exportNameHash([stem], generatedAt);
+    if(dot > 0){
+        return `${stem}-${stamp}-${digest}${name.slice(dot)}`;
+    }
+    return `${stem}-${stamp}-${digest}`;
+}
+function mergedDownloadNameForMediaItems(items, fallbackPrefix='merged'){
+    const parts = (items || [])
+        .map((item, index) => {
+            const preferred = String(item?.name || '').trim() || fileNameFromUrl(item?.url || '') || `${fallbackPrefix}-${index + 1}`;
+            const stem = safeExportFileName(preferred, `${fallbackPrefix}-${index + 1}`).replace(/\.[^.]+$/, '').trim();
+            return stripExportTimestampSuffix(stem);
+        })
+        .filter(Boolean);
+    const generatedAt = Date.now();
+    const joined = safeExportFileName(exportStemForNames(parts, fallbackPrefix), fallbackPrefix).slice(0, 160).replace(/[ ._-]+$/, '') || fallbackPrefix;
+    return `${joined}-${exportTimestampForMediaItem({created_at:generatedAt})}-${exportNameHash(parts, generatedAt)}.png`;
 }
 function downloadPreviewImage(){
     const node = nodes.find(n => n.id === previewNavState.nodeId);
@@ -11355,8 +11414,8 @@ async function applyImageGridJoin(){
         drawImageCover(ctx, img, Math.round(item.x * outputScale), Math.round(item.y * outputScale), Math.round(item.w * outputScale), Math.round(item.h * outputScale));
     }
     const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
-    const base = safeExportFileName((downloadNameForMediaItem(image || items[0]?.item, 'image') || 'image').replace(/\.[^.]+$/, ''), 'image');
-    const file = blob ? await uploadCroppedBlob(blob, `${base}_join.png`) : null;
+    const mergedName = mergedDownloadNameForMediaItems(items.map(entry => entry.item), 'grid-join');
+    const file = blob ? await uploadCroppedBlob(blob, mergedName) : null;
     if(file){
         const rect = nodeRect(node);
         const outputNode = createImageNodeAt({x:rect.x + rect.width + 240, y:rect.y + rect.height / 2}, [{
