@@ -9139,6 +9139,35 @@ async def upload_local_video_to_cloud(ref_url: str, service: str = "auto") -> Di
 async def upload_local_video_to_temp_sh(ref_url: str) -> Dict[str, str]:
     return await upload_local_video_to_cloud(ref_url, "auto")
 
+def strip_export_timestamp_suffix(name: str) -> str:
+    text = str(name or "").strip(" ._-")
+    previous = None
+    while text and text != previous:
+        previous = text
+        text = re.sub(r"[-_ ]+\d{8}-\d{4}(?:\d{2})?(?:[-_][0-9a-f]{6,12})?(?:-\d+)?$", "", text, flags=re.I).strip(" ._-")
+        text = re.sub(r"[-_ ][0-9a-f]{6,12}$", "", text, flags=re.I).strip(" ._-")
+    return text
+
+def generated_output_name_hash(source_names=None, generated_at=None):
+    clean_names = [strip_export_timestamp_suffix(name) for name in (source_names or [])]
+    payload = json.dumps(
+        {"names": clean_names, "generated_at": generated_at},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:6]
+
+def generated_output_source_stem(source_names=None):
+    names = [strip_export_timestamp_suffix(name) for name in (source_names or [])]
+    names = [name for name in names if name]
+    if not names:
+        return "asset"
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return "_".join(names[:2])
+    return f"{names[0]}_{names[1]}_等{len(names)}图"
+
 def generated_output_source_names(reference_images=None):
     names = []
     for ref in (reference_images or [])[:20]:
@@ -9152,7 +9181,7 @@ def generated_output_source_names(reference_images=None):
         if not name:
             continue
         safe = sanitize_export_filename(name, "").replace(".", "_") if name.startswith(".") else sanitize_export_filename(name, "")
-        stem = os.path.splitext(safe)[0].strip(" ._-")
+        stem = strip_export_timestamp_suffix(os.path.splitext(safe)[0])
         if stem:
             names.append(stem)
     return names
@@ -9162,9 +9191,12 @@ def generated_output_filename(prefix="online_", ext=".png", category="output", s
     if not clean_ext.startswith("."):
         clean_ext = "." + clean_ext
     if source_names:
-        joined = sanitize_export_filename("_".join(source_names), "asset").strip(" ._-") or "asset"
-        stem = joined[:180].rstrip(" ._-") or "asset"
-        filename = f"{stem}-{export_filename_timestamp(generated_at)}{clean_ext}"
+        generated_at = time.time() if generated_at is None else generated_at
+        joined = sanitize_export_filename(generated_output_source_stem(source_names), "asset").strip(" ._-") or "asset"
+        stem = joined[:160].rstrip(" ._-") or "asset"
+        stamp = export_filename_timestamp(generated_at)
+        digest = generated_output_name_hash(source_names, generated_at)
+        filename = f"{stem}-{stamp}-{digest}{clean_ext}"
     else:
         filename = f"{prefix}{uuid.uuid4().hex[:10]}{clean_ext}"
     name, suffix = os.path.splitext(filename)
@@ -9176,6 +9208,7 @@ def generated_output_filename(prefix="online_", ext=".png", category="output", s
     return candidate
 
 async def save_ai_image_to_output(image_data, prefix="online_", category="output", source_names=None, generated_at=None):
+    generated_at = time.time() if generated_at is None else generated_at
     filename = generated_output_filename(prefix, ".png", category, source_names, generated_at)
     path = output_path_for(filename, category)
     if image_data["type"] == "b64":
@@ -15593,6 +15626,25 @@ def sanitize_export_filename(name: str, fallback: str) -> str:
     base = re.sub(r'[\\/:*?"<>|]+', "_", base)
     return base or fallback
 
+def export_filename_timestamp(value: Any = None, fallback: str = "") -> str:
+    if fallback and value in (None, ""):
+        return fallback
+    try:
+        if value not in (None, ""):
+            ts = float(value)
+            if ts > 10_000_000_000:
+                ts = ts / 1000
+            return time.strftime("%Y%m%d-%H%M", time.localtime(ts))
+    except (TypeError, ValueError, OSError, OverflowError):
+        pass
+    return fallback or time.strftime("%Y%m%d-%H%M")
+
+def timestamped_export_filename(filename: str, stamp: str = "") -> str:
+    safe = sanitize_export_filename(filename, "asset")
+    name, ext = os.path.splitext(safe)
+    name = strip_export_timestamp_suffix(name) or "asset"
+    generated_at = stamp or time.time()
+    return f"{name}-{stamp or export_filename_timestamp(generated_at)}-{generated_output_name_hash([name], generated_at)}{ext}"
 def canvas_workflow_collect_resource_refs(value, found=None):
     if found is None:
         found = []
