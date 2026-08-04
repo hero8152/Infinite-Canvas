@@ -1,0 +1,190 @@
+name: Release Installers
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  UPDATE_BASE_URL: https://github.com/${{ github.repository }}/releases/latest/download
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Install Inno Setup Chinese language
+        shell: pwsh
+        run: |
+          $languagesDir = "C:\Program Files (x86)\Inno Setup 6\Languages"
+          $languageFile = Join-Path $languagesDir "ChineseSimplified.isl"
+          New-Item -ItemType Directory -Force -Path $languagesDir | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl" `
+            -OutFile $languageFile
+          if (-not (Test-Path -LiteralPath $languageFile)) {
+            throw "Failed to install Inno Setup ChineseSimplified.isl"
+          }
+
+      - name: Configure update manifest
+        shell: pwsh
+        run: |
+          @'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("packaging/windows/payload/manifest.json")
+          manifest = json.loads(path.read_text(encoding="utf-8"))
+          manifest["update_base_url"] = os.environ["UPDATE_BASE_URL"].rstrip("/")
+          manifest["version_endpoint"] = "windows-VERSION"
+          manifest["manifest_endpoint"] = "windows-manifest.json"
+          manifest["payload_endpoint"] = "windows-app-base.zip"
+          path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          '@ | python -
+
+      - name: Build Windows update payload
+        shell: pwsh
+        run: python packaging/windows/publish_release.py --update-base-url "$env:UPDATE_BASE_URL"
+
+      - name: Build Windows installer inputs
+        shell: pwsh
+        run: |
+          python packaging/windows/payload/build_payload.py
+          python packaging/windows/build_launcher.py
+          python packaging/windows/build_portable.py
+
+      - name: Compile Windows installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath VERSION | Select-Object -First 1).Trim()
+          if (-not $version) {
+            throw "VERSION must contain a version number"
+          }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" packaging\windows\installer\infinite-canvas.iss
+
+      - name: Stage Windows release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist\release-assets | Out-Null
+          Copy-Item -LiteralPath "dist\windows\Infinite Canvas 安装程序.exe" -Destination "dist\release-assets\Infinite-Canvas-Windows-Setup.exe"
+          Copy-Item -LiteralPath "dist\windows\Infinite-Canvas-Windows-Portable.zip" -Destination "dist\release-assets\Infinite-Canvas-Windows-Portable.zip"
+          Copy-Item -LiteralPath "dist\windows-release\windows-VERSION" -Destination "dist\release-assets\windows-VERSION"
+          Copy-Item -LiteralPath "dist\windows-release\windows-manifest.json" -Destination "dist\release-assets\windows-manifest.json"
+          Copy-Item -LiteralPath "dist\windows-release\windows-app-base.zip" -Destination "dist\release-assets\windows-app-base.zip"
+
+      - name: Upload Windows release assets
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$env:TAG_NAME" `
+            "dist\release-assets\Infinite-Canvas-Windows-Setup.exe" `
+            "dist\release-assets\Infinite-Canvas-Windows-Portable.zip" `
+            "dist\release-assets\windows-VERSION" `
+            "dist\release-assets\windows-manifest.json" `
+            "dist\release-assets\windows-app-base.zip" `
+            --clobber
+
+      - name: Upload Windows workflow artifacts
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-assets
+          path: dist/release-assets/*
+
+  macos:
+    name: macOS installer
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python build dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt PyInstaller
+
+      - name: Configure update manifest
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("packaging/macos/payload/manifest.json")
+          manifest = json.loads(path.read_text(encoding="utf-8"))
+          manifest["update_base_url"] = os.environ["UPDATE_BASE_URL"].rstrip("/")
+          manifest["version_endpoint"] = "macos-VERSION"
+          manifest["manifest_endpoint"] = "macos-manifest.json"
+          manifest["payload_endpoint"] = "macos-app-base.zip"
+          path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Build macOS update payload
+        run: python3 packaging/macos/publish_release.py --update-base-url "$UPDATE_BASE_URL"
+
+      - name: Build macOS DMG
+        run: |
+          python3 packaging/macos/payload/build_payload.py
+          python3 packaging/macos/build_dmg.py
+          python3 packaging/macos/build_portable.py
+
+      - name: Stage macOS release assets
+        run: |
+          mkdir -p dist/release-assets
+          dmg_path="$(find dist/macos -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$dmg_path"
+          cp "$dmg_path" dist/release-assets/Infinite-Canvas-macOS.dmg
+          cp dist/macos/Infinite-Canvas-macOS-Portable.zip dist/release-assets/Infinite-Canvas-macOS-Portable.zip
+          cp dist/macos-release/macos-VERSION dist/release-assets/macos-VERSION
+          cp dist/macos-release/macos-manifest.json dist/release-assets/macos-manifest.json
+          cp dist/macos-release/macos-app-base.zip dist/release-assets/macos-app-base.zip
+
+      - name: Upload macOS release assets
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG_NAME" \
+            dist/release-assets/Infinite-Canvas-macOS.dmg \
+            dist/release-assets/Infinite-Canvas-macOS-Portable.zip \
+            dist/release-assets/macos-VERSION \
+            dist/release-assets/macos-manifest.json \
+            dist/release-assets/macos-app-base.zip \
+            --clobber
+
+      - name: Upload macOS workflow artifacts
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-assets
+          path: dist/release-assets/*

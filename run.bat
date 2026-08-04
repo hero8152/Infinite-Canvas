@@ -10,7 +10,7 @@ echo Press Ctrl+C to stop.
 echo.
 
 start /b cmd /c "timeout /t 3 /nobreak >nul && start http://127.0.0.1:3000/"
-"%PYEXE%" main.py
+"%PYEXE%" -c "import os, runpy, sys; sys.path.insert(0, os.getcwd()); runpy.run_path('main.py', run_name='__main__')"
 
 echo.
 echo Server stopped.

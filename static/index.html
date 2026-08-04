@@ -1798,6 +1798,11 @@
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION' };
         let updateConnectivityResult = null;
         let projectUpdateRunning = false;
+        let updateCheckInFlight = false;
+        let launcherUpdateRecheckTimer = 0;
+        let launcherUpdateRecheckCount = 0;
+        const LAUNCHER_UPDATE_RECHECK_LIMIT = 3;
+        const LAUNCHER_UPDATE_RECHECK_INTERVAL_MS = 1200;
         let projectUpdateAbort = null;  // 当前更新请求的 AbortController，便于用户中途取消
         let updateSource = localStorage.getItem('studio_update_source') || 'github';
         let projectUpdateNotes = null;
@@ -2338,6 +2343,16 @@
         }
 
         function updateConnectivityTargets() {
+            if(appInfo.managed_by_launcher) {
+                const base = String(appInfo.update_base_url || '').replace(/\/$/, '');
+                const join = (endpoint) => base ? `${base}/${String(endpoint || '').replace(/^\//, '')}` : String(endpoint || '');
+                return [
+                    { name:'打包版本文件', url:join(appInfo.version_endpoint || 'windows-VERSION'), source:'launcher', required:true },
+                    { name:'打包清单文件', url:join(appInfo.manifest_endpoint || 'windows-manifest.json'), source:'launcher', required:true },
+                    { name:'打包更新包', url:join(appInfo.payload_endpoint || 'windows-app-base.zip'), source:'launcher', required:true },
+                    { name:'Google 连通性', url:'https://www.google.com/generate_204', source:'reference' },
+                ];
+            }
             const sources = appInfo.sources || {};
             const github = sources.github || {};
             const ms = sources.modelscope || {};
@@ -2500,6 +2515,10 @@
         });
 
         async function runProjectUpdate() {
+            if(appInfo.managed_by_launcher) {
+                await confirmLauncherUpdate();
+                return;
+            }
             openProjectUpdateModal();
         }
 
@@ -2638,6 +2657,7 @@
             const confirmText = document.getElementById('project-update-confirm-text');
             const testBtn = document.getElementById('connectivity-test-btn');
             const oldText = text?.textContent || '';
+            let keepDisabledAfterSuccess = false;
             projectUpdateRunning = true;
             if(btn) btn.disabled = true;
             if(confirmBtn) confirmBtn.disabled = true;
@@ -2680,7 +2700,10 @@
                 document.getElementById('github-entry-btn')?.classList.remove('update-available');
                 btn?.classList.remove('show');
                 setProjectVersionBadge(data.version || document.getElementById('github-entry-btn')?.dataset.remoteVersion || appInfo.version);
-                if(restarting) waitForBackendAndReload();
+                if(restarting) {
+                    keepDisabledAfterSuccess = true;
+                    waitForBackendAndReload();
+                }
             } catch(e) {
                 const msg = (e && e.name === 'AbortError')
                     ? (isEn ? 'Update timed out. Switch source or check your network, then retry.' : '更新超时。请切换下载源或检查网络后重试。')
@@ -2689,6 +2712,7 @@
             } finally {
                 clearTimeout(killer);
                 projectUpdateRunning = false;
+                if(keepDisabledAfterSuccess) return;
                 if(btn) btn.disabled = false;
                 if(confirmBtn) confirmBtn.disabled = false;
                 if(testBtn) testBtn.disabled = false;
@@ -2697,6 +2721,56 @@
                 refreshUpdateButtonText();
             }
         }
+        async function runLauncherUpdate() {
+            openProjectUpdateModal();
+        }
+
+        async function confirmLauncherUpdate() {
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            const btn = document.getElementById('update-now-btn');
+            const text = document.getElementById('update-now-text');
+            const confirmBtn = document.getElementById('project-update-confirm-btn');
+            const testBtn = document.getElementById('connectivity-test-btn');
+            let keepDisabledAfterSuccess = false;
+            if(btn) btn.disabled = true;
+            if(confirmBtn) confirmBtn.disabled = true;
+            if(testBtn) testBtn.disabled = true;
+            if(text) text.textContent = isEn ? 'Updating...' : '正在更新...';
+            try {
+                const res = await fetch('/api/launcher/apply-update', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({ auto_restart:true, restart_delay:3 })
+                });
+                const data = await res.json().catch(() => ({}));
+                if(!res.ok || data.ok === false) throw new Error(data.detail || (isEn ? 'Update failed' : '更新失败'));
+                if(data.updated) {
+                    setUpdateSummary(
+                        'ok',
+                        isEn ? 'Update installed' : '更新已安装',
+                        data.restart_scheduled
+                            ? (isEn ? 'The launcher is restarting.' : '启动器正在重启。')
+                            : (isEn ? 'Restart the launcher to finish.' : '请重启启动器完成更新。')
+                    );
+                    document.getElementById('github-entry-btn')?.classList.remove('update-available');
+                    if(data.restart_scheduled) {
+                        keepDisabledAfterSuccess = true;
+                        waitForBackendAndReload();
+                    }
+                } else {
+                    setUpdateSummary('ok', isEn ? 'Already up to date' : '已是最新版本', '');
+                }
+            } catch(e) {
+                setUpdateSummary('fail', isEn ? 'Update failed' : '更新失败', describeNetworkError(e, isEn));
+            } finally {
+                if(keepDisabledAfterSuccess) return;
+                if(btn) btn.disabled = false;
+                if(confirmBtn) confirmBtn.disabled = false;
+                if(testBtn) testBtn.disabled = false;
+                refreshUpdateButtonText();
+            }
+        }
+
         async function waitForBackendAndReload() {
             const deadline = Date.now() + 90 * 1000;
             await new Promise(r => setTimeout(r, 4000));

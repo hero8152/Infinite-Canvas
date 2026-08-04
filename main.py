@@ -18,6 +18,7 @@ import shutil
 import glob
 import asyncio
 import logging
+import platform
 import requests
 import zipfile
 import mimetypes
@@ -25,6 +26,7 @@ import tempfile
 import math
 import shlex
 import functools
+import textwrap
 import html
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple
@@ -32,6 +34,7 @@ from threading import Lock, Thread
 import httpx
 from PIL import Image, ImageOps
 from io import BytesIO
+from app_runtime import DEFAULT_APP_HOST, DEFAULT_APP_PORT, resolve_app_port, resolve_runtime_paths
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
@@ -216,31 +219,36 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
 
 CLIENT_ID = str(uuid.uuid4())
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKFLOW_DIR = os.path.join(BASE_DIR, "workflows")
-WORKFLOW_PATH = os.path.join(WORKFLOW_DIR, "Z-Image.json")
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+APP_DATA_ROOT = os.getenv("INFINITE_CANVAS_DATA_ROOT", "").strip()
+LAUNCHER_MANAGED = os.getenv("INFINITE_CANVAS_MANAGED_BY_LAUNCHER", "").strip() == "1"
+APP_PORT = resolve_app_port(os.getenv("INFINITE_CANVAS_PORT"), DEFAULT_APP_PORT)
+APP_HOST = os.getenv("INFINITE_CANVAS_HOST", DEFAULT_APP_HOST).strip() or DEFAULT_APP_HOST
+RUNTIME_PATHS = resolve_runtime_paths(BASE_DIR, APP_DATA_ROOT or None)
+WORKFLOW_DIR = RUNTIME_PATHS["WORKFLOW_DIR"]
+WORKFLOW_PATH = RUNTIME_PATHS["WORKFLOW_PATH"]
+STATIC_DIR = RUNTIME_PATHS["STATIC_DIR"]
 STATIC_RUNNINGHUB_DIR = os.path.join(STATIC_DIR, "runninghub")
 STATIC_RUNNINGHUB_THUMBNAIL_DIR = os.path.join(STATIC_RUNNINGHUB_DIR, "thumbnails")
 STATIC_RUNNINGHUB_API_PROVIDERS_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "api_providers.json")
 STATIC_RUNNINGHUB_MODEL_REGISTRY_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "models_registry.json")
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-OUTPUT_INPUT_DIR = os.path.join(ASSETS_DIR, "input")
-OUTPUT_OUTPUT_DIR = os.path.join(ASSETS_DIR, "output")
-ASSET_LIBRARY_DIR = os.path.join(ASSETS_DIR, "library")
-LOCAL_UPLOAD_DIR = os.path.join(ASSETS_DIR, "uploads")
-HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
-API_ENV_FILE = os.path.join(BASE_DIR, "API", ".env")
-DATA_DIR = os.path.join(BASE_DIR, "data")
-CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
-CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
+OUTPUT_DIR = RUNTIME_PATHS["OUTPUT_DIR"]
+ASSETS_DIR = RUNTIME_PATHS["ASSETS_DIR"]
+OUTPUT_INPUT_DIR = RUNTIME_PATHS["OUTPUT_INPUT_DIR"]
+OUTPUT_OUTPUT_DIR = RUNTIME_PATHS["OUTPUT_OUTPUT_DIR"]
+ASSET_LIBRARY_DIR = RUNTIME_PATHS["ASSET_LIBRARY_DIR"]
+LOCAL_UPLOAD_DIR = RUNTIME_PATHS["LOCAL_UPLOAD_DIR"]
+HISTORY_FILE = RUNTIME_PATHS["HISTORY_FILE"]
+API_ENV_FILE = RUNTIME_PATHS["API_ENV_FILE"]
+DATA_DIR = RUNTIME_PATHS["DATA_DIR"]
+CONVERSATION_DIR = RUNTIME_PATHS["CONVERSATION_DIR"]
+CANVAS_DIR = RUNTIME_PATHS["CANVAS_DIR"]
 MEDIA_PREVIEW_DIR = os.path.join(DATA_DIR, "media_previews")
-ASSET_LIBRARY_PATH = os.path.join(DATA_DIR, "asset_library.json")
+ASSET_LIBRARY_PATH = RUNTIME_PATHS["ASSET_LIBRARY_PATH"]
 PROMPT_LIBRARY_PATH = os.path.join(DATA_DIR, "prompt_libraries.json")
-API_PROVIDERS_FILE = os.path.join(DATA_DIR, "api_providers.json")
-RUNNINGHUB_WORKFLOW_STORE_FILE = os.path.join(DATA_DIR, "runninghub_workflows.json")
-SHARED_FOLDERS_FILE = os.path.join(DATA_DIR, "shared_folders.json")
-GLOBAL_CONFIG_FILE = os.path.join(BASE_DIR, "global_config.json")
+API_PROVIDERS_FILE = RUNTIME_PATHS["API_PROVIDERS_FILE"]
+RUNNINGHUB_WORKFLOW_STORE_FILE = RUNTIME_PATHS["RUNNINGHUB_WORKFLOW_STORE_FILE"]
+SHARED_FOLDERS_FILE = RUNTIME_PATHS["SHARED_FOLDERS_FILE"]
+GLOBAL_CONFIG_FILE = RUNTIME_PATHS["GLOBAL_CONFIG_FILE"]
 CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
 LOCAL_IMAGE_IMPORT_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -306,17 +314,19 @@ LOAD_LOCK = Lock()
 RUNNINGHUB_WORKFLOW_LOCK = Lock()
 NEXT_TASK_ID = 1
 UPDATE_LOCK = Lock()
-JIMENG_LOGIN_SESSION = {
-    "proc": None,
-    "stdout": "",
-    "stderr": "",
-    "started_at": 0.0,
-}
+JIMENG_LOGIN_LOCK = Lock()
+JIMENG_LOGIN_SESSIONS = {}
+JIMENG_INSTALL_LOCK = Lock()
+JIMENG_INSTALL_SESSIONS = {}
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
 SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses", "tudou-async"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
+JIMENG_INSTALL_SCRIPT_URL = "https://jimeng.jianying.com/cli"
+JIMENG_DOWNLOAD_BASE = "https://lf3-static.bytednsdoc.com/obj/eden-cn/psj_hupthlyk/ljhwZthlaukjlkulzlp/dreamina_cli_beta"
+JIMENG_SKILL_URL = f"{JIMENG_DOWNLOAD_BASE}/SKILL.md"
+JIMENG_VERSION_URL = "https://lf3-static.bytednsdoc.com/obj/eden-cn/psj_hupthlyk/ljhwZthlaukjlkulzlp/version.json"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
 RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/models_registry.json"
 RUNNINGHUB_LLM_BASE_URL = "https://llm.runninghub.cn/v1"
@@ -1600,8 +1610,47 @@ def fetch_update_notes_with_fallback(preferred_source: str, version: str, timeou
             }
     return best_notes, notes_by_source
 
-def versioned_static_html(html: str) -> str:
+STATIC_ASSET_VERSION_CACHE: Dict[str, str] = {"key": "", "value": ""}
+
+def static_asset_fingerprint_bytes(path: str) -> bytes:
+    with open(path, "rb") as f:
+        data = f.read()
+    if path.lower().endswith(".html"):
+        return re.sub(rb'([?&]v=)[^"\'`\s<>)]*', rb'\1', data)
+    return data
+
+def static_asset_version() -> str:
     version = current_app_version()
+    watched_paths = [
+        os.path.join(BASE_DIR, "VERSION"),
+        os.path.join(STATIC_DIR, "index.html"),
+        os.path.join(STATIC_DIR, "js", "i18n.js"),
+    ]
+    parts = [version]
+    for path in watched_paths:
+        try:
+            stat = os.stat(path)
+            parts.append(f"{path}:{stat.st_mtime_ns}:{stat.st_size}")
+        except OSError:
+            parts.append(f"{path}:missing")
+    cache_key = "|".join(parts)
+    if STATIC_ASSET_VERSION_CACHE.get("key") == cache_key:
+        return STATIC_ASSET_VERSION_CACHE.get("value") or version
+
+    digest = hashlib.sha256()
+    digest.update(version.encode("utf-8", errors="replace"))
+    for path in watched_paths:
+        if path.endswith(".js") or path.endswith(".html"):
+            try:
+                digest.update(static_asset_fingerprint_bytes(path))
+            except OSError:
+                pass
+    value = f"{version}.{digest.hexdigest()[:10]}" if version else digest.hexdigest()[:12]
+    STATIC_ASSET_VERSION_CACHE.update({"key": cache_key, "value": value})
+    return value
+
+def versioned_static_html(html: str) -> str:
+    version = static_asset_version()
     if not version:
         return html
     safe_version = urllib.parse.quote(version, safe="._-")
@@ -1848,8 +1897,56 @@ def update_connectivity_probe(name: str):
             return item
     raise HTTPException(status_code=404, detail="未知的连通性检测目标")
 
+def join_update_url(base_url: str, endpoint: str) -> str:
+    return str(base_url or "").rstrip("/") + "/" + str(endpoint or "").lstrip("/")
+
+def launcher_update_endpoint_defaults() -> Dict[str, str]:
+    prefix = "macos" if sys.platform == "darwin" else "windows"
+    return {
+        "version_endpoint": f"{prefix}-VERSION",
+        "manifest_endpoint": f"{prefix}-manifest.json",
+        "payload_endpoint": f"{prefix}-app-base.zip",
+        "update_base_url": os.getenv("INFINITE_CANVAS_UPDATE_BASE_URL", "").strip(),
+    }
+
+def launcher_update_config() -> Dict[str, str]:
+    defaults = launcher_update_endpoint_defaults()
+    return {
+        "version_endpoint": os.getenv("INFINITE_CANVAS_VERSION_ENDPOINT", defaults["version_endpoint"]).strip() or defaults["version_endpoint"],
+        "manifest_endpoint": os.getenv("INFINITE_CANVAS_MANIFEST_ENDPOINT", defaults["manifest_endpoint"]).strip() or defaults["manifest_endpoint"],
+        "payload_endpoint": os.getenv("INFINITE_CANVAS_PAYLOAD_ENDPOINT", defaults["payload_endpoint"]).strip() or defaults["payload_endpoint"],
+        "update_base_url": defaults["update_base_url"],
+    }
+
+def launcher_update_connectivity_targets(config: Optional[Dict[str, str]] = None) -> List[Tuple[str, str, str, bool]]:
+    config = config or launcher_update_config()
+    base_url = config.get("update_base_url", "")
+    return [
+        ("打包版本文件", join_update_url(base_url, config.get("version_endpoint", "")), "发布下载入口", True),
+        ("打包清单文件", join_update_url(base_url, config.get("manifest_endpoint", "")), "发布下载入口", True),
+        ("打包更新包", join_update_url(base_url, config.get("payload_endpoint", "")), "发布下载入口", True),
+    ]
+
 @app.get("/api/update-connectivity")
 def update_connectivity():
+    if LAUNCHER_MANAGED:
+        config = launcher_update_config()
+        mode = os.getenv("INFINITE_CANVAS_LAUNCHER_MODE", "")
+        targets = launcher_update_connectivity_targets()
+        results = []
+        for name, url, source, required in targets:
+            item = connectivity_probe(name, url)
+            item["source"] = source
+            item["required"] = required
+            results.append(item)
+        return {
+            **config,
+            "ok": all(item["ok"] for item in results if item.get("required")),
+            "mode": mode,
+            "results": results,
+            "required": [item["name"] for item in results if item.get("required")],
+            "optional": [],
+        }
     targets = update_connectivity_targets()
     results = []
     for name, url, source, required in targets:
@@ -1871,6 +1968,187 @@ def update_connectivity():
         "required": sources["github"]["required"],
         "optional": ["GitHub 主页", "ModelScope 空间页面", "ModelScope 主页", "Google 连通性"],
     }
+
+@app.get("/api/launcher/status")
+def launcher_status_api():
+    if not LAUNCHER_MANAGED:
+        raise HTTPException(status_code=404, detail="launcher unavailable")
+    return {
+        **launcher_update_config(),
+        "managed_by_launcher": True,
+        "mode": os.getenv("INFINITE_CANVAS_LAUNCHER_MODE", ""),
+        "storage_root": APP_DATA_ROOT,
+        "port": APP_PORT,
+    }
+
+def launcher_executable_path() -> str:
+    return os.getenv("INFINITE_CANVAS_LAUNCHER_EXE", "").strip()
+
+def call_launcher_command(*args: str) -> Dict[str, Any]:
+    launcher_exe = launcher_executable_path()
+    if not launcher_exe or not os.path.exists(launcher_exe):
+        raise HTTPException(status_code=500, detail="launcher executable missing")
+    try:
+        result = subprocess.run(
+            [launcher_exe, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"launcher invoke failed: {exc}") from exc
+    stdout = (result.stdout or "").strip()
+    try:
+        payload = json.loads(stdout.splitlines()[-1]) if stdout else {}
+    except Exception:
+        payload = {"raw": stdout}
+    if result.returncode != 0:
+        detail = payload.get("detail") if isinstance(payload, dict) else ""
+        raise HTTPException(status_code=500, detail=detail or "launcher command failed")
+    return payload if isinstance(payload, dict) else {"raw": stdout}
+
+def hidden_windows_restart_flags() -> int:
+    return (
+        getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
+
+def vbs_string(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+def write_and_launch_vbs(script_path: str, script: str) -> None:
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write(script)
+    subprocess.Popen(
+        ["wscript.exe", "//B", "//Nologo", script_path],
+        creationflags=hidden_windows_restart_flags(),
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+def macos_app_bundle_from_launcher(launcher_exe: str) -> str:
+    macos_dir = os.path.dirname(os.path.abspath(launcher_exe or ""))
+    contents_dir = os.path.dirname(macos_dir)
+    app_bundle = os.path.dirname(contents_dir)
+    if (
+        os.path.basename(macos_dir) == "MacOS"
+        and os.path.basename(contents_dir) == "Contents"
+        and app_bundle.endswith(".app")
+        and os.path.isdir(app_bundle)
+    ):
+        return app_bundle
+    return ""
+
+def launcher_restart_storage_args() -> str:
+    if sys.platform != "darwin" or not APP_DATA_ROOT:
+        return ""
+    return " --storage-root " + shlex.quote(APP_DATA_ROOT)
+
+def schedule_launcher_restart(delay_seconds: int = 3) -> bool:
+    launcher_exe = launcher_executable_path()
+    if not launcher_exe or not os.path.exists(launcher_exe):
+        return False
+    delay = max(1, int(delay_seconds or 3))
+    pid = os.getpid()
+    restart_dir = DATA_DIR or BASE_DIR
+    os.makedirs(restart_dir, exist_ok=True)
+    try:
+        if os.name == "nt":
+            script_path = os.path.join(restart_dir, "_launcher_restart.vbs")
+            log_path = os.path.join(restart_dir, "_launcher_restart.log")
+            launcher_dir = os.path.dirname(launcher_exe)
+            script = textwrap.dedent(
+                f"""
+                Set shell = CreateObject("WScript.Shell")
+                Set fso = CreateObject("Scripting.FileSystemObject")
+                scriptPath = {vbs_string(script_path)}
+                logPath = {vbs_string(log_path)}
+                launcher = {vbs_string(launcher_exe)}
+                launcherDir = {vbs_string(launcher_dir)}
+                pid = {vbs_string(str(pid))}
+                delayMs = {delay * 1000}
+
+                Function Q(value)
+                    Q = Chr(34) & value & Chr(34)
+                End Function
+
+                Sub Log(message)
+                    On Error Resume Next
+                    Set file = fso.OpenTextFile(logPath, 8, True)
+                    file.WriteLine Now & " " & message
+                    file.Close
+                End Sub
+
+                Log "launcher restart scheduled"
+                WScript.Sleep delayMs
+                shell.Run "taskkill /F /PID " & pid, 0, True
+                WScript.Sleep 1200
+                shell.CurrentDirectory = launcherDir
+                shell.Run Q(launcher) & " --no-browser", 0, False
+                Log "launcher restart launched"
+                On Error Resume Next
+                fso.DeleteFile scriptPath, True
+                """
+            ).strip()
+            write_and_launch_vbs(script_path, script)
+        else:
+            script_path = os.path.join(restart_dir, "_launcher_restart.sh")
+            app_bundle = macos_app_bundle_from_launcher(launcher_exe) if sys.platform == "darwin" else ""
+            storage_args = launcher_restart_storage_args()
+            direct_launch = f"{shlex.quote(launcher_exe)} --no-browser{storage_args} >/dev/null 2>&1 &"
+            bundle_launch = (
+                f"/usr/bin/open -n {shlex.quote(app_bundle)} --args --no-browser{storage_args} >/dev/null 2>&1 || {direct_launch}"
+                if app_bundle
+                else direct_launch
+            )
+            script = (
+                "#!/bin/sh\n"
+                f"sleep {delay}\n"
+                f"kill -TERM {pid} 2>/dev/null\n"
+                "sleep 2\n"
+                f"{bundle_launch}\n"
+            )
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(script)
+            os.chmod(script_path, 0o755)
+            subprocess.Popen(
+                ["/bin/sh", script_path],
+                start_new_session=True,
+                close_fds=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return True
+    except Exception as exc:
+        logging.exception("schedule_launcher_restart failed: %s", exc)
+        return False
+
+class LauncherUpdateRequest(BaseModel):
+    auto_restart: bool = False
+    restart_delay: int = 3
+
+@app.get("/api/launcher/check-update")
+def launcher_check_update_api():
+    if not LAUNCHER_MANAGED:
+        raise HTTPException(status_code=404, detail="launcher unavailable")
+    return call_launcher_command("--check-update")
+
+@app.post("/api/launcher/apply-update")
+def launcher_apply_update_api(req: LauncherUpdateRequest = LauncherUpdateRequest()):
+    if not LAUNCHER_MANAGED:
+        raise HTTPException(status_code=404, detail="launcher unavailable")
+    result = call_launcher_command("--apply-update")
+    updated = bool(result.get("updated"))
+    restart_scheduled = False
+    if req.auto_restart and updated:
+        restart_scheduled = schedule_launcher_restart(req.restart_delay)
+    result["restart_required"] = updated
+    result["restart_scheduled"] = restart_scheduled
+    return result
 
 def fetch_remote_version(url: str, timeout: float = 5.0) -> Dict[str, Any]:
     info: Dict[str, Any] = {"version": "", "ok": False, "error": "", "url": url}
@@ -2091,7 +2369,7 @@ def schedule_self_restart(delay_seconds: int = 3) -> bool:
             launcher = os.path.join(BASE_DIR, "启动服务.bat")
             if not os.path.exists(launcher):
                 launcher = os.path.join(BASE_DIR, "start.bat")
-            bat_path = os.path.join(BASE_DIR, "_self_restart.bat")
+            bat_path = os.path.join(BASE_DIR, "_self_restart.vbs")
             log_path = os.path.join(BASE_DIR, "_self_restart.log")
             script = (
                 "@echo off\r\n"
@@ -2101,10 +2379,10 @@ def schedule_self_restart(delay_seconds: int = 3) -> bool:
                 f"set \"LAUNCHER={launcher}\"\r\n"
                 f"set \"LOG_FILE={log_path}\"\r\n"
                 "echo [%date% %time%] restart scheduled >> \"%LOG_FILE%\"\r\n"
-                f"timeout /t {delay} /nobreak >nul\r\n"
+                f"WScript.Sleep {delay * 1000}\r\n"
                 "echo [%date% %time%] stopping old process >> \"%LOG_FILE%\"\r\n"
                 f"taskkill /F /PID {pid} >nul 2>&1\r\n"
-                "timeout /t 2 /nobreak >nul\r\n"
+                "WScript.Sleep 2000\r\n"
                 "cd /d \"%APP_DIR%\"\r\n"
                 "if exist \"%LAUNCHER%\" (\r\n"
                 "  echo [%date% %time%] starting launcher: %LAUNCHER% >> \"%LOG_FILE%\"\r\n"
@@ -2119,13 +2397,7 @@ def schedule_self_restart(delay_seconds: int = 3) -> bool:
                 ")\r\n"
                 "del \"%~f0\"\r\n"
             )
-            with open(bat_path, "w", encoding="utf-8") as f:
-                f.write(script)
-            subprocess.Popen(
-                ["cmd", "/c", bat_path],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                close_fds=True,
-            )
+            write_and_launch_vbs(bat_path, script)
         else:
             launcher = os.path.join(BASE_DIR, "mac-启动服务.command")
             if not os.path.exists(launcher):
@@ -5708,17 +5980,46 @@ def jimeng_use_wsl():
     value = str(jimeng_env_value("JIMENG_USE_WSL") or "").strip().lower()
     return value in {"1", "true", "yes", "on", "wsl"}
 
-def jimeng_cli_executable():
-    if jimeng_use_wsl():
-        return shutil.which("wsl.exe") or shutil.which("wsl") or "wsl.exe"
+def jimeng_managed_root():
+    return os.path.join(BASE_DIR, "dreamina-cli")
+
+def jimeng_managed_bin_dir():
+    return os.path.join(jimeng_managed_root(), "bin")
+
+def jimeng_managed_executable_name():
+    return "dreamina.exe" if os.name == "nt" else "dreamina"
+
+def jimeng_managed_executable_path():
+    return os.path.join(jimeng_managed_bin_dir(), jimeng_managed_executable_name())
+
+def jimeng_existing_executable(path):
+    text = str(path or "").strip().strip('"')
+    if not text:
+        return ""
+    return text if os.path.isfile(text) else ""
+
+def jimeng_native_cli_executable():
+    managed = jimeng_existing_executable(jimeng_managed_executable_path())
+    if managed:
+        return managed
     configured = str(
         jimeng_env_value("JIMENG_BIN")
         or jimeng_env_value("DREAMINA_BIN")
         or ""
     ).strip()
+    configured = jimeng_existing_executable(configured)
     if configured:
         return configured
     return shutil.which("dreamina") or shutil.which("dreamina.exe") or shutil.which("dreamina.cmd") or ""
+
+def jimeng_cli_executable():
+    native = jimeng_native_cli_executable()
+    if native:
+        return native
+    if jimeng_use_wsl():
+        return shutil.which("wsl.exe") or shutil.which("wsl") or "wsl.exe"
+    return ""
+
 
 def decode_utf16_auto(raw: bytes) -> str:
     # WSL/Windows interop emits UTF-16 for null-heavy diagnostics, but the
@@ -5896,6 +6197,213 @@ def jimeng_extract_json(text):
                 weight += 10
         return weight
     return max(parsed, key=score)[1] if parsed else {"text": text}
+
+def jimeng_platform_download_file():
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    is_arm64 = machine in {"arm64", "aarch64"}
+    is_amd64 = machine in {"x86_64", "amd64", "x64"}
+    if system == "windows" and is_amd64:
+        return "dreamina_cli_windows_amd64.exe"
+    if system == "darwin":
+        if is_arm64:
+            return "dreamina_cli_darwin_arm64"
+        if is_amd64:
+            return "dreamina_cli_darwin_amd64"
+    if system == "linux":
+        if is_arm64:
+            return "dreamina_cli_linux_arm64"
+        if is_amd64:
+            return "dreamina_cli_linux_amd64"
+    raise RuntimeError(f"暂不支持的系统或架构：{platform.system()} {platform.machine()}")
+
+def jimeng_download_file(url, target_path):
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    tmp_path = f"{target_path}.download"
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, open(tmp_path, "wb") as handle:
+            shutil.copyfileobj(response, handle)
+        os.replace(tmp_path, target_path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+def jimeng_install_log(session_id, message):
+    if not session_id:
+        return
+    with JIMENG_INSTALL_LOCK:
+        session = JIMENG_INSTALL_SESSIONS.get(session_id)
+        if session:
+            session.setdefault("output", []).append(str(message))
+
+def install_jimeng_native_cli(session_id=""):
+    download_file = jimeng_platform_download_file()
+    binary_url = f"{JIMENG_DOWNLOAD_BASE}/{download_file}"
+    target_path = jimeng_managed_executable_path()
+    skill_dir = os.path.join(os.path.expanduser("~"), ".dreamina_cli", "dreamina")
+    version_dir = os.path.join(os.path.expanduser("~"), ".dreamina_cli")
+    skill_path = os.path.join(skill_dir, "SKILL.md")
+    version_path = os.path.join(version_dir, "version.json")
+
+    jimeng_install_log(session_id, f"官方安装入口：{JIMENG_INSTALL_SCRIPT_URL}")
+    jimeng_install_log(session_id, f"下载 CLI：{binary_url}")
+    jimeng_download_file(binary_url, target_path)
+    if os.name != "nt":
+        os.chmod(target_path, 0o755)
+
+    jimeng_install_log(session_id, f"下载 Dreamina skill：{JIMENG_SKILL_URL}")
+    jimeng_download_file(JIMENG_SKILL_URL, skill_path)
+    jimeng_install_log(session_id, f"下载版本信息：{JIMENG_VERSION_URL}")
+    jimeng_download_file(JIMENG_VERSION_URL, version_path)
+
+    update_env_values({
+        "JIMENG_BIN": target_path,
+        "DREAMINA_BIN": target_path,
+        "JIMENG_USE_WSL": "",
+    })
+    return {
+        "path": target_path,
+        "skill_path": skill_path,
+        "version_path": version_path,
+        "download_url": binary_url,
+    }
+
+def jimeng_install_public_state(session):
+    output = "\n".join(session.get("output") or [])
+    return {
+        "session_id": session.get("id"),
+        "status": session.get("status") or "running",
+        "message": session.get("message") or "",
+        "output": output[-4000:],
+        "result": session.get("result") or {},
+    }
+
+async def jimeng_install_watch(session_id):
+    try:
+        result = await asyncio.to_thread(install_jimeng_native_cli, session_id)
+        with JIMENG_INSTALL_LOCK:
+            session = JIMENG_INSTALL_SESSIONS.get(session_id)
+            if session:
+                session["status"] = "success"
+                session["message"] = "即梦 CLI 安装完成"
+                session["result"] = result
+                session.setdefault("output", []).append(f"安装完成：{result.get('path')}")
+    except Exception as exc:
+        with JIMENG_INSTALL_LOCK:
+            session = JIMENG_INSTALL_SESSIONS.get(session_id)
+            if session:
+                session["status"] = "failed"
+                session["message"] = str(exc)
+                session.setdefault("output", []).append(f"安装失败：{exc}")
+
+def jimeng_login_command():
+    exe = jimeng_cli_executable()
+    if not exe:
+        raise HTTPException(status_code=400, detail="未找到 dreamina CLI。请先安装：curl -fsSL https://jimeng.jianying.com/cli | bash")
+    if jimeng_use_wsl():
+        shell_line = (
+            ". ~/.profile >/dev/null 2>&1 || true; . ~/.bashrc >/dev/null 2>&1 || true; "
+            "DREAMINA_BIN=$(command -v dreamina || find \"$HOME\" -maxdepth 4 -type f -name dreamina 2>/dev/null | head -n 1); "
+            "if [ -z \"$DREAMINA_BIN\" ]; then echo 'dreamina CLI not found in WSL' >&2; exit 127; fi; "
+            "\"$DREAMINA_BIN\" login"
+        )
+        return [exe, *jimeng_wsl_base_args(exe), "-e", "sh", "-lc", shell_line]
+    return [exe, "login"]
+
+def jimeng_login_parse_output(text):
+    text = str(text or "")
+    lines = [line.strip() for line in text.replace("\r", "\n").splitlines() if line.strip()]
+    data = {"verification_url": "", "user_code": "", "device_code": "", "expires_at": ""}
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if "verification_uri" in low:
+            value = ""
+            if line.startswith("verification_uri:"):
+                value = line.split(":", 1)[1].strip()
+            elif line.startswith("verification_uri="):
+                value = line.split("=", 1)[1].strip()
+            else:
+                match = re.search(r"https?://\S+", line)
+                value = match.group(0) if match else ""
+            if value.startswith("http"):
+                if value.endswith("?") and i + 1 < len(lines) and lines[i + 1].startswith("verification_uri="):
+                    value = value + lines[i + 1]
+                data["verification_url"] = value
+        for key in ("user_code", "device_code", "expires_at"):
+            if low.startswith(f"{key}:"):
+                data[key] = line.split(":", 1)[1].strip()
+    return data
+
+def jimeng_login_public_state(session):
+    output = "\n".join(session.get("output") or [])
+    parsed = jimeng_login_parse_output(output)
+    status = session.get("status") or "starting"
+    return {
+        "session_id": session.get("id"),
+        "status": status,
+        "verification_url": parsed.get("verification_url") or session.get("verification_url") or "",
+        "user_code": parsed.get("user_code") or "",
+        "device_code": parsed.get("device_code") or "",
+        "expires_at": parsed.get("expires_at") or "",
+        "message": session.get("message") or "",
+        "output": output[-4000:],
+        "returncode": session.get("returncode"),
+    }
+
+def jimeng_login_mark_output(session_id, text):
+    if not text:
+        return
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+        if not session:
+            return
+        session.setdefault("output", []).append(text.strip())
+        output = "\n".join(session.get("output") or [])
+        parsed = jimeng_login_parse_output(output)
+        if parsed.get("verification_url"):
+            session["verification_url"] = parsed["verification_url"]
+            if session.get("status") == "starting":
+                session["status"] = "waiting"
+                session["message"] = "已获取登录地址，等待扫码确认"
+            event = session.get("ready_event")
+            if event:
+                event.set()
+        if "oauth 登录成功" in output.lower() or "当前登录账户信息" in output:
+            session["status"] = "success"
+            session["message"] = "OAuth 登录成功"
+            event = session.get("ready_event")
+            if event:
+                event.set()
+
+async def jimeng_login_read_stream(session_id, stream):
+    while True:
+        data = await stream.readline()
+        if not data:
+            break
+        text = decode_wsl_output(data) if jimeng_use_wsl() else data.decode("utf-8", errors="replace")
+        jimeng_login_mark_output(session_id, text)
+
+async def jimeng_login_watch_process(session_id):
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+        proc = session.get("proc") if session else None
+    if not proc:
+        return
+    returncode = await proc.wait()
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+        if not session:
+            return
+        session["returncode"] = returncode
+        if session.get("status") not in {"success", "canceled"}:
+            session["status"] = "failed" if returncode else "finished"
+            session["message"] = "登录进程已结束" if returncode == 0 else f"登录进程退出：{returncode}"
+        event = session.get("ready_event")
+        if event:
+            event.set()
 
 async def run_jimeng_cli(args, timeout=120, raw_text=False):
     exe = jimeng_cli_executable()
@@ -12823,28 +13331,55 @@ async def gemini_cli_help(payload: GeminiCliHelpRequest):
 @app.get("/api/jimeng/status")
 async def jimeng_status():
     exe = jimeng_cli_executable()
+    min_version_str = ".".join(str(part) for part in JIMENG_MIN_CLI_VERSION)
     if not exe:
-        return {"installed": False, "logged_in": False, "message": "未找到 dreamina CLI"}
+        return {
+            "installed": False,
+            "logged_in": False,
+            "install_supported": True,
+            "message": "未找到 dreamina CLI",
+            "managed_path": jimeng_managed_executable_path(),
+            "min_version": min_version_str,
+        }
     version, version_text = await jimeng_cli_version()
     version_str = ".".join(str(part) for part in version) if version else None
     version_ok = version >= JIMENG_MIN_CLI_VERSION if version else None
-    min_version_str = ".".join(str(part) for part in JIMENG_MIN_CLI_VERSION)
     try:
         raw = await run_jimeng_cli(["user_credit"], timeout=30)
         return {
             "installed": True,
             "logged_in": True,
+            "install_supported": True,
+            "path": exe,
             "raw": raw,
             "cli_version": version_str,
+            "cli_version_text": version_text,
             "version_ok": version_ok,
             "min_version": min_version_str,
         }
     except HTTPException as exc:
+        detail = str(exc.detail)
+        lower_detail = detail.lower()
+        if jimeng_use_wsl() and ("dreamina cli not found in wsl" in lower_detail or "未找到即梦 cli：wsl" in lower_detail):
+            return {
+                "installed": False,
+                "logged_in": False,
+                "install_supported": True,
+                "message": "WSL 内未找到 dreamina CLI，可安装官方原生 CLI",
+                "managed_path": jimeng_managed_executable_path(),
+                "cli_version": version_str,
+                "cli_version_text": version_text,
+                "version_ok": version_ok,
+                "min_version": min_version_str,
+            }
         return {
             "installed": True,
             "logged_in": False,
-            "message": str(exc.detail),
+            "install_supported": True,
+            "path": exe,
+            "message": detail,
             "cli_version": version_str,
+            "cli_version_text": version_text,
             "version_ok": version_ok,
             "min_version": min_version_str,
         }
@@ -12857,22 +13392,59 @@ async def jimeng_credit():
 @app.post("/api/jimeng/logout")
 async def jimeng_logout():
     raw = await run_jimeng_cli(["logout"], timeout=30)
-    return {"success": True, "raw": raw}
+    return {"ok": True, "success": True, "message": "即梦 CLI 已登出", "raw": raw}
+
+@app.post("/api/jimeng/install/start")
+async def jimeng_install_start():
+    exe = jimeng_native_cli_executable()
+    if exe:
+        return {
+            "session_id": "",
+            "status": "success",
+            "message": "即梦 CLI 已安装",
+            "result": {"path": exe},
+            "output": "",
+        }
+    with JIMENG_INSTALL_LOCK:
+        active = next((item for item in JIMENG_INSTALL_SESSIONS.values() if item.get("status") == "running"), None)
+        if active:
+            return jimeng_install_public_state(active)
+        session_id = uuid.uuid4().hex[:12]
+        session = {
+            "id": session_id,
+            "status": "running",
+            "message": "正在下载并安装即梦 CLI",
+            "output": [],
+            "result": {},
+        }
+        JIMENG_INSTALL_SESSIONS[session_id] = session
+    asyncio.create_task(jimeng_install_watch(session_id))
+    return jimeng_install_public_state(session)
+
+@app.get("/api/jimeng/install/{session_id}/status")
+async def jimeng_install_status(session_id: str):
+    with JIMENG_INSTALL_LOCK:
+        session = JIMENG_INSTALL_SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="安装会话不存在或已结束")
+    return jimeng_install_public_state(session)
 
 @app.post("/api/jimeng/login/start")
 async def jimeng_login_start():
-    old_proc = JIMENG_LOGIN_SESSION.get("proc")
-    if old_proc and getattr(old_proc, "returncode", None) is None:
-        try:
-            old_proc.terminate()
-        except Exception:
-            pass
-    exe = jimeng_cli_executable()
-    if not exe:
-        raise HTTPException(status_code=400, detail="未找到 dreamina CLI")
-    JIMENG_LOGIN_SESSION.update({"proc": None, "stdout": "", "stderr": "", "started_at": time.time()})
-    args = ["login", "--headless"]
-    command = jimeng_command(args, exe)
+    with JIMENG_LOGIN_LOCK:
+        active = next((item for item in JIMENG_LOGIN_SESSIONS.values() if item.get("status") in {"starting", "waiting"}), None)
+    if active:
+        state = jimeng_login_public_state(active)
+        if not state.get("verification_url") and active.get("ready_event"):
+            try:
+                await asyncio.wait_for(active["ready_event"].wait(), timeout=10)
+            except asyncio.TimeoutError:
+                pass
+            state = jimeng_login_public_state(active)
+        return state
+    command = jimeng_login_command()
+    session_id = uuid.uuid4().hex[:12]
+    ready_event = asyncio.Event()
     try:
         proc = await asyncio.create_subprocess_exec(
             *command,
@@ -12881,53 +13453,57 @@ async def jimeng_login_start():
             stderr=asyncio.subprocess.PIPE,
         )
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=400, detail=f"未找到即梦 CLI：{exe}") from exc
-    JIMENG_LOGIN_SESSION["proc"] = proc
-    asyncio.create_task(jimeng_login_reader(proc))
-    await asyncio.sleep(2)
-    text = jimeng_login_text()
-    if proc.returncode not in (None, 0) and ("unknown" in text.lower() or "no such option" in text.lower()):
-        # 旧版 CLI 可能没有 --headless，退回 debug 输出。
-        JIMENG_LOGIN_SESSION.update({"proc": None, "stdout": "", "stderr": "", "started_at": time.time()})
-        proc = await asyncio.create_subprocess_exec(
-            *jimeng_command(["login", "--debug"], exe),
-            cwd=BASE_DIR,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        JIMENG_LOGIN_SESSION["proc"] = proc
-        asyncio.create_task(jimeng_login_reader(proc))
-        await asyncio.sleep(2)
-        text = jimeng_login_text()
-    return {
-        "success": True,
-        "running": JIMENG_LOGIN_SESSION.get("proc") is not None and JIMENG_LOGIN_SESSION["proc"].returncode is None,
-        "text": text,
-        "qr_url": jimeng_login_qr_from_text(text),
-        "started_at": JIMENG_LOGIN_SESSION.get("started_at") or 0,
+        raise HTTPException(status_code=400, detail=f"未找到即梦 CLI：{command[0]}") from exc
+    session = {
+        "id": session_id,
+        "proc": proc,
+        "status": "starting",
+        "message": "正在启动 dreamina login",
+        "output": [],
+        "ready_event": ready_event,
+        "returncode": None,
     }
+    with JIMENG_LOGIN_LOCK:
+        JIMENG_LOGIN_SESSIONS[session_id] = session
+    asyncio.create_task(jimeng_login_read_stream(session_id, proc.stdout))
+    asyncio.create_task(jimeng_login_read_stream(session_id, proc.stderr))
+    asyncio.create_task(jimeng_login_watch_process(session_id))
+    try:
+        await asyncio.wait_for(ready_event.wait(), timeout=15)
+    except asyncio.TimeoutError:
+        pass
+    state = jimeng_login_public_state(session)
+    if not state.get("verification_url") and state.get("status") not in {"success", "finished"}:
+        state["message"] = state.get("message") or "已启动登录进程，仍在等待 CLI 输出登录地址"
+    return state
 
-@app.get("/api/jimeng/login/status")
-async def jimeng_login_status():
-    proc = JIMENG_LOGIN_SESSION.get("proc")
-    text = jimeng_login_text()
-    running = proc is not None and getattr(proc, "returncode", None) is None
-    logged_in = False
-    credit_raw = None
-    if not running:
+@app.get("/api/jimeng/login/{session_id}/status")
+async def jimeng_login_status(session_id: str):
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="登录会话不存在或已结束")
+    return jimeng_login_public_state(session)
+
+@app.post("/api/jimeng/login/{session_id}/cancel")
+async def jimeng_login_cancel(session_id: str):
+    with JIMENG_LOGIN_LOCK:
+        session = JIMENG_LOGIN_SESSIONS.get(session_id)
+        proc = session.get("proc") if session else None
+        if session and session.get("status") not in {"success", "finished", "failed"}:
+            session["status"] = "canceled"
+            session["message"] = "用户已关闭登录弹框"
+    if proc and proc.returncode is None:
         try:
-            credit_raw = await run_jimeng_cli(["user_credit"], timeout=20)
-            logged_in = True
-        except HTTPException:
-            logged_in = False
-    return {
-        "success": True,
-        "running": running,
-        "logged_in": logged_in,
-        "text": text,
-        "qr_url": jimeng_login_qr_from_text(text),
-        "raw": credit_raw,
-    }
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    return {"ok": True}
 
 @app.post("/api/jimeng/help")
 async def jimeng_help(payload: JimengHelpRequest):
@@ -13320,6 +13896,9 @@ async def test_provider_connection(payload: TestConnectionPayload):
         status = await jimeng_status()
         return {
             "ok": bool(status.get("installed") and status.get("logged_in")),
+            "installed": bool(status.get("installed")),
+            "logged_in": bool(status.get("logged_in")),
+            "install_supported": bool(status.get("install_supported")),
             "status": 200 if status.get("logged_in") else 0,
             "message": status.get("message") or "即梦 CLI 已登录",
             "model_count": len(JIMENG_DEFAULT_IMAGE_MODELS) + len(JIMENG_DEFAULT_VIDEO_MODELS),
@@ -18773,5 +19352,5 @@ if __name__ == "__main__":
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
     # 默认 20s ping/20s 超时会把这些连接每隔一会儿就踢掉造成"频繁断连"。
     # 客户端有自己的应用层心跳 + 断线重连兜底，这里禁用协议 ping 更稳。
-    uvicorn.run(app, host="0.0.0.0", port=3000,
+    uvicorn.run(app, host=APP_HOST, port=APP_PORT,
                 ws_ping_interval=None, ws_ping_timeout=None)

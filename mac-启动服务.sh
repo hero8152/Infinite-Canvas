@@ -18,7 +18,7 @@ echo ""
 # Open browser after 3 seconds
 sleep 3 && open "${APP_URL}" &
 
-python3 main.py
+python3 -c "import os, runpy, sys; sys.path.insert(0, os.getcwd()); runpy.run_path('main.py', run_name='__main__')"
 
 echo ""
 echo "Server stopped."
