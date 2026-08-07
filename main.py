@@ -537,6 +537,16 @@ load_env_file()
 COMFYUI_INSTANCES = [s.strip() for s in os.getenv("COMFYUI_INSTANCES", "127.0.0.1:8188").split(",") if s.strip()]
 COMFYUI_ADDRESS = COMFYUI_INSTANCES[0]
 
+def comfy_base_url(addr):
+    """返回带协议的 ComfyUI 基础地址。支持 https://domain:port 等远程加密后端；
+    无协议前缀时默认 http://（兼容旧的 host:port 写法）。"""
+    addr = str(addr or "").strip().rstrip("/")
+    if not addr:
+        return "http://"
+    if addr.startswith("http://") or addr.startswith("https://"):
+        return addr
+    return f"http://{addr}"
+
 AI_BASE_URL = os.getenv("COMFLY_BASE_URL", "https://ai.comfly.chat").rstrip("/")
 AI_API_KEY = os.getenv("COMFLY_API_KEY", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
@@ -3207,7 +3217,7 @@ def check_images_exist(backend_addr, images):
     if not images: return True
     for img in images:
         try:
-            url = f"http://{backend_addr}/view?filename={urllib.parse.quote(img)}&type=input"
+            url = f"{comfy_base_url(backend_addr)}/view?filename={urllib.parse.quote(img)}&type=input"
             r = requests.get(url, stream=True, timeout=0.5)
             r.close()
             if r.status_code != 200: return False
@@ -3281,7 +3291,7 @@ def get_best_backend(required_images: List[str] = None):
 
     for addr in COMFYUI_INSTANCES:
         try:
-            with urllib.request.urlopen(f"http://{addr}/queue", timeout=1) as response:
+            with urllib.request.urlopen(f"{comfy_base_url(addr)}/queue", timeout=1) as response:
                 data = json.loads(response.read())
                 remote_load = len(data.get('queue_running', [])) + len(data.get('queue_pending', []))
                 with LOAD_LOCK:
@@ -3308,7 +3318,7 @@ def reserve_best_backend(required_images: List[str] = None):
     backend_stats = {}
     for addr in COMFYUI_INSTANCES:
         try:
-            with urllib.request.urlopen(f"http://{addr}/queue", timeout=1) as response:
+            with urllib.request.urlopen(f"{comfy_base_url(addr)}/queue", timeout=1) as response:
                 data = json.loads(response.read())
                 remote_load = len(data.get('queue_running', [])) + len(data.get('queue_pending', []))
                 has_images = check_images_exist(addr, required_images)
@@ -3333,7 +3343,7 @@ def reserve_best_backend(required_images: List[str] = None):
 def download_image(comfy_address, comfy_url_path, prefix="studio_"):
     filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
     local_path = output_path_for(filename, "output")
-    full_url = f"http://{comfy_address}{comfy_url_path}"
+    full_url = f"{comfy_base_url(comfy_address)}{comfy_url_path}"
     try:
         with urllib.request.urlopen(full_url, timeout=COMFYUI_DOWNLOAD_TIMEOUT) as response, open(local_path, 'wb') as out_file:
             shutil.copyfileobj(response, out_file)
@@ -3400,7 +3410,7 @@ def download_comfy_output(comfy_address, item, prefix="studio_"):
     subfolder = urllib.parse.quote(str(item.get("subfolder") or ""))
     file_type = urllib.parse.quote(str(item.get("type") or "output"))
     comfy_url_path = f"/view?filename={urllib.parse.quote(str(item['filename']))}&subfolder={subfolder}&type={file_type}"
-    full_url = f"http://{comfy_address}{comfy_url_path}"
+    full_url = f"{comfy_base_url(comfy_address)}{comfy_url_path}"
     try:
         with urllib.request.urlopen(full_url, timeout=COMFYUI_DOWNLOAD_TIMEOUT) as response, open(local_path, 'wb') as out_file:
             shutil.copyfileobj(response, out_file)
@@ -3492,7 +3502,7 @@ def save_to_history(record):
 
 def get_comfy_history(comfy_address, prompt_id):
     try:
-        with urllib.request.urlopen(f"http://{comfy_address}/history/{prompt_id}") as response:
+        with urllib.request.urlopen(f"{comfy_base_url(comfy_address)}/history/{prompt_id}") as response:
             return json.loads(response.read())
     except Exception as e:
         return {}
@@ -11677,7 +11687,7 @@ def view_image(filename: str, type: str = "input", subfolder: str = ""):
     # 先按原逻辑去各 ComfyUI 后端找
     for addr in COMFYUI_INSTANCES:
         try:
-            url = f"http://{addr}/view"
+            url = f"{comfy_base_url(addr)}/view"
             params = {"filename": filename, "type": type, "subfolder": subfolder}
             r = requests.get(url, params=params, timeout=1)
             if r.status_code == 200:
@@ -11839,7 +11849,7 @@ async def upload_image(files: List[UploadFile] = File(...)):
         for addr in COMFYUI_INSTANCES:
             try:
                 files_data = {'image': (file.filename, content, file.content_type)}
-                response = requests.post(f"http://{addr}/upload/image", files=files_data, timeout=5)
+                response = requests.post(f"{comfy_base_url(addr)}/upload/image", files=files_data, timeout=5)
                 if response.status_code == 200:
                     last_result = response.json()
                     success_count += 1
@@ -11949,7 +11959,7 @@ async def upload_comfyui_base64(payload: Base64UploadRequest):
     comfy_name = None
     for addr in COMFYUI_INSTANCES:
         try:
-            resp = requests.post(f"http://{addr}/upload/image",
+            resp = requests.post(f"{comfy_base_url(addr)}/upload/image",
                                  files={'image': (filename, content, ct or 'image/png')}, timeout=10)
             if resp.status_code == 200:
                 comfy_name = resp.json().get("name", filename)
@@ -18171,7 +18181,7 @@ def generate(req: GenerateRequest):
         for image_name in required_images:
             need_sync = False
             try:
-                check_url = f"http://{target_backend}/view?filename={urllib.parse.quote(image_name)}&type=input"
+                check_url = f"{comfy_base_url(target_backend)}/view?filename={urllib.parse.quote(image_name)}&type=input"
                 resp = requests.get(check_url, stream=True, timeout=0.5)
                 resp.close()
                 if resp.status_code != 200:
@@ -18185,7 +18195,7 @@ def generate(req: GenerateRequest):
                 for addr in COMFYUI_INSTANCES:
                     if addr == target_backend: continue
                     try:
-                        src_url = f"http://{addr}/view?filename={urllib.parse.quote(image_name)}&type=input"
+                        src_url = f"{comfy_base_url(addr)}/view?filename={urllib.parse.quote(image_name)}&type=input"
                         r = requests.get(src_url, timeout=5)
                         if r.status_code == 200:
                             image_content = r.content
@@ -18196,7 +18206,7 @@ def generate(req: GenerateRequest):
                 if image_content:
                     try:
                         files = {'image': (image_name, image_content, image_type)}
-                        requests.post(f"http://{target_backend}/upload/image", files=files, timeout=10)
+                        requests.post(f"{comfy_base_url(target_backend)}/upload/image", files=files, timeout=10)
                     except Exception as e:
                         print(f"Sync upload failed: {e}")
 
@@ -18249,7 +18259,7 @@ def generate(req: GenerateRequest):
         p = {"prompt": workflow, "client_id": CLIENT_ID}
         data = json.dumps(p).encode('utf-8')
         try:
-            post_req = urllib.request.Request(f"http://{target_backend}/prompt", data=data)
+            post_req = urllib.request.Request(f"{comfy_base_url(target_backend)}/prompt", data=data)
             prompt_id = json.loads(urllib.request.urlopen(post_req, timeout=10).read())['prompt_id']
         except urllib.error.HTTPError as e:
             error_body = e.read().decode('utf-8')
@@ -18855,22 +18865,31 @@ def get_comfyui_instances():
 
 @app.put("/api/comfyui/instances")
 def save_comfyui_instances(payload: ComfyInstancesPayload):
-    # 宽容校验：去前后空白、去 http(s):// 前缀、去尾部斜杠；要求形如 host:port
+    # 宽容校验：去前后空白、去尾部斜杠；保留 http(s):// 前缀以支持远程加密后端
+    #（如 https://example.com:8188）；要求形如 [scheme://]host:port
     cleaned = []
     for item in payload.instances:
         s = str(item or "").strip()
         if not s:
             continue
-        s = re.sub(r"^https?://", "", s)
         s = s.rstrip("/")
-        if ":" not in s:
-            raise HTTPException(status_code=400, detail=f"地址缺少端口号：{item}（应为 host:port，例如 127.0.0.1:8188）")
-        host, _, port = s.rpartition(":")
+        scheme = ""
+        m = re.match(r"^(https?://)", s, re.I)
+        if m:
+            scheme = m.group(1).lower()
+            rest = s[len(m.group(1)):]
+        else:
+            rest = s
+        rest = re.sub(r"^//", "", rest)
+        if ":" not in rest:
+            raise HTTPException(status_code=400, detail=f"地址缺少端口号：{item}（应为 host:port，例如 127.0.0.1:8188；远程后端可用 https://example.com:8188）")
+        host, _, port = rest.rpartition(":")
         if not host or not port.isdigit():
-            raise HTTPException(status_code=400, detail=f"地址不合法：{item}（应为 host:port，例如 127.0.0.1:8188）")
-        if s in cleaned:
+            raise HTTPException(status_code=400, detail=f"地址不合法：{item}（应为 host:port，例如 127.0.0.1:8188；远程后端可用 https://example.com:8188）")
+        normalized = f"{scheme}{rest}" if scheme else rest
+        if normalized in cleaned:
             continue
-        cleaned.append(s)
+        cleaned.append(normalized)
     if not cleaned:
         raise HTTPException(status_code=400, detail="至少保留一个 ComfyUI 后端地址")
     # 写入 env 文件
