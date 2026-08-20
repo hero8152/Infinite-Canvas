@@ -809,6 +809,22 @@
 
         function handleOutsideClick(e) { if (e.target.id === 'lightbox') closeLightbox(); }
 
+        function downloadLightboxImage() {
+            const compare = document.getElementById('compareContainer');
+            const image = compare.classList.contains('hidden')
+                ? document.getElementById('lightboxImg')
+                : document.getElementById('compareGenerated');
+            const imgUrl = image.currentSrc || image.src;
+            if (!imgUrl || imgUrl === window.location.href) return;
+
+            const link = document.createElement('a');
+            link.href = imgUrl;
+            link.download = `Enhance-Master-${Date.now()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
         async function loadHistory() {
             try {
                 const res = await fetch('/api/history?type=enhance');
