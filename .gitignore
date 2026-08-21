@@ -1,0 +1,30 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*_pytest_cache
+
+# --- 运行时生成的数据（本地持久化，不进仓库） ---
+# 画布、会话、素材库、配置等内容会随运行写入这些目录/文件，
+# 由 Docker 命名卷或本机目录持久化，不纳入版本控制。
+data/
+output/
+assets/
+history.json
+global_config.json
+
+# API 密钥等本地配置
+API/.env
+
+# 重启/临时脚本
+_self_restart.bat
+_self_restart.log
+_self_restart.sh
+
+# Codex / 会话本地数据
+.reasonix/
+
+# 系统文件
+.DS_Store
+Thumbs.db

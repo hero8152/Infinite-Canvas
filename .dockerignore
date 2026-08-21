@@ -1,0 +1,24 @@
+# 运行时生成的数据与本地工具，构建时不需要
+.git
+.reasonix/
+.venv/
+__pycache__/
+*.py[cod]
+data/
+output/
+assets/
+API/.env
+history.json
+global_config.json
+packages/
+python/
+node_modules/
+
+# 备份/临时文件
+_self_restart.bat
+_self_restart.log
+_self_restart.sh
+
+# 系统文件
+.DS_Store
+Thumbs.db

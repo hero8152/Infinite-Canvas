@@ -41,3 +41,18 @@ API使用教程：https://xcnk45dd0a92.feishu.cn/wiki/DRuEwOd8mi9d0sknkxPcCzTjn1
 ---mac运行---
 
 新增了3个mac的使用说明/修复全选/启动服务，如果运行仍然失败，建议安装https://opencode.ai/zh/download，选中这个项目文件夹，让他运行程序
+
+---linux运行---
+
+1. 安装依赖：bash install.sh
+2. 启动：bash start.sh
+3. 默认访问：http://127.0.0.1:3000/
+
+---docker运行---
+
+需要 Docker + Docker Compose：
+
+docker compose up -d --build
+
+访问 http://127.0.0.1:3000/；画布/会话/素材库等数据用命名卷持久化，
+docker compose down 不会丢失数据。
