@@ -21,6 +21,7 @@ const volcSkInput = document.getElementById('volcSkInput');
 const volcAssetKeyHint = document.getElementById('volcAssetKeyHint');
 const volcProjectInput = document.getElementById('volcProjectInput');
 const volcRegionInput = document.getElementById('volcRegionInput');
+const volcengineKeyStack = document.querySelector('.volcengine-key-stack');
 const jimengCliPanel = document.getElementById('jimengCliPanel');
 const jimengCliStatus = document.getElementById('jimengCliStatus');
 const jimengCredit = document.getElementById('jimengCredit');
@@ -2569,6 +2570,7 @@ function renderEditor(){
         if(volcProjectInput) volcProjectInput.value = item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME;
         if(volcRegionInput) volcRegionInput.value = item.volcengine_region || VOLCENGINE_DEFAULT_REGION;
     }
+    if(volcengineKeyStack) volcengineKeyStack.hidden = !isVolcengine;
     if(isJimeng){
         item.base_url = '';
         item.protocol = 'jimeng';

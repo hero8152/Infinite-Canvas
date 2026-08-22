@@ -9209,28 +9209,32 @@ async def check_apimart_avatar_task(provider, task_id: str) -> Dict[str, Any]:
     return {"status": "Processing", "asset_uri": "", "detail": "审核中"}
 
 # ---- 火山 Ark 私域素材资产（Assets）API：AK/SK 签名 V4 + CreateAssetGroup/CreateAsset/GetAsset ----
-VOLCENGINE_ARK_ASSET_HOST = "open.volcengineapi.com"
+VOLCENGINE_ARK_ASSET_HOST = "ark.cn-beijing.volcengineapi.com"
 VOLCENGINE_ARK_ASSET_SERVICE = "ark"
 VOLCENGINE_ARK_ASSET_REGION = "cn-beijing"
-VOLCENGINE_ARK_ASSET_VERSION = "2024-01-01"
 
 def _volc_hmac(key: bytes, msg: str) -> bytes:
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
-def volcengine_sign_v4_headers(ak: str, sk: str, action: str, body_str: str,
-                               service: str = VOLCENGINE_ARK_ASSET_SERVICE,
-                               region: str = VOLCENGINE_ARK_ASSET_REGION,
-                               version: str = VOLCENGINE_ARK_ASSET_VERSION,
-                               host: str = VOLCENGINE_ARK_ASSET_HOST) -> Dict[str, str]:
-    """火山引擎 OpenAPI 签名 V4（POST + JSON body）。返回需随请求发送的鉴权头。"""
+def volcengine_sign_v4_headers(
+    ak: str,
+    sk: str,
+    action: str,
+    body_str: str,
+    *,
+    path: str,
+    query: str,
+    service: str = VOLCENGINE_ARK_ASSET_SERVICE,
+    region: str = VOLCENGINE_ARK_ASSET_REGION,
+    host: str,
+) -> Dict[str, str]:
+    """火山引擎 OpenAPI 签名 V4。"""
     method = "POST"
     content_type = "application/json"
     now = datetime.datetime.now(datetime.timezone.utc)
     x_date = now.strftime("%Y%m%dT%H%M%SZ")
     short_date = x_date[:8]
     payload_hash = hashlib.sha256(body_str.encode("utf-8")).hexdigest()
-    # 查询串按键排序：Action < Version
-    canonical_query = f"Action={urllib.parse.quote(action, safe='')}&Version={urllib.parse.quote(version, safe='')}"
     canonical_headers = (
         f"content-type:{content_type}\n"
         f"host:{host}\n"
@@ -9238,7 +9242,7 @@ def volcengine_sign_v4_headers(ak: str, sk: str, action: str, body_str: str,
         f"x-date:{x_date}\n"
     )
     signed_headers = "content-type;host;x-content-sha256;x-date"
-    canonical_request = "\n".join([method, "/", canonical_query, canonical_headers, signed_headers, payload_hash])
+    canonical_request = "\n".join([method, path, query, canonical_headers, signed_headers, payload_hash])
     algorithm = "HMAC-SHA256"
     credential_scope = f"{short_date}/{region}/{service}/request"
     string_to_sign = "\n".join([
@@ -9262,15 +9266,17 @@ def volcengine_sign_v4_headers(ak: str, sk: str, action: str, body_str: str,
         "Authorization": authorization,
     }
 
-async def volcengine_ark_asset_call(client, action: str, body: Dict[str, Any]) -> Dict[str, Any]:
-    """调用一次火山 Ark Assets OpenAPI，返回 Result 内容；出错抛 HTTPException。"""
+async def volcengine_ark_asset_call(client, action: str, body: Dict[str, Any], provider=None) -> Dict[str, Any]:
+    """调用一次火山 Ark Assets OpenAPI。"""
     ak = volcengine_access_key_value()
     sk = volcengine_secret_key_value()
     if not ak or not sk:
         raise HTTPException(status_code=400, detail="未配置火山引擎 AK/SK，请在 API 设置中填写 Access Key ID / Secret Access Key。")
     body_str = json.dumps(body, ensure_ascii=False)
-    headers = volcengine_sign_v4_headers(ak, sk, action, body_str)
-    url = f"https://{VOLCENGINE_ARK_ASSET_HOST}/?Action={urllib.parse.quote(action, safe='')}&Version={urllib.parse.quote(VOLCENGINE_ARK_ASSET_VERSION, safe='')}"
+    query = f"Action={urllib.parse.quote(action, safe='')}&Version={urllib.parse.quote('2024-01-01', safe='')}"
+    path = "/"
+    headers = volcengine_sign_v4_headers(ak, sk, action, body_str, path=path, query=query, host=VOLCENGINE_ARK_ASSET_HOST)
+    url = f"https://{VOLCENGINE_ARK_ASSET_HOST}/?{query}"
     resp = await client.post(url, headers=headers, content=body_str.encode("utf-8"), timeout=120)
     try:
         payload = resp.json()
@@ -9287,7 +9293,7 @@ async def volcengine_ark_asset_call(client, action: str, body: Dict[str, Any]) -
     result = payload.get("Result") if isinstance(payload, dict) and isinstance(payload.get("Result"), dict) else None
     return result if result is not None else (payload if isinstance(payload, dict) else {})
 
-async def volcengine_ensure_asset_group(client, project_name: str, group_name: str) -> str:
+async def volcengine_ensure_asset_group(client, project_name: str, group_name: str, provider=None) -> str:
     """复用同名素材组合，没有则新建。返回 GroupId。"""
     name = (group_name or "可信素材").strip()[:60] or "可信素材"
     project_name = (project_name or "default").strip() or "default"
@@ -9296,7 +9302,7 @@ async def volcengine_ensure_asset_group(client, project_name: str, group_name: s
         listed = await volcengine_ark_asset_call(client, "ListAssetGroups", {
             "Filter": {"Name": name, "GroupType": "AIGC"},
             "PageNumber": 1, "PageSize": 10, "ProjectName": project_name,
-        })
+        }, provider=provider)
         for item in (listed.get("Items") or []):
             if str(item.get("Name") or "").strip() == name and str(item.get("ProjectName") or "default") == project_name:
                 gid = str(item.get("Id") or "").strip()
@@ -9306,36 +9312,37 @@ async def volcengine_ensure_asset_group(client, project_name: str, group_name: s
         pass  # 查询失败不致命，继续走新建
     created = await volcengine_ark_asset_call(client, "CreateAssetGroup", {
         "Name": name, "Description": name, "ProjectName": project_name,
-    })
+        "GroupType": "AIGC",
+    }, provider=provider)
     gid = str(created.get("Id") or "").strip()
     if not gid:
         raise HTTPException(status_code=502, detail=f"火山 CreateAssetGroup 未返回 GroupId：{str(created)[:200]}")
     return gid
 
-async def submit_volcengine_avatar_asset(public_url: str, name: str, kind: str,
+async def submit_volcengine_avatar_asset(provider, public_url: str, name: str, kind: str,
                                          project_name: str = "default", group_name: str = "") -> str:
     """把公网可访问素材提交到火山 Ark 私域素材库（异步）。返回 Asset Id 作为任务 ID。"""
     async with httpx.AsyncClient(timeout=120) as client:
-        group_id = await volcengine_ensure_asset_group(client, project_name, group_name)
+        group_id = await volcengine_ensure_asset_group(client, project_name, group_name, provider=provider)
         created = await volcengine_ark_asset_call(client, "CreateAsset", {
             "GroupId": group_id,
             "URL": public_url,
-            "AssetType": apimart_avatar_asset_type(kind),
+            "AssetType": "Image",
             "Name": (name or "asset")[:60],
             "ProjectName": (project_name or "default").strip() or "default",
-        })
+        }, provider=provider)
     asset_id = str(created.get("Id") or "").strip()
     if not asset_id:
         raise HTTPException(status_code=502, detail=f"火山 CreateAsset 未返回 Asset Id：{str(created)[:200]}")
     return asset_id
 
-async def check_volcengine_avatar_task(asset_id: str, project_name: str = "default") -> Dict[str, Any]:
+async def check_volcengine_avatar_task(provider, asset_id: str, project_name: str = "default") -> Dict[str, Any]:
     """查询一次火山素材状态。返回 {status: Active/Processing/Failed, asset_uri, detail}。"""
     async with httpx.AsyncClient(timeout=60) as client:
         info = await volcengine_ark_asset_call(client, "GetAsset", {
             "Id": asset_id,
             "ProjectName": (project_name or "default").strip() or "default",
-        })
+        }, provider=provider)
     status = str(info.get("Status") or "").strip()
     if status == "Active":
         return {"status": "Active", "asset_uri": f"asset://{asset_id}", "detail": ""}
@@ -9344,14 +9351,15 @@ async def check_volcengine_avatar_task(asset_id: str, project_name: str = "defau
     return {"status": "Processing", "asset_uri": "", "detail": "火山素材处理中"}
 
 def volcengine_public_asset_url(url: str) -> str:
-    """火山 CreateAsset 要求 URL 公网可访问；本地文件需 PUBLIC_BASE_URL，否则返回 ERR:。"""
+    """火山 CreateAsset 需要可访问的 URL；本地文件会先尝试转成公网短链。"""
     text = str(url or "").strip()
-    if text.startswith("http://") or text.startswith("https://"):
+    parsed = urllib.parse.urlsplit(text)
+    if parsed.scheme and parsed.netloc and parsed.scheme.lower() not in {"asset", "file"}:
         return text
     public = local_asset_public_url(text)
     if public:
         return public
-    return "ERR:火山要求素材是公网可访问的 http/https URL；本地画布文件需配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL 暴露为公网地址。"
+    return ""
 
 def local_media_path_for_cloud_upload(ref_url: str, allowed_prefixes=("image/", "video/")) -> str:
     ref_url = str(ref_url or "").strip()
@@ -9436,6 +9444,26 @@ async def upload_local_video_to_cloud(ref_url: str, service: str = "auto") -> Di
 
 async def upload_local_video_to_temp_sh(ref_url: str) -> Dict[str, str]:
     return await upload_local_video_to_cloud(ref_url, "auto")
+
+async def upload_local_file_to_cloud(ref_url: str, service: str = "auto") -> Dict[str, str]:
+    ref_url = str(ref_url or "").strip()
+    if ref_url.startswith("http://") or ref_url.startswith("https://"):
+        return {"url": ref_url, "source": ref_url, "service": "existing"}
+    path = output_file_from_url(ref_url)
+    if not path:
+        raise HTTPException(status_code=400, detail="无法定位本地文件")
+    service = str(service or os.getenv("CLOUD_FILE_UPLOAD_SERVICE", "auto") or "auto").strip().lower()
+    if service in {"litterbox", "catbox"}:
+        return await upload_video_to_litterbox(path, ref_url)
+    if service in {"temp", "temp.sh", "tempsh"}:
+        return await upload_video_to_temp_sh(path, ref_url)
+    errors = []
+    for name, func in (("litterbox", upload_video_to_litterbox), ("temp.sh", upload_video_to_temp_sh)):
+        try:
+            return await func(path, ref_url)
+        except HTTPException as exc:
+            errors.append(f"{name}: {exc.detail}")
+    raise HTTPException(status_code=502, detail="云端上传失败：" + "；".join(errors))
 
 async def save_ai_image_to_output(image_data, prefix="online_", category="output"):
     filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
@@ -17094,11 +17122,18 @@ async def register_asset_library_avatar(item_id: str, payload: AssetAvatarRegist
     elif platform == "volcengine":
         # 火山以 API 设置里配置的 ProjectName 为准（必须与视频生成 key 的项目一致）
         project_name = str(provider.get("volcengine_project_name") or VOLCENGINE_DEFAULT_PROJECT_NAME).strip() or VOLCENGINE_DEFAULT_PROJECT_NAME
-        public_url = volcengine_public_asset_url(target_item.get("url") or "")
-        if public_url.startswith("ERR:"):
-            raise HTTPException(status_code=400, detail=public_url[4:])
+        raw_url = str(target_item.get("url") or "").strip()
+        public_url = volcengine_public_asset_url(raw_url)
+        if not public_url:
+            try:
+                uploaded = await upload_local_file_to_cloud(raw_url)
+                public_url = str((uploaded or {}).get("url") or "").strip()
+            except HTTPException as exc:
+                raise HTTPException(status_code=400, detail=f"火山素材无法转成可访问 URL：{exc.detail}")
+        if not public_url:
+            raise HTTPException(status_code=400, detail="火山素材无法转成可访问 URL。")
         task_id = await submit_volcengine_avatar_asset(
-            public_url, target_item.get("name") or "asset", kind,
+            provider, public_url, target_item.get("name") or "asset", kind,
             project_name=project_name, group_name=payload.group_name or "",
         )
     else:
@@ -17139,7 +17174,7 @@ async def check_asset_library_avatar(item_id: str, payload: AssetAvatarRegisterR
         result = await check_apimart_avatar_task(provider, task_id)
     elif platform == "volcengine":
         result = await check_volcengine_avatar_task(
-            task_id, str(reg.get("project_name") or VOLCENGINE_DEFAULT_PROJECT_NAME).strip() or VOLCENGINE_DEFAULT_PROJECT_NAME,
+            provider, task_id, str(reg.get("project_name") or VOLCENGINE_DEFAULT_PROJECT_NAME).strip() or VOLCENGINE_DEFAULT_PROJECT_NAME,
         )
     else:
         raise HTTPException(status_code=400, detail="该平台的认证后端尚未接入。")
