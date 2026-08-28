@@ -60,9 +60,9 @@ function canvasMediaPreviewUrl(url, size=512){
 function canvasPreviewImgHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const preview = canvasMediaPreviewUrl(original, size);
-    // loading=lazy：画布内容多时，视口外的缩略图不加载/不解码，避免一次性解码上百张图卡顿；
-    // decoding=async：解码放到主线程外，渲染时不阻塞。
-    return `<img loading="lazy" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}"${attrs ? ` ${attrs}` : ''}>`;
+    const eager = /\bdata-eager-preview(?:\s|=|$)/.test(attrs || '');
+    // 画布内容多时默认懒加载；日志缩略图使用 data-eager-preview，避免弹窗内的缩略图被浏览器延迟加载。
+    return `<img loading="${eager ? 'eager' : 'lazy'}" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}"${attrs ? ` ${attrs}` : ''}>`;
 }
 function loadCanvasOriginalImageDimensions(url){
     const src = String(url || '');
@@ -77,7 +77,8 @@ function loadCanvasOriginalImageDimensions(url){
 function canvasVideoPreviewHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const preview = canvasMediaPreviewUrl(original, size);
-    return `<img loading="lazy" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${attrs ? ` ${attrs}` : ''}>`;
+    const eager = /\bdata-eager-preview(?:\s|=|$)/.test(attrs || '');
+    return `<img loading="${eager ? 'eager' : 'lazy'}" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${attrs ? ` ${attrs}` : ''}>`;
 }
 function canvasVideoFallbackHtml(url, attrs=''){
     const original = canvasOriginalMediaUrl(url);
@@ -723,6 +724,97 @@ function providerImageModels(providerId){
     // 不走 providerById（会 fallback 到第一个 provider，造成串台），直接查精确匹配
     const provider = apiProviders.find(p => p.id === providerId);
     return uniqueModels(provider?.image_models || []);
+}
+function isDrawThingsProvider(provider){
+    return String(provider?.id || '').trim().toLowerCase() === 'drawthings'
+        || String(provider?.protocol || '').trim().toLowerCase() === 'grpc';
+}
+// Keep Draw Things seeds in the same uint32 range as the canvas/ComfyUI seed controls.
+function drawThingsRandomSeed(){ return Math.floor(Math.random() * 4294967295) + 1; }
+function normalizeDrawThingsSeed(value){
+    const num = Number(value);
+    if(!Number.isFinite(num)) return drawThingsRandomSeed();
+    return Math.max(1, Math.min(4294967295, Math.floor(num)));
+}
+// 普通画布只在随机模式下显示本次实际提交的 seed；固定模式必须保留用户输入，供指纹缓存复用。
+function applyDrawThingsSeedToGenerator(gen, seeds=[]){
+    if(!gen || gen.drawThingsSeedRandom === false || !Array.isArray(seeds) || !seeds.length) return;
+    gen.drawThingsSeed = normalizeDrawThingsSeed(seeds[seeds.length - 1]);
+}
+// 统一把请求对象按 key 排序，避免对象属性插入顺序不同造成错误的指纹变化。
+function stableGenerationFingerprintValue(value){
+    if(Array.isArray(value)) return value.map(stableGenerationFingerprintValue);
+    if(value && typeof value === 'object'){
+        return Object.keys(value).sort().reduce((result, key) => {
+            result[key] = stableGenerationFingerprintValue(value[key]);
+            return result;
+        }, {});
+    }
+    return value;
+}
+// 只要存在固定 seed，就必须把完整请求和 seed 一起验证；随机模式本身不命中缓存，
+// 但生成完成后会按实际提交的 seed 暂存结果，方便关闭骰子后复用刚生成的图片。
+function generationRequestFingerprint(payload, count, fixedSeedState){
+    if(!fixedSeedState || fixedSeedState.random) return '';
+    return JSON.stringify(stableGenerationFingerprintValue({
+        request:payload || {},
+        count:Number(count) || 1,
+        seed:fixedSeedState
+    }));
+}
+function drawThingsSeedResultCacheKey(payload, seed){
+    return generationRequestFingerprint(payload, 1, {
+        provider:'drawthings',
+        seed:normalizeDrawThingsSeed(seed)
+    });
+}
+function generationSeedField(field){
+    const name = `${field?.id || ''} ${field?.input || ''} ${field?.name || ''} ${field?.fieldName || ''}`.toLowerCase();
+    return /(^|[^a-z])(seed|noise[_ -]?seed|random[_ -]?seed)([^a-z]|$)|种子|噪声/.test(name);
+}
+// ComfyUI/RunningHub 的动态参数都通过同一个 helper 判断是否是固定 seed。
+function fixedGenerationSeedState({fields=[], valueFor, randomEnabled, randomActive}){
+    const values = {};
+    let hasSeed = false;
+    let random = false;
+    (fields || []).forEach(field => {
+        if(!generationSeedField(field)) return;
+        hasSeed = true;
+        const id = field.id || field.fieldName || field.input || String(Object.keys(values).length);
+        if(randomEnabled?.(field) && randomActive?.(field)) random = true;
+        values[id] = valueFor ? valueFor(field) : undefined;
+    });
+    if(!hasSeed || random) return null;
+    return {fields:values};
+}
+function generationCachedOutputsForNode(node, out, key){
+    const cache = node?._fixedSeedGenerationCache;
+    const outputs = Array.isArray(cache?.outputs) ? cache.outputs.filter(Boolean) : [];
+    if(!key || cache?.key !== key || !outputs.length) return [];
+    // 删除过输出图片后不能继续复用已不存在的结果。
+    const available = out
+        ? outputs.every(url => outputHasUrl(out, url))
+        : outputs.every(url => (node.generatedOutputs || []).some(item => outputUrlValue(item) === url));
+    return available ? outputs : [];
+}
+function rememberGenerationOutputs(node, key, outputs){
+    if(!node || !key) return;
+    const urls = (outputs || []).map(outputUrlValue).filter(Boolean);
+    if(urls.length) node._fixedSeedGenerationCache = {key, outputs:urls};
+}
+async function refreshDrawThingsModels(){
+    const provider = apiProviders.find(p => isDrawThingsProvider(p));
+    if(!provider) return;
+    try {
+        const data = await fetch('/api/drawthings/models').then(r => r.json());
+        provider.image_models = Array.isArray(data.models) ? uniqueModels(data.models) : [];
+        provider.drawthings_connected = Boolean(data.connected);
+        provider.drawthings_status = data.message || '';
+    } catch(err){
+        provider.image_models = [];
+        provider.drawthings_connected = false;
+        provider.drawthings_status = String(err?.message || err || '连接失败');
+    }
 }
 function sanitizeImageNodeProviderModel(node){
     if(!node || node.type !== 'generator') return;
@@ -1945,7 +2037,7 @@ async function createSmartCanvas(){
 }
 function openSmartCanvasPage(id){
     if(!id) return;
-    window.location.href = `/static/smart-canvas.html?id=${encodeURIComponent(id)}&v=2026.05.22.1`;
+        window.location.href = `/static/smart-canvas.html?id=${encodeURIComponent(id)}&v=2026.08.03.1`;
 }
 function toggleEmojiPicker(id, event){
     event?.preventDefault();
@@ -3690,6 +3782,18 @@ function mediaKindForRef(ref){
 }
 function imageRefsOnly(refs){
     return (refs || []).filter(ref => ref?.url && mediaKindForRef(ref) === 'image').slice(0, CANVAS_REFERENCE_IMAGE_MAX);
+}
+function canvasReferenceIsMask(ref){
+    if(!ref) return false;
+    if(ref.mask === true || ref.isMask === true || ref.is_mask === true || ref.maskImage === true || ref.mask_image === true) return true;
+    const values = [ref.role, ref.type, ref.kind, ref.mediaRole, ref.media_role, ref.maskType, ref.mask_type];
+    if(values.some(value => ['mask', 'inpaint_mask', 'inpainting_mask'].includes(String(value || '').trim().toLowerCase()))) return true;
+    const metadata = ref.metadata || ref.meta || {};
+    if(metadata && typeof metadata === 'object'){
+        if(metadata.mask === true || metadata.isMask === true || metadata.is_mask === true) return true;
+        if(['mask', 'inpaint_mask', 'inpainting_mask'].includes(String(metadata.role || metadata.type || metadata.kind || '').trim().toLowerCase())) return true;
+    }
+    return /(?:^|[_-])mask\.(?:png|jpe?g|webp)$/i.test(String(ref.name || ref.url || '').split(/[?#]/, 1)[0].split('/').pop() || '');
 }
 function videoRefsOnly(refs){
     return (refs || []).filter(ref => ref?.url && mediaKindForRef(ref) === 'video');
@@ -5845,6 +5949,15 @@ function applyImageEdit(){
 function nodeHasLiveMedia(node){
     return node?.type === 'image' && node.url && ['video','audio'].includes(mediaKindForNode(node));
 }
+function nodeHasStableImagePreview(node){
+    return node?.type === 'image' && node.url && mediaKindForNode(node) === 'image';
+}
+function stableImagePreviewMatches(el, node){
+    if(!el || !nodeHasStableImagePreview(node)) return false;
+    const img = el.querySelector?.('img[data-url], img[data-original-src]');
+    const currentUrl = img?.dataset?.originalSrc || img?.dataset?.url || '';
+    return currentUrl === canvasOriginalMediaUrl(node.url);
+}
 function captureMediaPlaybackState(media){
     if(!media) return null;
     return {
@@ -5930,29 +6043,44 @@ function measureCanvasOriginalImageNodes(root=nodesEl){
 function render(){
     const outputScrolls = captureOutputScrolls();
     const mediaStates = captureMediaPlaybackStates();
-    const reusableMediaNodes = new Map();
+    const existingNodes = new Map();
+    const reusableNodes = new Map();
     nodesEl.querySelectorAll('.node').forEach(el => {
+        if(el.dataset?.id) existingNodes.set(el.dataset.id, el);
         const node = nodes.find(n => n.id === el.dataset.id);
-        if(nodeHasLiveMedia(node)) reusableMediaNodes.set(node.id, el);
+        if(nodeHasLiveMedia(node) || nodeHasStableImagePreview(node)) reusableNodes.set(node.id, el);
     });
     applyViewport();
-    [...nodesEl.children].forEach(child => {
-        if(!reusableMediaNodes.has(child.dataset?.id)) child.remove();
-    });
+    const renderedElements = new Set();
     nodes.forEach(node => {
         // 单个节点渲染异常不能中断整个循环，否则它后面的节点（含新建节点，通常排在末尾）都不会被
         // 追加进 DOM，连带这些节点的连线也会因找不到 DOM 而画到 (0,0) 变成“消失”。
         try {
-            const fresh = renderNode(node);
-            const old = reusableMediaNodes.get(node.id);
-            nodesEl.appendChild(fresh);
-            if(old){
-                transplantNodeMediaElement(old, fresh);
-                if(old !== fresh) old.remove();
+            const reusable = reusableNodes.get(node.id);
+            if(reusable && (nodeHasLiveMedia(node) || stableImagePreviewMatches(reusable, node))){
+                nodesEl.appendChild(reusable);
+                renderedElements.add(reusable);
+                return;
             }
+            const fresh = renderNode(node);
+            const old = existingNodes.get(node.id);
+            nodesEl.appendChild(fresh);
+            if(old && old !== fresh){
+                transplantNodeMediaElement(old, fresh);
+                old.remove();
+            }
+            renderedElements.add(fresh);
         } catch(err){
             console.error('[canvas] renderNode 失败，已跳过该节点：', node?.id, node?.type, err);
+            const old = existingNodes.get(node.id);
+            if(old){
+                nodesEl.appendChild(old);
+                renderedElements.add(old);
+            }
         }
+    });
+    [...nodesEl.children].forEach(child => {
+        if(!renderedElements.has(child)) child.remove();
     });
     restoreMediaPlaybackStates(mediaStates);
     restoreOutputScrolls(outputScrolls);
@@ -10705,6 +10833,7 @@ async function runRhNode(nodeId, opts={}){
     const pendingId = uid('p');
     const run = runSnapshot(node, media.prompt || 'RunningHub', media.refs);
     run.taskLabel = 'RunningHub';
+    let fixedSeedCacheKey = '';
     if(out) out._pending = [...(out._pending || []), makePendingForRun(pendingId, run, node, {refs:media.refs, cascadeTargetId})];
     if(!opts.cascade) node.running = true;
     refreshRunNodes(node, out);
@@ -10715,6 +10844,26 @@ async function runRhNode(nodeId, opts={}){
         const body = mode === 'workflow'
             ? {workflowId:node.workflowId.trim(), nodeInfoList, useWallet:rhUseWallet(node), ...workflowExtras}
             : {webappId:node.webappId.trim(), nodeInfoList, instanceType:node.instanceType || '', useWallet:rhUseWallet(node)};
+        const fields = rhActiveFields(node);
+        const fixedSeedState = fixedGenerationSeedState({
+            fields,
+            valueFor:field => nodeInfoList.find(item => rhParamKey(item.nodeId, item.fieldName) === rhParamKey(field.nodeId, field.fieldName))?.fieldValue,
+            randomEnabled:rhRandomEnabled,
+            randomActive:field => rhRandomActive(node, rhParamKey(field.nodeId, field.fieldName))
+        });
+        fixedSeedCacheKey = generationRequestFingerprint({engine:'runninghub', mode, body}, 1, fixedSeedState);
+        const cached = fixedSeedCacheKey ? generationCachedOutputsForNode(node, out, fixedSeedCacheKey) : [];
+        if(cached.length){
+            // RunningHub 的固定 seed 也按完整 nodeInfoList 指纹复用，随机字段开启时不会进入这里。
+            const cachedMeta = collectRunMeta(out, pendingId);
+            if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+            appendOutputImages(out, cached, media.refs[0], [cachedMeta]);
+            mergeGeneratedOutputs(node, cached, Boolean(opts.cascade));
+            node.runStatus = 'done'; node.runError = ''; node.running = false;
+            refreshRunNodes(node, out);
+            scheduleSave();
+            return;
+        }
         const submit = await cascadeFetch(endpoint, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
@@ -10746,6 +10895,7 @@ async function runRhNode(nodeId, opts={}){
         if(!result) throw new Error(tr('canvas.rhTimeout'));
         const outputs = result.urls || [];
         if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
+        rememberGenerationOutputs(node, fixedSeedCacheKey, outputs);
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
         appendOutputImages(out, outputs, media.refs[0], [meta]);
@@ -11114,7 +11264,13 @@ function generatedImageRefs(node){
             const url = outputUrlValue(item);
             if(!url) return null;
             const kind = mediaKindForOutputItem(item);
-            return {url, name:outputImageName(url) || `${node.type || 'generated'}-${i + 1}`, kind, index:i};
+            return {
+                url,
+                name:outputImageName(url) || `${node.type || 'generated'}-${i + 1}`,
+                kind,
+                originalLocalUrl:item?.originalLocalUrl || '',
+                index:i
+            };
         })
         .filter(Boolean)
         .filter(ref => keepGeneratedMedia || ref.kind === 'image')
@@ -11127,20 +11283,20 @@ function mediaRefsFromNode(node){
     if(!node) return [];
     if(node.type === 'image' && node.url){
         const kind = mediaKindForNode(node);
-        return [{url:node.url, name:node.name || kind, role:node.role || '', kind}];
+        return [{url:node.url, name:node.name || kind, role:node.role || '', kind, originalLocalUrl:node.originalLocalUrl || ''}];
     }
     if(node.type === 'group'){
         return (node.items || [])
             .map(id => nodes.find(x => x.id === id))
             .filter(x => x?.type === 'image' && x?.url)
-            .map(item => ({url:item.url, name:item.name || mediaKindForNode(item), role:item.role || '', kind:mediaKindForNode(item)}));
+            .map(item => ({url:item.url, name:item.name || mediaKindForNode(item), role:item.role || '', kind:mediaKindForNode(item), originalLocalUrl:item.originalLocalUrl || ''}));
     }
     if(node.type === 'output'){
         return (node.images || []).map((item, i) => {
             const url = outputUrlValue(item);
             if(!url) return null;
             const kind = mediaKindForOutputItem(item);
-            return {url, name:outputImageName(url) || `output-${i + 1}`, kind, nodeId:node.id, outputIndex:i};
+            return {url, name:outputImageName(url) || `output-${i + 1}`, kind, originalLocalUrl:item?.originalLocalUrl || '', nodeId:node.id, outputIndex:i};
         }).filter(Boolean);
     }
     if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)) return generatedImageRefs(node);
@@ -11155,7 +11311,7 @@ function generatorSources(gen){
             if(found){
                 const last = outputUrlValue(found.item);
                 const kind = mediaKindForOutputItem(found.item);
-                return {id:n.id, type:'outputImage', label:'上游输出', preview:last, refs:[{url:last, name:'output.png', kind, nodeId:n.id, outputIndex:found.index}], prompt:''};
+                return {id:n.id, type:'outputImage', label:'上游输出', preview:last, refs:[{url:last, name:'output.png', kind, originalLocalUrl:found.item?.originalLocalUrl || '', nodeId:n.id, outputIndex:found.index}], prompt:''};
             }
         }
         if(CANVAS_MEDIA_OUTPUT_TYPES.includes(n.type)){
@@ -11173,7 +11329,7 @@ function generatorSources(gen){
         }
         if(n.type === 'image' && n.url) {
             const kind = mediaKindForNode(n);
-            return {id:n.id, type:kind, label:n.name || kind, preview:n.url, refs:[{url:n.url, name:n.name || kind, role:n.role || '', kind}], prompt:''};
+            return {id:n.id, type:kind, label:n.name || kind, preview:n.url, refs:[{url:n.url, name:n.name || kind, role:n.role || '', kind, originalLocalUrl:n.originalLocalUrl || ''}], prompt:''};
         }
         if(n.type === 'group') {
             const items = (n.items || []).map(id => nodes.find(x => x.id === id)).filter(Boolean);
@@ -11184,7 +11340,7 @@ function generatorSources(gen){
                 imageId:img.id,
                 label:img.name || mediaKindForNode(img),
                 preview:img.url,
-                refs:[{url:img.url, name:img.name || mediaKindForNode(img), role:img.role || '', kind:mediaKindForNode(img)}],
+                refs:[{url:img.url, name:img.name || mediaKindForNode(img), role:img.role || '', kind:mediaKindForNode(img), originalLocalUrl:img.originalLocalUrl || ''}],
                 prompt:''
             }));
             const prompts = items.filter(x => x.type === 'prompt').map(p => p.text || '').filter(Boolean);
@@ -11316,8 +11472,44 @@ async function runGenerator(genId, opts={}){
         size:await generatorSizeForRun(gen, refs),
         reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
     };
+    const drawThingsSelected = isDrawThingsProvider(providerById(payload.provider_id));
+    const submittedSeeds = [];
     const quality = normalizedImageQuality(gen.quality);
     if(quality) payload.quality = quality;
+    const requestPayload = () => {
+        if(!drawThingsSelected) return payload;
+        // Match the existing dice behavior: each batch request gets a new seed
+        // while disabling the dice keeps the value entered in the node.
+        const seed = gen.drawThingsSeedRandom !== false
+            ? drawThingsRandomSeed()
+            : normalizeDrawThingsSeed(gen.drawThingsSeed);
+        submittedSeeds.push(seed);
+        return {
+            ...payload,
+            seed
+        };
+    };
+    const fixedSeedState = drawThingsSelected && gen.drawThingsSeedRandom === false
+        ? {provider:'drawthings', seed:normalizeDrawThingsSeed(gen.drawThingsSeed)}
+        : null;
+    const fixedSeedCacheKey = generationRequestFingerprint(payload, count, fixedSeedState);
+    // 将缓存键带进结果元数据，批量任务完成后可以准确归并到本次请求。
+    if(fixedSeedCacheKey) run.fixedSeedCacheKey = fixedSeedCacheKey;
+    const cachedFixedSeedOutputs = fixedSeedCacheKey
+        ? generationCachedOutputsForNode(gen, out, fixedSeedCacheKey)
+        : [];
+    if(cachedFixedSeedOutputs.length){
+        // 固定 seed 且完整请求未变化时复用当前结果，避免再次提交相同的 gRPC 任务。
+        setStatus('检测到 seed 值（种子数）相同，跳过生成');
+        mergeGeneratedOutputs(gen, cachedFixedSeedOutputs, Boolean(opts.cascade));
+        gen.runStatus = 'done';
+        gen.runError = '';
+        gen.running = false;
+        refreshRunNodes(gen, out);
+        scheduleSave();
+        return;
+    }
+    const runCacheKey = fixedSeedCacheKey;
     let pendingIds = [];
     const startedAt = nowMs();
     if(!opts.cascade){
@@ -11327,16 +11519,27 @@ async function runGenerator(genId, opts={}){
         setTimeout(() => { gen.running = false; refreshRunNodes(gen, out); }, 2000);
     }
     try {
-        const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload, {cascadeTargetId})));
+        const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(requestPayload(), {cascadeTargetId})));
+        applyDrawThingsSeedToGenerator(gen, submittedSeeds);
+        const randomSeedCacheKeys = drawThingsSelected && gen.drawThingsSeedRandom !== false
+            ? submittedSeeds.map(seed => drawThingsSeedResultCacheKey(payload, seed))
+            : [];
         if(!out){
             let outputs = [];
+            const taskOutputs = [];
             for(const task of taskInfos){
                 const result = await waitCanvasImageTaskResult(task.task_id, {cascadeTargetId});
-                outputs.push(...(result.images || []));
+                const images = result.images || [];
+                taskOutputs.push(images);
+                outputs.push(...images);
                 run.request = requestMetaFromResult(result);
             }
             if(!outputs.length) throw new Error(tr('canvas.generationFailed'));
             mergeGeneratedOutputs(gen, outputs, Boolean(opts.cascade));
+            if(runCacheKey) rememberGenerationOutputs(gen, runCacheKey, outputs);
+            else taskOutputs.forEach((images, index) => {
+                rememberGenerationOutputs(gen, randomSeedCacheKeys[index], images);
+            });
             addGenerationLog({run, outputs, runMs:nowMs() - startedAt});
             gen.runStatus = 'done';
             gen.runError = '';
@@ -11348,13 +11551,18 @@ async function runGenerator(genId, opts={}){
         pendingIds = taskInfos.map(() => uid('p'));
         if(out) out._pending = [
             ...(out._pending || []),
-            ...taskInfos.map((task, index) => makePendingForRun(pendingIds[index], run, gen, {refs, requestSize:payload.size, cascadeTargetId}, {
-                canvasTaskId:task.task_id,
-                canvasTaskType:'online-image',
-                providerId:payload.provider_id,
-                model:payload.model,
-                appendGenerated:Boolean(opts.cascade)
-            }))
+            ...taskInfos.map((task, index) => {
+                const taskCacheKey = runCacheKey || randomSeedCacheKeys[index] || '';
+                const taskRun = taskCacheKey ? {...run, fixedSeedCacheKey:taskCacheKey} : run;
+                return makePendingForRun(pendingIds[index], taskRun, gen, {refs, requestSize:payload.size, cascadeTargetId}, {
+                    canvasTaskId:task.task_id,
+                    canvasTaskType:'online-image',
+                    providerId:payload.provider_id,
+                    model:payload.model,
+                    appendGenerated:Boolean(opts.cascade),
+                    fixedSeedCacheKey:taskCacheKey
+                });
+            })
         ];
         refreshRunNodes(gen, out);
         scheduleSave();
@@ -11572,19 +11780,57 @@ async function runGeneratorLegacy(genId, opts={}){
             resolution:['1k','2k','4k'].includes(gen.resolution) ? gen.resolution : '',
             reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
         };
+        const drawThingsSelected = isDrawThingsProvider(providerById(payload.provider_id));
+        const submittedSeeds = [];
+        const requestPayload = () => {
+            if(!drawThingsSelected) return payload;
+            // The legacy endpoint also honors the generator's seed control.
+            const seed = gen.drawThingsSeedRandom !== false
+                ? drawThingsRandomSeed()
+                : normalizeDrawThingsSeed(gen.drawThingsSeed);
+            submittedSeeds.push(seed);
+            return {
+                ...payload,
+                seed
+            };
+        };
         const quality = normalizedImageQuality(gen.quality);
         if(quality) payload.quality = quality;
+        const fixedSeedState = isDrawThingsProvider(providerById(payload.provider_id)) && gen.drawThingsSeedRandom === false
+            ? {provider:'drawthings', seed:normalizeDrawThingsSeed(gen.drawThingsSeed)}
+            : null;
+        const fixedSeedCacheKey = generationRequestFingerprint(payload, count, fixedSeedState);
+        const cached = fixedSeedCacheKey ? generationCachedOutputsForNode(gen, out, fixedSeedCacheKey) : [];
+        if(cached.length){
+            setStatus('检测到 seed 值（种子数）相同，跳过生成');
+            const cachedMetas = collectRunMetas(out, pendingIds);
+            if(out) out._pending = (out._pending || []).filter(p => !pendingIds.includes(p.id));
+            appendOutputImages(out, cached, refs[0], cachedMetas);
+            mergeGeneratedOutputs(gen, cached, Boolean(opts.cascade));
+            gen.runStatus = 'done'; gen.runError = ''; gen.running = false;
+            refreshRunNodes(gen, out);
+            scheduleSave();
+            return;
+        }
         const results = await Promise.all(Array.from({length:count}, () => fetch('/api/online-image', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(payload)
+            body:JSON.stringify(requestPayload())
         }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.generationFailed'))); return r.json(); })));
+        applyDrawThingsSeedToGenerator(gen, submittedSeeds);
         const images = results.flatMap(result => result.images || []);
+        const randomSeedCacheKeys = drawThingsSelected && gen.drawThingsSeedRandom !== false
+            ? submittedSeeds.map(seed => drawThingsSeedResultCacheKey(payload, seed))
+            : [];
         const metas = collectRunMetas(out, pendingIds);
         run.request = results[0] ? requestMetaFromResult(results[0]) : {};
         if(out) out._pending = (out._pending||[]).filter(p => !pendingIds.includes(p.id));
         appendOutputImages(out, images, refs[0], metas);
         mergeGeneratedOutputs(gen, images, Boolean(opts.cascade));
+        if(fixedSeedCacheKey) rememberGenerationOutputs(gen, fixedSeedCacheKey, images);
+        else results.forEach((result, index) => {
+            rememberGenerationOutputs(gen, randomSeedCacheKeys[index], result.images || []);
+        });
         addGenerationLog({run, outputs:images, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
         gen.runStatus = 'done'; gen.runError = '';
         refreshRunNodes(gen, out);
@@ -12535,6 +12781,21 @@ async function runLTXDirectorNode(nodeId, opts={}){
             [LTX_DIRECTOR_WF_NODE]:directorInputs,
             [LTX_DIRECTOR_SEED_NODE]:{noise_seed:Number(node.noiseSeed ?? 12)}
         };
+        const fixedSeedCacheKey = generationRequestFingerprint({engine:'comfy', workflow:LTX_DIRECTOR_WORKFLOW, prompt:globalPrompt, params}, 1, {
+            provider:'comfy',
+            fields:{noise_seed:Number(node.noiseSeed ?? 12)}
+        });
+        const cached = generationCachedOutputsForNode(node, out, fixedSeedCacheKey);
+        if(cached.length){
+            const cachedMeta = collectRunMeta(out, pendingId);
+            if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+            appendOutputImages(out, cached, refs[0], [cachedMeta]);
+            mergeGeneratedOutputs(node, cached, Boolean(opts.cascade));
+            node.runStatus = 'done'; node.runError = ''; node.running = false;
+            refreshRunNodes(node, out);
+            scheduleSave();
+            return;
+        }
         const result = await runQueuedComfyGenerate({
             prompt:globalPrompt,
             workflow_json:LTX_DIRECTOR_WORKFLOW,
@@ -12546,6 +12807,7 @@ async function runLTXDirectorNode(nodeId, opts={}){
         if(result.error) throw new Error(result.error);
         const outputs = comfyResultOutputs(result);
         if(!outputs.length) throw new Error(tr('canvas.ltxNoOutput'));
+        rememberGenerationOutputs(node, fixedSeedCacheKey, outputs);
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
         appendOutputImages(out, outputs, refs[0], [meta]);
@@ -12582,7 +12844,8 @@ async function runComfyNode(nodeId, opts={}){
     const sources = orderedSources(node, generatorSources(node));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
     const allRefs = sources.flatMap(s => s.refs || []);
-    const refs = imageRefsOnly(allRefs);
+    const comfyMaskRefs = allRefs.filter(canvasReferenceIsMask);
+    const refs = imageRefsOnly(allRefs).filter(ref => !canvasReferenceIsMask(ref));
     const mode = node.mode || 'text';
     const customImageFields = mode === 'custom' ? comfyFields(node, 'image') : [];
     const customVideoFields = mode === 'custom' ? comfyFields(node, 'video') : [];
@@ -12592,10 +12855,14 @@ async function runComfyNode(nodeId, opts={}){
     if((mode !== 'text' && mode !== 'custom' && !refs.length) || (mode === 'custom' && refs.length < customImageFields.length)){ alert(tr('canvas.needImage')); return; }
     if(mode === 'custom' && videoRefsOnly(allRefs).length < customVideoFields.length){ alert(langIsEn() ? 'Please connect enough video inputs for this ComfyUI workflow.' : '请为这个 ComfyUI 工作流连接足够的视频输入'); return; }
     if(mode === 'custom' && audioRefsOnly(allRefs).length < customAudioFields.length){ alert(langIsEn() ? 'Please connect enough audio inputs for this ComfyUI workflow.' : '请为这个 ComfyUI 工作流连接足够的音频输入'); return; }
+    if(comfyMaskRefs.length && mode !== 'custom'){
+        setStatus(langIsEn() ? 'The current ComfyUI workflow has no mask input; the mask will be ignored.' : '当前 ComfyUI 工作流没有遮罩输入，遮罩不会生效。');
+    }
     let out = outputForNode(node, 480);
     const pendingId = uid('p');
     const run = runSnapshot(node, prompt, refs);
     run.taskLabel = comfyRunLabel(node);
+    let fixedSeedCacheKey = '';
     const requestSize = mode === 'text' ? {width:Number(node.width || 1024), height:Number(node.height || 1024)} : null;
     if(out) out._pending = [...(out._pending||[]), makePendingForRun(pendingId, run, node, {refs, requestSize, cascadeTargetId})];
     if(!opts.cascade){
@@ -12677,6 +12944,25 @@ async function runComfyNode(nodeId, opts={}){
                 }
                 params[f.node][f.input] = comfyParamValue(node, f);
             });
+            const fixedSeedState = fixedGenerationSeedState({
+                fields:settingFields,
+                valueFor:f => comfyParamValue(node, f),
+                randomEnabled:comfyRandomEnabled,
+                randomActive:f => comfyRandomActive(node, f.id)
+            });
+            fixedSeedCacheKey = generationRequestFingerprint({engine:'comfy', mode, workflow:workflowName, prompt, refs:allRefs, params}, 1, fixedSeedState);
+            const cached = fixedSeedCacheKey ? generationCachedOutputsForNode(node, out, fixedSeedCacheKey) : [];
+            if(cached.length){
+                // Comfy 固定 seed 与其它 provider 使用同一套完整请求指纹，命中时不再重复提交。
+                const cachedMeta = collectRunMeta(out, pendingId);
+                if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+                appendOutputImages(out, cached, refs[0], [cachedMeta]);
+                mergeGeneratedOutputs(node, cached, Boolean(opts.cascade));
+                node.runStatus = 'done'; node.runError = ''; node.running = false;
+                refreshRunNodes(node, out);
+                scheduleSave();
+                return;
+            }
             const result = await runQueuedComfyGenerate({
                 prompt,
                 workflow_json:workflowName,
@@ -12688,6 +12974,8 @@ async function runComfyNode(nodeId, opts={}){
             if(result.error) throw new Error(actionFailed('canvas.comfyCustom', result.error));
             images = comfyResultOutputs(result);
             if(!images.length) throw new Error(noReturnedImage('canvas.comfyCustom'));
+            applyComfySeedResult(node, settingFields, result);
+            rememberGenerationOutputs(node, fixedSeedCacheKey, images);
         } else {
             run.taskLabel = tr('canvas.comfyEdit');
             const names = [];
@@ -13298,7 +13586,9 @@ function formatRunDuration(ms){
 }
 function nowMs(){ return Date.now(); }
 function outputUrlValue(item){
-    return typeof item === 'string' ? item : item?.url || '';
+    if(typeof item === 'string') return item;
+    if(!item || typeof item !== 'object') return '';
+    return item.url || item.path || item.src || item.uri || item.output_url || item.outputUrl || '';
 }
 function isMissingAssetUrl(url){
     return Boolean(url && missingAssetUrls.has(url));
@@ -13352,6 +13642,38 @@ function requestMetaFromResult(result={}){
         seed: result.seed || '',
     };
 }
+function applyComfySeedResult(node, fields=[], result={}){
+    if(!node || !Array.isArray(fields) || !result) return false;
+    const seedValues = result.seed_values && typeof result.seed_values === 'object' ? result.seed_values : {};
+    const fallbackSeed = Number(result.seed);
+    const seedFields = fields.filter(generationSeedField);
+    let changed = false;
+    fields.filter(generationSeedField).forEach(field => {
+        const keys = [
+            `${field.node}:${field.input}`,
+            `${field.node}.${field.input}`,
+            String(field.input || ''),
+        ];
+        let value;
+        for(const key of keys){
+            if(seedValues[key] !== undefined){
+                value = seedValues[key];
+                break;
+            }
+        }
+        if(value === undefined && seedFields.length === 1 && Number.isFinite(fallbackSeed)) value = fallbackSeed;
+        if(value === undefined) return;
+        const numericValue = Number(value);
+        if(!Number.isFinite(numericValue)) return;
+        node.comfyParams = node.comfyParams || {};
+        if(Number(node.comfyParams[field.id]) !== numericValue){
+            node.comfyParams[field.id] = numericValue;
+            changed = true;
+        }
+    });
+    if(changed) refreshNodes([node.id]);
+    return changed;
+}
 function runPlatformLabel(run){
     const node = run?.node || {};
     if(run?.nodeType === 'generator') return providerById(node.apiProvider || 'comfly')?.name || node.apiProvider || 'API';
@@ -13377,20 +13699,69 @@ function logTaskLabel(log){
     }
     return log?.model || '-';
 }
+async function deleteCanvasLogEntry(logId, deleteMedia=false){
+    if(!canvas || !logId) return;
+    const confirmText = deleteMedia ? tr('canvas.deleteLogMediaConfirm') : tr('canvas.deleteLogConfirm');
+    if(!confirm(confirmText)) return;
+    try {
+        if(localCanvasDirty || saveTimer){
+            clearTimeout(saveTimer);
+            saveTimer = null;
+            await saveCanvas();
+        }
+        const res = await fetch(`/api/canvases/${encodeURIComponent(canvas.id)}/logs/delete`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                log_id:logId,
+                delete_unreferenced_media:deleteMedia,
+                reset_referencing_nodes:deleteMedia,
+                base_updated_at:Number(canvas.updated_at || lastCanvasUpdatedAt || 0)
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || tr('canvas.logDeleteFailed'));
+        canvas.logs = data.canvas?.logs || (canvas.logs || []).filter(item => item.id !== logId);
+        if(data.canvas?.nodes){
+            canvas.nodes = data.canvas.nodes;
+            canvas.connections = data.canvas.connections || [];
+            nodes = canvas.nodes;
+            connections = canvas.connections;
+            render();
+        }
+        canvas.updated_at = Number(data.canvas?.updated_at || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        renderCanvasLog();
+        const notes = [tr('canvas.logDeleted')];
+        if(data.removed_files?.length) notes.push(tr('canvas.logMediaRemoved').replace('{n}', data.removed_files.length));
+        if(data.reset_node_ids?.length) notes.push(tr('canvas.logNodesReset').replace('{n}', data.reset_node_ids.length));
+        if(data.skipped_referenced?.length) notes.push(tr('canvas.logMediaReferenced').replace('{n}', data.skipped_referenced.length));
+        setStatus(notes.join(' · '));
+    } catch(err) {
+        setStatus(err?.message || tr('canvas.logDeleteFailed'));
+    }
+}
 function addGenerationLog({run, outputs=[], runMs=0, error=''}) {
     if(!canvas) return;
     canvas.logs = canvas.logs || [];
     if(!error && (outputs || []).some(item => outputUrlValue(item))) playGenerationCompleteSound();
+    const normalizedOutputs = (outputs || []).map(item => {
+        const url = outputUrlValue(item);
+        if(!url) return null;
+        if(typeof item === 'object' && item.url === url) return item;
+        return {url, kind:mediaKindForOutputItem(item), name:item?.name || item?.filename || ''};
+    }).filter(Boolean);
     const entry = {
         id:uid('log'),
         createdAt:Date.now(),
         status:error ? 'failed' : 'success',
+        nodeId:run?.node?.id || run?.nodeId || '',
         platform:runPlatformLabel(run),
         nodeType:run?.nodeType || '',
         model:run?.taskLabel || runTaskLabel(run),
         request:run?.request || {},
         prompt:run?.prompt || '',
-        outputs:(outputs || []).filter(Boolean),
+        outputs:normalizedOutputs,
         refs:run?.refs || [],
         runMs:Number(runMs || 0),
         error:error ? String(error) : '',
@@ -13402,13 +13773,16 @@ function renderCanvasLog(){
     const logs = (typeof canvas !== 'undefined' && Array.isArray(canvas?.logs)) ? canvas.logs : [];
     if(!list) return;
     list.innerHTML = logs.length ? logs.map(log => {
-        const thumbs = (log.outputs || []).slice(0, 8).map(item => {
+        const logOutputs = Array.isArray(log.outputs) && log.outputs.length
+            ? log.outputs
+            : (Array.isArray(log.items) ? log.items : (Array.isArray(log.images) ? log.images : []));
+        const thumbs = logOutputs.slice(0, 8).map(item => {
             const url = outputUrlValue(item);
             if(!url) return '';
             const safe = escapeAttr(url);
             if(isMissingAssetUrl(url)) return `<div class="missing-asset compact" data-url="${safe}"><i data-lucide="image-off" class="w-4 h-4"></i></div>`;
             const kind = mediaKindForOutputItem(item);
-            return kind === 'video' ? canvasVideoPreviewHtml(url, 256, 'alt="output"') : canvasPreviewImgHtml(url, 256, 'alt="output"');
+            return kind === 'video' ? canvasVideoPreviewHtml(url, 256, 'alt="output" data-eager-preview="1"') : canvasPreviewImgHtml(url, 256, 'alt="output" data-eager-preview="1"');
         }).join('');
         const date = new Date(log.createdAt || Date.now()).toLocaleString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN');
         const req = log.request || {};
@@ -13421,11 +13795,11 @@ function renderCanvasLog(){
         const backendText = workflow || backend || '';
         const subParts = [
             date,
-            `${langIsEn() ? 'outputs' : '输出'} ${(log.outputs || []).length}`,
+            `${langIsEn() ? 'outputs' : '输出'} ${logOutputs.length}`,
             idText ? `ID ${idText}` : '',
             backendText,
         ].filter(Boolean);
-        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}">
+        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}" data-canvas-log-id="${escapeAttr(log.id || '')}">
             <div class="log-main">
                 <div class="log-meta">
                     <span class="log-chip ${log.status === 'failed' ? 'status-failed' : 'status-ok'}">${escapeHtml(log.status === 'failed' ? tr('canvas.failed') : tr('canvas.success'))}</span>
@@ -13436,6 +13810,10 @@ function renderCanvasLog(){
                 <div class="log-subline">${subParts.map(part => `<span title="${escapeAttr(part)}">${escapeHtml(part)}</span>`).join('')}</div>
                 ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
                 <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
+                <div class="log-actions">
+                    <button type="button" data-log-delete="record"><i data-lucide="list-x"></i><span>${escapeHtml(tr('canvas.deleteLog'))}</span></button>
+                    <button type="button" class="danger" data-log-delete="media"><i data-lucide="trash-2"></i><span>${escapeHtml(tr('canvas.deleteLogAndMedia'))}</span></button>
+                </div>
             </div>
             <div class="log-thumbs">${thumbs}</div>
         </div>`;
@@ -13465,6 +13843,13 @@ function renderCanvasLog(){
     };
     bindCanvasLogCopy('[data-prompt]', 'prompt');
     bindCanvasLogCopy('[data-error]', 'error');
+    list.querySelectorAll('[data-log-delete]').forEach(button => {
+        button.onclick = e => {
+            e.stopPropagation();
+            const logId = button.closest('[data-canvas-log-id]')?.dataset.canvasLogId || '';
+            deleteCanvasLogEntry(logId, button.dataset.logDelete === 'media');
+        };
+    });
     refreshIcons();
 }
 async function importWorkflowAssetUrl(url, name='workflow'){
@@ -13622,6 +14007,7 @@ function completeRecoverPendingOutput(out, pending, result){
     const gen = nodes.find(n => n.id === meta.run?.node?.id);
     if(gen){
         mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
+        rememberGenerationOutputs(gen, pending.fixedSeedCacheKey, images);
         gen.runStatus = 'done';
         gen.runError = '';
         gen.running = false;
@@ -13740,6 +14126,15 @@ function completeCanvasImageTask(taskId, result){
     const gen = nodes.find(n => n.id === meta.run?.node?.id);
     if(gen){
         mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
+        // 批量任务逐个完成；只有本次固定 seed 的同组任务全部结束后才写入缓存。
+        const sameRunPending = (out._pending || []).some(item => item.fixedSeedCacheKey === pending.fixedSeedCacheKey);
+        if(!sameRunPending && pending.fixedSeedCacheKey){
+            const cachedImages = (out.images || [])
+                .filter(item => item?.fixedSeedCacheKey === pending.fixedSeedCacheKey)
+                .map(outputUrlValue)
+                .filter(Boolean);
+            rememberGenerationOutputs(gen, pending.fixedSeedCacheKey, cachedImages);
+        }
         gen.runStatus = 'done';
         gen.runError = '';
         gen.running = false;
@@ -13864,6 +14259,7 @@ function appendOutputImages(out, images, compareRef, metas=[], layout=null){
         if(source.kind || source.mediaKind) item.kind = source.kind || source.mediaKind;
         if(meta.kind) item.kind = meta.kind;
         if(meta.grid) item.grid = meta.grid;
+        if(meta.run?.fixedSeedCacheKey) item.fixedSeedCacheKey = meta.run.fixedSeedCacheKey;
         return item;
     })];
     if(compareRef?.url){

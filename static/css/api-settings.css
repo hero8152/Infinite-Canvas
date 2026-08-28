@@ -375,7 +375,8 @@ body.show-jimeng .api-key-field,
 body.show-codex .api-base-url-field,
 body.show-codex .api-key-field,
 body.show-gemini-cli .api-base-url-field,
-body.show-gemini-cli .api-key-field { display:none !important; }
+body.show-gemini-cli .api-key-field,
+body.show-drawthings .api-key-field { display:none !important; }
 .jimeng-cli-panel { grid-column:1/-1; display:none; flex-direction:column; gap:12px; margin-top:2px; padding:14px; border:1px solid var(--line); border-radius:14px; background:var(--soft); }
 body.show-jimeng .jimeng-cli-panel:not([hidden]) { display:flex; }
 body.show-codex .jimeng-cli-panel:not([hidden]) { display:flex; }
@@ -618,7 +619,10 @@ body.show-codex .image-edit-route-wrap,
 body.show-gemini-cli #probeAsyncBtn,
 body.show-gemini-cli .advanced-endpoints,
 body.show-gemini-cli .image-request-mode-wrap,
-body.show-gemini-cli .image-edit-route-wrap { display:none !important; }
+body.show-gemini-cli .image-edit-route-wrap,
+body.show-drawthings #probeAsyncBtn,
+body.show-drawthings .protocol-selector-wrap,
+body.show-drawthings .image-request-mode-wrap { display:none !important; }
 .protocol-selector-wrap,
 .image-request-mode-wrap,
 .image-edit-route-wrap { height:36px; padding:0 4px; flex-shrink:0; background:var(--panel); }

@@ -1,0 +1,12 @@
+grpcio>=1.71.0
+flatbuffers>=25.2.10
+protobuf>=5.29.0
+fpzip
+numpy
+
+Pillow
+requests
+httpx
+fastapi
+python-multipart
+uvicorn

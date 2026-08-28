@@ -28,7 +28,7 @@ import functools
 import html
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple
-from threading import Lock, Thread
+from threading import Lock, RLock, Thread
 import httpx
 from PIL import Image, ImageOps
 from io import BytesIO
@@ -301,7 +301,7 @@ QUEUE_LOCK = Lock()
 HISTORY_LOCK = Lock()
 GLOBAL_CONFIG_LOCK = Lock()
 CONVERSATION_LOCK = Lock()
-CANVAS_LOCK = Lock()
+CANVAS_LOCK = RLock()
 LOAD_LOCK = Lock()
 RUNNINGHUB_WORKFLOW_LOCK = Lock()
 NEXT_TASK_ID = 1
@@ -314,7 +314,7 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex", "tudou", "grpc"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses", "tudou-async"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.ai"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.ai/openapi/v2"
@@ -593,9 +593,19 @@ AI_REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "1800"))
 IMAGE_POLL_INTERVAL = float(os.getenv("IMAGE_POLL_INTERVAL", "2"))
 IMAGE_TASK_TIMEOUT = float(os.getenv("IMAGE_TASK_TIMEOUT", str(AI_REQUEST_TIMEOUT)))
 COMFYUI_HISTORY_TIMEOUT = int(float(os.getenv("COMFYUI_HISTORY_TIMEOUT", "1800")))
-# 下载 ComfyUI 产物的 socket 超时（秒，作用于连接和每次 read）。没有它时一次网络卡顿会让 urlopen 永久挂起，
-# 导致 generate() 不返回、画布卡片一直转圈拿不到结果。给得足够大以容纳大视频/大图的正常下载。
-COMFYUI_DOWNLOAD_TIMEOUT = float(os.getenv("COMFYUI_DOWNLOAD_TIMEOUT", "120"))
+# Cloudflare Access TCP 转发可能比局域网后端有更高的连接延迟，所有远端请求都必须有明确的单次超时。
+COMFYUI_BACKEND_CHECK_TIMEOUT = float(os.getenv("COMFYUI_BACKEND_CHECK_TIMEOUT", "5"))
+COMFYUI_HTTP_TIMEOUT = float(os.getenv("COMFYUI_HTTP_TIMEOUT", "30"))
+COMFYUI_HISTORY_REQUEST_TIMEOUT = float(os.getenv("COMFYUI_HISTORY_REQUEST_TIMEOUT", "15"))
+# 下载 ComfyUI 产物的 socket 超时（秒，作用于连接和每次 read）。结果通过 Cloudflare 隧道回传时，
+# 连接可能会短暂重置，因此下载层会自动重试，而不是直接把远端 URL 交给前端再次下载。
+COMFYUI_DOWNLOAD_TIMEOUT = float(os.getenv("COMFYUI_DOWNLOAD_TIMEOUT", "300"))
+COMFYUI_DOWNLOAD_RETRIES = max(1, int(float(os.getenv("COMFYUI_DOWNLOAD_RETRIES", "3"))))
+COMFYUI_DOWNLOAD_RETRY_DELAY = max(0.0, float(os.getenv("COMFYUI_DOWNLOAD_RETRY_DELAY", "1")))
+COMFYUI_UPLOAD_TIMEOUT = float(os.getenv("COMFYUI_UPLOAD_TIMEOUT", "60"))
+COMFYUI_UPLOAD_CONNECT_TIMEOUT = float(os.getenv("COMFYUI_UPLOAD_CONNECT_TIMEOUT", "10"))
+COMFYUI_UPLOAD_READ_TIMEOUT = float(os.getenv("COMFYUI_UPLOAD_READ_TIMEOUT", str(COMFYUI_UPLOAD_TIMEOUT)))
+COMFYUI_BACKEND_FAILURE_COOLDOWN = max(0.0, float(os.getenv("COMFYUI_BACKEND_FAILURE_COOLDOWN", "30")))
 APIMART_IMAGE_TASK_TIMEOUT = float(os.getenv("APIMART_IMAGE_TASK_TIMEOUT", "1800"))
 APIMART_IMAGE_POLL_INTERVAL = float(os.getenv("APIMART_IMAGE_POLL_INTERVAL", "5"))
 APIMART_IMAGE_INITIAL_POLL_DELAY = float(os.getenv("APIMART_IMAGE_INITIAL_POLL_DELAY", "10"))
@@ -1266,13 +1276,14 @@ def normalize_provider(item):
         raise HTTPException(status_code=400, detail=f"API 平台 ID 不合法：{provider_id or '(empty)'}")
     name = re.sub(r"\s+", " ", str(item.get("name") or provider_id).strip())[:60] or provider_id
     base_url = str(item.get("base_url") or "").strip().rstrip("/")
-    if base_url and not re.match(r"^https?://", base_url):
-        raise HTTPException(status_code=400, detail=f"{name} 的 Base URL 需要以 http:// 或 https:// 开头")
     protocol = str(item.get("protocol") or "openai").strip().lower()
     if protocol == "tudou":
         protocol = "openai"
     if protocol not in SUPPORTED_PROVIDER_PROTOCOLS:
         protocol = "openai"
+    is_drawthings = provider_id == "drawthings" or protocol == "grpc"
+    if base_url and not is_drawthings and not re.match(r"^https?://", base_url):
+        raise HTTPException(status_code=400, detail=f"{name} 的 Base URL 需要以 http:// 或 https:// 开头")
     image_request_mode = detect_image_request_mode(base_url, item.get("image_models") or []) or normalize_image_request_mode(item.get("image_request_mode"))
     image_generation_endpoint = normalize_endpoint_override(item.get("image_generation_endpoint"), "文生图端口")
     image_edit_endpoint = normalize_endpoint_override(item.get("image_edit_endpoint"), "图生图/编辑端口")
@@ -1288,6 +1299,10 @@ def normalize_provider(item):
         base_url = ""
     if protocol in {"codex", "gemini-cli"}:
         base_url = ""
+    if provider_id == "drawthings" or protocol == "grpc":
+        provider_id = "drawthings"
+        name = name or "Draw Things gRPCServerCLI"
+        protocol = "grpc"
     if provider_id == "runninghub":
         protocol = "runninghub"
         base_url = base_url or RUNNINGHUB_DEFAULT_BASE_URL
@@ -1546,6 +1561,7 @@ def update_env_values(updates):
         f.write("\n".join(next_lines).rstrip() + "\n")
 
 BACKEND_LOCAL_LOAD = {addr: 0 for addr in COMFYUI_INSTANCES}
+COMFYUI_BACKEND_COOLDOWN_UNTIL = {}
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
@@ -2763,6 +2779,12 @@ class GenerateRequest(BaseModel):
 class DeleteHistoryRequest(BaseModel):
     timestamp: float
 
+class DeleteCanvasLogRequest(BaseModel):
+    log_id: str
+    delete_unreferenced_media: bool = False
+    reset_referencing_nodes: bool = False
+    base_updated_at: int = 0
+
 class TokenRequest(BaseModel):
     token: str
 
@@ -2800,7 +2822,11 @@ class OnlineImageRequest(BaseModel):
     resolution: str = ""
     quality: str = "auto"
     n: int = 1
+    batch_size: int = 1
+    seed: Optional[int] = None
     reference_images: List[AIReference] = []
+    mask_images: List[AIReference] = []
+    loras: Optional[List[Dict[str, Any]]] = None
     operation: str = ""
     resolution_type: str = ""
 
@@ -3208,7 +3234,7 @@ def check_images_exist(backend_addr, images):
     for img in images:
         try:
             url = f"http://{backend_addr}/view?filename={urllib.parse.quote(img)}&type=input"
-            r = requests.get(url, stream=True, timeout=0.5)
+            r = requests.get(url, stream=True, timeout=COMFYUI_BACKEND_CHECK_TIMEOUT)
             r.close()
             if r.status_code != 200: return False
         except: return False
@@ -3216,6 +3242,8 @@ def check_images_exist(backend_addr, images):
 
 MEDIA_INPUT_KEYS = ("image", "video", "audio", "mask", "filename", "file")
 MEDIA_INPUT_EXT_RE = re.compile(r"\.(png|jpe?g|webp|gif|bmp|tiff?|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)(?:\?|$)", re.I)
+OPTIONAL_WORKFLOW_IMAGE_MODES = {"prune-workflow", "prune_workflow", "prune"}
+PRUNABLE_WORKFLOW_IMAGE_NODE_TYPES = {"ImageScaleToTotalPixels", "VAEEncode", "ReferenceLatent"}
 
 def is_comfy_input_media_value(input_name: str, value: Any) -> bool:
     if not isinstance(value, str) or not value.strip():
@@ -3235,6 +3263,139 @@ def collect_required_comfy_media(params: Dict[str, Any]) -> List[str]:
             if is_comfy_input_media_value(input_name, value):
                 required.append(value)
     return list(dict.fromkeys(required))
+
+def _workflow_image_fields_for_pruning(workflow_path: str) -> Tuple[List[Dict[str, Any]], str]:
+    config_path = os.path.splitext(workflow_path)[0] + ".config.json"
+    if not os.path.exists(config_path):
+        return [], ""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return [], ""
+    if not isinstance(config, dict):
+        return [], ""
+    fields = config.get("fields")
+    if not isinstance(fields, list):
+        return [], str(config.get("optionalImageMode") or "").strip().lower()
+    image_fields = []
+    for index, field in enumerate(fields):
+        if not isinstance(field, dict):
+            continue
+        field_type = str(field.get("type") or field.get("fieldType") or "").strip().lower()
+        input_name = str(field.get("input") or field.get("fieldName") or "").strip().lower()
+        if field_type not in {"image", "image_upload", "imageurl", "image_url"} and "image" not in input_name:
+            continue
+        item = dict(field)
+        item["_order"] = index
+        image_fields.append(item)
+    image_fields.sort(key=lambda field: (int(field.get("imageOrder") or 0) or 10**9, field["_order"]))
+    return image_fields, str(config.get("optionalImageMode") or "").strip().lower()
+
+def _workflow_link_target(value: Any) -> Optional[str]:
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+    target = value[0]
+    return str(target) if isinstance(target, (str, int)) else None
+
+def _can_drop_missing_workflow_link(node: Dict[str, Any], input_name: str) -> bool:
+    class_type = str(node.get("class_type") or "").strip()
+    normalized_input = str(input_name or "").strip().lower()
+    if class_type == "ComfySwitchNode" and normalized_input in {"on_true", "on_false"}:
+        return True
+    if "textencode" in class_type.lower() and normalized_input.startswith("image"):
+        return True
+    return normalized_input in {"image", "image1", "image2", "image3", "image4"}
+
+def prune_optional_comfy_workflow_images(
+    workflow: Dict[str, Any],
+    workflow_path: str,
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not isinstance(workflow, dict):
+        return workflow
+    image_fields, mode = _workflow_image_fields_for_pruning(workflow_path)
+    if mode not in OPTIONAL_WORKFLOW_IMAGE_MODES or not image_fields:
+        return workflow
+
+    has_required_true = any(field.get("required") is True for field in image_fields)
+    optional_image_nodes = set()
+    for index, field in enumerate(image_fields):
+        node_id = str(field.get("node") or field.get("nodeId") or "").strip()
+        input_name = str(field.get("input") or field.get("fieldName") or "").strip()
+        if not node_id or not input_name:
+            continue
+        required = field.get("required") is True
+        if not has_required_true and index == 0:
+            required = True
+        if required:
+            continue
+        optional_image_nodes.add(node_id)
+        supplied = params.get(node_id) if isinstance(params, dict) else None
+        supplied_value = supplied.get(input_name) if isinstance(supplied, dict) else None
+        if not isinstance(supplied_value, str) or not supplied_value.strip():
+            node = workflow.get(node_id)
+            if isinstance(node, dict) and isinstance(node.get("inputs"), dict):
+                node["inputs"][input_name] = ""
+
+    empty_image_nodes = {
+        node_id
+        for node_id in optional_image_nodes
+        if isinstance(workflow.get(node_id), dict)
+        and str(workflow[node_id].get("class_type") or "") == "LoadImage"
+        and not str((workflow[node_id].get("inputs") or {}).get("image") or "").strip()
+    }
+    if not empty_image_nodes:
+        return workflow
+
+    removed_nodes = set(empty_image_nodes)
+    changed = True
+    while changed:
+        changed = False
+        for node_id, node in list(workflow.items()):
+            node_id = str(node_id)
+            if node_id in removed_nodes or not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            for input_name, value in list(inputs.items()):
+                if _workflow_link_target(value) not in removed_nodes:
+                    continue
+                if _can_drop_missing_workflow_link(node, input_name):
+                    del inputs[input_name]
+                elif str(node.get("class_type") or "") in PRUNABLE_WORKFLOW_IMAGE_NODE_TYPES:
+                    removed_nodes.add(node_id)
+                    changed = True
+                break
+
+    for node_id in removed_nodes:
+        workflow.pop(node_id, None)
+    for node in workflow.values():
+        if not isinstance(node, dict) or not isinstance(node.get("inputs"), dict):
+            continue
+        for input_name, value in list(node["inputs"].items()):
+            if _workflow_link_target(value) in removed_nodes:
+                del node["inputs"][input_name]
+    return workflow
+
+def mark_comfy_backend_failed(addr: str, reason: str = ""):
+    with LOAD_LOCK:
+        COMFYUI_BACKEND_COOLDOWN_UNTIL[addr] = time.monotonic() + COMFYUI_BACKEND_FAILURE_COOLDOWN
+    if reason:
+        print(f"ComfyUI backend temporarily disabled {addr}: {reason}")
+
+def clear_comfy_backend_failure(addr: str):
+    with LOAD_LOCK:
+        COMFYUI_BACKEND_COOLDOWN_UNTIL.pop(addr, None)
+
+def comfy_backend_is_available(addr: str) -> bool:
+    with LOAD_LOCK:
+        cooldown_until = COMFYUI_BACKEND_COOLDOWN_UNTIL.get(addr, 0.0)
+        if cooldown_until and cooldown_until <= time.monotonic():
+            COMFYUI_BACKEND_COOLDOWN_UNTIL.pop(addr, None)
+            return True
+        return not cooldown_until
 
 def comfy_prompt_error_message(status_code: int, error_body: str) -> str:
     """Turn ComfyUI's validation payload into a useful canvas error."""
@@ -3280,8 +3441,14 @@ def get_best_backend(required_images: List[str] = None):
     backend_stats = {}
 
     for addr in COMFYUI_INSTANCES:
+        if not comfy_backend_is_available(addr):
+            continue
         try:
-            with urllib.request.urlopen(f"http://{addr}/queue", timeout=1) as response:
+            request = urllib.request.Request(
+                f"http://{addr}/queue",
+                headers={"Connection": "close", "Cache-Control": "no-cache"},
+            )
+            with urllib.request.urlopen(request, timeout=COMFYUI_BACKEND_CHECK_TIMEOUT) as response:
                 data = json.loads(response.read())
                 remote_load = len(data.get('queue_running', [])) + len(data.get('queue_pending', []))
                 with LOAD_LOCK:
@@ -3307,8 +3474,14 @@ def get_best_backend(required_images: List[str] = None):
 def reserve_best_backend(required_images: List[str] = None):
     backend_stats = {}
     for addr in COMFYUI_INSTANCES:
+        if not comfy_backend_is_available(addr):
+            continue
         try:
-            with urllib.request.urlopen(f"http://{addr}/queue", timeout=1) as response:
+            request = urllib.request.Request(
+                f"http://{addr}/queue",
+                headers={"Connection": "close", "Cache-Control": "no-cache"},
+            )
+            with urllib.request.urlopen(request, timeout=COMFYUI_BACKEND_CHECK_TIMEOUT) as response:
                 data = json.loads(response.read())
                 remote_load = len(data.get('queue_running', [])) + len(data.get('queue_pending', []))
                 has_images = check_images_exist(addr, required_images)
@@ -3316,6 +3489,12 @@ def reserve_best_backend(required_images: List[str] = None):
         except Exception as e:
             print(f"Backend {addr} unreachable: {e}")
             continue
+    if not backend_stats:
+        configured = ", ".join(COMFYUI_INSTANCES) or "未配置"
+        raise HTTPException(
+            status_code=502,
+            detail=f"没有可用的 ComfyUI 后端：{configured}。请检查服务是否启动，以及端口是否可访问",
+        )
     with LOAD_LOCK:
         best_backend = COMFYUI_INSTANCES[0]
         min_load = float('inf')
@@ -3328,15 +3507,112 @@ def reserve_best_backend(required_images: List[str] = None):
         BACKEND_LOCAL_LOAD[best_backend] = BACKEND_LOCAL_LOAD.get(best_backend, 0) + 1
         return best_backend
 
+def get_comfy_backend_upload_order():
+    """Return reachable ComfyUI backends first, ordered by current load.
+
+    Uploading to every configured backend is both slow and fragile: one stale
+    or disconnected address can make an otherwise healthy backend look like a
+    total upload failure.  A generated workflow can still synchronize its
+    input files to the backend selected later by ``reserve_best_backend``.
+    """
+    backend_stats = {}
+    for addr in COMFYUI_INSTANCES:
+        if not comfy_backend_is_available(addr):
+            continue
+        try:
+            response = requests.get(
+                f"http://{addr}/queue",
+                headers={"Connection": "close", "Cache-Control": "no-cache"},
+                timeout=COMFYUI_BACKEND_CHECK_TIMEOUT,
+            )
+            response.raise_for_status()
+            data = response.json()
+            remote_load = len(data.get("queue_running", [])) + len(data.get("queue_pending", []))
+            with LOAD_LOCK:
+                local_load = BACKEND_LOCAL_LOAD.get(addr, 0)
+            backend_stats[addr] = max(remote_load, local_load)
+        except Exception as exc:
+            print(f"ComfyUI upload backend unavailable {addr}: {exc}")
+
+    return sorted(
+        backend_stats,
+        key=lambda addr: (backend_stats[addr], COMFYUI_INSTANCES.index(addr)),
+    )
+
 # --- 辅助工具 ---
+
+def _download_comfy_file_atomic(full_url, local_path, validate_image=False, alternate_urls=None):
+    """Download a ComfyUI file atomically with retries for tunnel resets."""
+    directory = os.path.dirname(local_path) or "."
+    urls = [str(full_url)]
+    for alternate_url in alternate_urls or []:
+        if alternate_url and str(alternate_url) not in urls:
+            urls.append(str(alternate_url))
+    last_error = None
+
+    for attempt in range(COMFYUI_DOWNLOAD_RETRIES):
+        for url in urls:
+            temp_path = ""
+            try:
+                prefix = f".{os.path.basename(local_path)}."
+                fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=".part", dir=directory)
+                total_bytes = 0
+                request = urllib.request.Request(
+                    url,
+                    headers={"Connection": "close", "Cache-Control": "no-cache"},
+                )
+                with os.fdopen(fd, "wb") as out_file:
+                    with urllib.request.urlopen(request, timeout=COMFYUI_DOWNLOAD_TIMEOUT) as response:
+                        expected_length = response.headers.get("Content-Length")
+                        try:
+                            expected_length = int(expected_length) if expected_length else None
+                        except (TypeError, ValueError):
+                            expected_length = None
+                        while True:
+                            chunk = response.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            out_file.write(chunk)
+                            total_bytes += len(chunk)
+                    out_file.flush()
+                    os.fsync(out_file.fileno())
+                if expected_length is not None and total_bytes != expected_length:
+                    raise IOError(
+                        f"ComfyUI 文件下载不完整：收到 {total_bytes} 字节，期望 {expected_length} 字节"
+                    )
+                if total_bytes <= 0:
+                    raise IOError("ComfyUI 返回了空文件")
+                if validate_image:
+                    with Image.open(temp_path) as image:
+                        image.verify()
+                os.replace(temp_path, local_path)
+                temp_path = ""
+                return
+            except Exception as exc:
+                last_error = exc
+            finally:
+                if temp_path:
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+        if attempt + 1 < COMFYUI_DOWNLOAD_RETRIES:
+            time.sleep(COMFYUI_DOWNLOAD_RETRY_DELAY)
+
+    raise last_error or IOError("ComfyUI 文件下载失败")
 
 def download_image(comfy_address, comfy_url_path, prefix="studio_"):
     filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
     local_path = output_path_for(filename, "output")
     full_url = f"http://{comfy_address}{comfy_url_path}"
     try:
-        with urllib.request.urlopen(full_url, timeout=COMFYUI_DOWNLOAD_TIMEOUT) as response, open(local_path, 'wb') as out_file:
-            shutil.copyfileobj(response, out_file)
+        alternate_url = full_url.replace("/view?", "/api/view?", 1)
+        _download_comfy_file_atomic(
+            full_url,
+            local_path,
+            validate_image=True,
+            alternate_urls=[alternate_url],
+        )
         return output_url_for(filename, "output")
     except Exception as e:
         print(f"下载图片失败: {e}")
@@ -3401,15 +3677,18 @@ def download_comfy_output(comfy_address, item, prefix="studio_"):
     file_type = urllib.parse.quote(str(item.get("type") or "output"))
     comfy_url_path = f"/view?filename={urllib.parse.quote(str(item['filename']))}&subfolder={subfolder}&type={file_type}"
     full_url = f"http://{comfy_address}{comfy_url_path}"
+    alternate_url = full_url.replace("/view?", "/api/view?", 1)
     try:
-        with urllib.request.urlopen(full_url, timeout=COMFYUI_DOWNLOAD_TIMEOUT) as response, open(local_path, 'wb') as out_file:
-            shutil.copyfileobj(response, out_file)
+        _download_comfy_file_atomic(
+            full_url,
+            local_path,
+            validate_image=ext in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"},
+            alternate_urls=[alternate_url],
+        )
         return output_url_for(filename, "output")
     except Exception as e:
         print(f"下载 ComfyUI 输出失败: {e}")
-        if comfy_url_path.startswith("/view"):
-            return comfy_url_path.replace("/view", "/api/view", 1)
-        return full_url
+        raise RuntimeError(f"ComfyUI 输出回传失败：{e}") from e
 
 def save_comfy_text_output(value, prefix="studio_", name=""):
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
@@ -3492,7 +3771,11 @@ def save_to_history(record):
 
 def get_comfy_history(comfy_address, prompt_id):
     try:
-        with urllib.request.urlopen(f"http://{comfy_address}/history/{prompt_id}") as response:
+        request = urllib.request.Request(
+            f"http://{comfy_address}/history/{prompt_id}",
+            headers={"Connection": "close", "Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(request, timeout=COMFYUI_HISTORY_REQUEST_TIMEOUT) as response:
             return json.loads(response.read())
     except Exception as e:
         return {}
@@ -4887,6 +5170,9 @@ def is_codex_provider(provider):
 
 def is_gemini_cli_provider(provider):
     return provider_protocol(provider) == "gemini-cli"
+
+def is_draw_things_provider(provider):
+    return provider_protocol(provider) == "grpc" or str((provider or {}).get("id") or "").strip().lower() == "drawthings"
 
 def codex_env_value(key):
     return os.getenv(key, "") or read_api_env_value(key)
@@ -6940,6 +7226,205 @@ def output_file_from_url(url):
             return path
     return None
 
+def collect_local_media_urls(value: Any) -> List[str]:
+    urls = []
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith(("/assets/", "/output/", "/api/storage-files/")):
+            urls.append(text)
+    elif isinstance(value, dict):
+        for item in value.values():
+            urls.extend(collect_local_media_urls(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            urls.extend(collect_local_media_urls(item))
+    return urls
+
+def local_media_path_from_url(url: str) -> Optional[str]:
+    try:
+        return output_file_from_url(url)
+    except (HTTPException, OSError, ValueError):
+        return None
+
+def generated_media_path_from_url(url: str) -> Optional[str]:
+    path = local_media_path_from_url(url)
+    if not path or not os.path.isfile(path):
+        return None
+    path = os.path.realpath(path)
+    for root in (OUTPUT_OUTPUT_DIR, OUTPUT_DIR):
+        root = os.path.realpath(root)
+        try:
+            if os.path.commonpath([root, path]) == root:
+                return path
+        except ValueError:
+            continue
+    return None
+
+def json_references_media_path(value: Any, target_path: str) -> bool:
+    target = os.path.normcase(os.path.realpath(target_path))
+    if isinstance(value, str):
+        resolved = local_media_path_from_url(value.strip())
+        return bool(resolved and os.path.normcase(os.path.realpath(resolved)) == target)
+    if isinstance(value, dict):
+        return any(json_references_media_path(item, target) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(json_references_media_path(item, target) for item in value)
+    return False
+
+def persisted_json_references_media_path(target_path: str) -> bool:
+    candidates = [ASSET_LIBRARY_PATH]
+    for root in (CANVAS_DIR, CONVERSATION_DIR):
+        if os.path.isdir(root):
+            for current, _, files in os.walk(root):
+                candidates.extend(
+                    os.path.join(current, name)
+                    for name in files
+                    if name.lower().endswith(".json")
+                )
+    seen = set()
+    for path in candidates:
+        path = os.path.abspath(path)
+        if path in seen or not os.path.isfile(path):
+            continue
+        seen.add(path)
+        try:
+            with open(path, "r", encoding="utf-8-sig") as handle:
+                value = json.load(handle)
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return True
+        if json_references_media_path(value, target_path):
+            return True
+    return False
+
+def prune_generation_history_for_media(paths: List[str]) -> int:
+    if not paths or not os.path.isfile(HISTORY_FILE):
+        return 0
+    try:
+        with HISTORY_LOCK:
+            with open(HISTORY_FILE, "r", encoding="utf-8-sig") as handle:
+                history = json.load(handle)
+            if not isinstance(history, list):
+                return 0
+            kept = [
+                record for record in history
+                if not any(json_references_media_path(record, path) for path in paths)
+            ]
+            removed = len(history) - len(kept)
+            if removed:
+                with open(HISTORY_FILE, "w", encoding="utf-8") as handle:
+                    json.dump(kept, handle, ensure_ascii=False, indent=4)
+            return removed
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return 0
+
+def smart_owned_result_items(images: List[Any], paths: List[str]) -> List[Any]:
+    return [
+        item for item in images
+        if isinstance(item, dict)
+        and item.get("loopInputPreview") is not True
+        and item.get("generatedResult") is True
+    ]
+
+def expand_canvas_generated_media_paths(canvas: Dict[str, Any], paths: List[str]) -> List[str]:
+    expanded = list(paths)
+    for node in list(canvas.get("nodes") or []):
+        node_type = str(node.get("type") or "").strip().lower()
+        images = list(node.get("images") or [])
+        if node_type == "output":
+            owned_items = images
+        elif node_type == "smart-image":
+            owned_items = smart_owned_result_items(images, paths)
+        else:
+            owned_items = []
+        if not any(json_references_media_path(item, path) for item in owned_items for path in paths):
+            continue
+        for item in owned_items:
+            for url in collect_local_media_urls(item):
+                candidate = generated_media_path_from_url(url)
+                if candidate and candidate not in expanded:
+                    expanded.append(candidate)
+    return expanded
+
+def reset_canvas_result_nodes_for_media(canvas: Dict[str, Any], paths: List[str]) -> List[str]:
+    reset_ids = []
+    updated_nodes = []
+    for node in list(canvas.get("nodes") or []):
+        node = dict(node)
+        node_type = str(node.get("type") or "").strip().lower()
+        changed = False
+        if isinstance(node.get("generatedOutputs"), list):
+            outputs = list(node.get("generatedOutputs") or [])
+            kept_outputs = [
+                item for item in outputs
+                if not any(json_references_media_path(item, path) for path in paths)
+            ]
+            if len(kept_outputs) != len(outputs):
+                node["generatedOutputs"] = kept_outputs
+                changed = True
+        if node_type in {"smart-image", "output"} and isinstance(node.get("images"), list):
+            images = list(node.get("images") or [])
+            owned_items = smart_owned_result_items(images, paths) if node_type == "smart-image" else images
+            owns_target = any(
+                json_references_media_path(item, path) for item in owned_items for path in paths
+            )
+            kept_images = [
+                item for item in images
+                if not (
+                    owns_target
+                    and item in owned_items
+                    and any(json_references_media_path(item, path) for path in paths)
+                )
+            ]
+            if len(kept_images) != len(images):
+                node["images"] = kept_images
+                changed = True
+                if node_type == "output":
+                    node["_pending"] = []
+                    node["imageComparisons"] = {}
+                if node_type == "smart-image":
+                    node["pending"] = 0
+                    node["running"] = False
+                    node["queued"] = False
+                    for key in (
+                        "jimengPending", "pendingTasks", "runStartedAt", "runFinishedAt",
+                        "runElapsedMs", "runTimerHidden", "outputKind", "w", "h",
+                    ):
+                        node.pop(key, None)
+        elif node_type == "image" and any(json_references_media_path(node.get("url"), path) for path in paths):
+            node["url"] = ""
+            node["mediaKind"] = "image"
+            node["name"] = "空白图片"
+            changed = True
+        if changed and node.get("id"):
+            reset_ids.append(str(node["id"]))
+        updated_nodes.append(node)
+
+    if reset_ids:
+        canvas["nodes"] = updated_nodes
+    return reset_ids
+
+def delete_media_preview_cache(path: str) -> int:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return 0
+    source = os.path.realpath(path)
+    removed = 0
+    for width in range(0, 4097):
+        keys = [hashlib.sha1(f"{source}|{stat.st_mtime_ns}|{stat.st_size}|{width}|jpg".encode("utf-8", "ignore")).hexdigest() + ".jpg"]
+        if 64 <= width <= 2048:
+            preview_key = hashlib.sha1(f"{source}|{stat.st_mtime_ns}|{stat.st_size}|{width}".encode("utf-8", "ignore")).hexdigest()
+            keys.extend((preview_key + ".webp", preview_key + ".png"))
+        for name in keys:
+            cache_path = os.path.join(MEDIA_PREVIEW_DIR, name)
+            try:
+                if os.path.isfile(cache_path):
+                    os.remove(cache_path)
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
 def image_has_alpha(img: Image.Image) -> bool:
     if img.mode in ("RGBA", "LA"):
         return True
@@ -8721,7 +9206,7 @@ def public_media_url_suffix() -> str:
 
 def local_asset_public_url(value: str) -> str:
     text = str(value or "").strip()
-    if not text.startswith(("/output/", "/assets/")):
+    if not text.startswith(("/output/", "/assets/", "/api/storage-files/")):
         return ""
     if not output_file_from_url(text):
         return ""
@@ -8765,6 +9250,36 @@ async def openai_video_proxy_public_reference_url(ref) -> str:
             detail=f"参考图上传图床失败，无法转成公网 URL：{upload_error[:200] or '未知错误'}。请检查网络后重试。"
         )
     raise HTTPException(status_code=400, detail=f"参考图不是公网 URL，无法传给上游：{text[:160]}")
+
+def local_media_reference_path(ref_url: str) -> str:
+    """将画布引用中的本机 URL 还原为后端可读取的本地媒体 URL。"""
+    text = str(ref_url or "").strip()
+    if not text:
+        return ""
+    parsed = urllib.parse.urlsplit(text)
+    if parsed.scheme in {"http", "https"}:
+        host = (parsed.hostname or "").lower()
+        is_local_host = (
+            host in {"127.0.0.1", "localhost", "::1"}
+            or re.match(r"^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)", host)
+            or host.endswith(".local")
+        )
+        if not is_local_host:
+            return ""
+        text = urllib.parse.unquote(parsed.path or "")
+        if parsed.path == "/api/media-preview":
+            nested = urllib.parse.parse_qs(parsed.query).get("url", [""])[0]
+            text = urllib.parse.unquote(nested or "")
+    elif parsed.scheme == "file":
+        text = urllib.parse.unquote(parsed.path or "")
+    elif parsed.scheme:
+        return ""
+    if parsed.path == "/api/media-preview":
+        nested = urllib.parse.parse_qs(parsed.query).get("url", [""])[0]
+        text = urllib.parse.unquote(nested or "")
+    if text.startswith(("/output/", "/assets/", "/api/storage-files/")):
+        return text
+    return ""
 
 def openai_video_proxy_local_image_path(ref) -> str:
     raw = ref.get("url", "") if isinstance(ref, dict) else ref
@@ -9357,11 +9872,12 @@ def local_media_path_for_cloud_upload(ref_url: str, allowed_prefixes=("image/", 
     ref_url = str(ref_url or "").strip()
     if not ref_url:
         raise HTTPException(status_code=400, detail="没有可上传的媒体文件")
-    if ref_url.startswith("http://") or ref_url.startswith("https://"):
-        return ""
-    if not (ref_url.startswith("/output/") or ref_url.startswith("/assets/")):
+    local_ref = local_media_reference_path(ref_url) or ref_url
+    if not local_ref.startswith(("/output/", "/assets/", "/api/storage-files/")):
+        if ref_url.startswith(("http://", "https://")):
+            return ""
         raise HTTPException(status_code=400, detail="云端上传只支持画布里的本地图片或视频文件")
-    path = output_file_from_url(ref_url)
+    path = output_file_from_url(local_ref)
     if not path:
         raise HTTPException(status_code=404, detail="本地媒体文件不存在或已被删除")
     ct = content_type_for_path(path)
@@ -9416,20 +9932,92 @@ async def upload_video_to_temp_sh(path: str, source_url: str) -> Dict[str, str]:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Temp.sh 上传异常：{exc}") from exc
 
+async def upload_media_to_uguu(path: str, source_url: str) -> Dict[str, str]:
+    upload_url = os.getenv("UGUU_UPLOAD_URL", "https://uguu.se/upload.php").strip() or "https://uguu.se/upload.php"
+    ct = content_type_for_path(path)
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=600.0, write=600.0, pool=20.0), follow_redirects=True) as client:
+            with open(path, "rb") as fh:
+                files = {"files[]": (os.path.basename(path), fh, ct)}
+                response = await client.post(upload_url, files=files)
+        if not response.is_success:
+            raise HTTPException(status_code=response.status_code, detail=f"Uguu 上传失败：{response.text[:300]}")
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Uguu 返回了非 JSON 响应：{response.text[:300]}") from exc
+        items = payload.get("files") if isinstance(payload, dict) else None
+        direct_url = str((items[0] if isinstance(items, list) and items else {}).get("url") or "").strip()
+        if not re.match(r"^https?://", direct_url, re.I):
+            raise HTTPException(status_code=502, detail=f"Uguu 返回了无法识别的链接：{str(payload)[:300]}")
+        return {"url": direct_url, "source": source_url, "name": os.path.basename(path), "expires": "temporary", "service": "uguu"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Uguu 上传异常：{exc}") from exc
+
+async def verify_public_media_url(url: str, expected_content_type: str = "") -> Dict[str, str]:
+    parsed = urllib.parse.urlsplit(str(url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=502, detail="上传服务返回的不是有效公网 URL")
+    expected = str(expected_content_type or "").lower().split(";", 1)[0].strip()
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=20.0, read=60.0, write=30.0, pool=20.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Infinite-Canvas/1.0"},
+        ) as client:
+            async with client.stream("GET", str(url).strip()) as response:
+                if not response.is_success:
+                    raise HTTPException(status_code=502, detail=f"公网媒体返回 HTTP {response.status_code}")
+                content_type = str(response.headers.get("content-type") or "").lower().split(";", 1)[0].strip()
+                if expected.startswith("image/"):
+                    supported = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+                    if content_type not in supported:
+                        raise HTTPException(status_code=502, detail=f"公网地址返回的不是可用图片（Content-Type: {content_type or '未知'}）")
+                elif expected.startswith("video/") and not content_type.startswith("video/"):
+                    raise HTTPException(status_code=502, detail=f"公网地址返回的不是可用视频（Content-Type: {content_type or '未知'}）")
+                first_chunk = b""
+                async for chunk in response.aiter_bytes():
+                    first_chunk += chunk
+                    if len(first_chunk) >= 32:
+                        break
+                if expected.startswith("image/") and not first_chunk:
+                    raise HTTPException(status_code=502, detail="公网地址返回了空图片")
+                return {"content_type": content_type, "status": str(response.status_code), "host": parsed.hostname or ""}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"公网媒体地址无法访问：{exc}") from exc
+
 async def upload_local_video_to_cloud(ref_url: str, service: str = "auto") -> Dict[str, str]:
     ref_url = str(ref_url or "").strip()
-    if ref_url.startswith("http://") or ref_url.startswith("https://"):
+    local_ref = local_media_reference_path(ref_url)
+    if local_ref:
+        ref_url = local_ref
+    elif ref_url.startswith(("http://", "https://")):
         return {"url": ref_url, "source": ref_url, "service": "existing"}
     path = local_media_path_for_cloud_upload(ref_url)
-    service = str(service or os.getenv("CLOUD_VIDEO_UPLOAD_SERVICE", "auto") or "auto").strip().lower()
-    if service in {"litterbox", "catbox"}:
-        return await upload_video_to_litterbox(path, ref_url)
-    if service in {"temp", "temp.sh", "tempsh"}:
-        return await upload_video_to_temp_sh(path, ref_url)
+    requested_service = str(service or "").strip().lower()
+    service = requested_service if requested_service not in {"", "auto"} else str(os.getenv("CLOUD_VIDEO_UPLOAD_SERVICE", "auto") or "auto").strip().lower()
+    uploaders = {
+        "uguu": upload_media_to_uguu,
+        "litterbox": upload_video_to_litterbox,
+        "catbox": upload_video_to_litterbox,
+        "temp": upload_video_to_temp_sh,
+        "temp.sh": upload_video_to_temp_sh,
+        "tempsh": upload_video_to_temp_sh,
+    }
+    if service in uploaders:
+        result = await uploaders[service](path, ref_url)
+        result.update(await verify_public_media_url(result.get("url", ""), content_type_for_path(path)))
+        return result
     errors = []
-    for name, func in (("litterbox", upload_video_to_litterbox), ("temp.sh", upload_video_to_temp_sh)):
+    for name, func in (("uguu", upload_media_to_uguu), ("litterbox", upload_video_to_litterbox), ("temp.sh", upload_video_to_temp_sh)):
         try:
-            return await func(path, ref_url)
+            result = await func(path, ref_url)
+            result.update(await verify_public_media_url(result.get("url", ""), content_type_for_path(path)))
+            return result
         except HTTPException as exc:
             errors.append(f"{name}: {exc.detail}")
     raise HTTPException(status_code=502, detail="云端上传失败：" + "；".join(errors))
@@ -11169,10 +11757,110 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {"videos": local_urls, "task_id": task_id, "raw": result}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", aspect_ratio="", resolution=""):
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", aspect_ratio="", resolution="", seed=None, batch_size=1, loras=None, mask_images=None):
     provider = get_api_provider(provider_id)
     if is_tudou_provider(provider):
         model = tudou_image_model_for_request(model)
+    if is_draw_things_provider(provider):
+        from CLI.macos.drawthings.draw_things_grpc import draw_things_model_supports_editing
+
+        drawthings_references = []
+        drawthings_masks = []
+        seen_sources = set()
+        for reference in (reference_images or []):
+            item = dict(reference) if isinstance(reference, dict) else {"url": reference}
+            url = str(item.get("url") or "").strip()
+            is_mask = (
+                str(item.get("role") or "").strip().lower() == "mask"
+                or bool(re.search(r"(?:^|_)mask\.(?:png|jpe?g|webp)$", str(item.get("name") or "").strip(), re.IGNORECASE))
+            )
+            # Canvas references normally use /output or /assets URLs. Resolve
+            # those to local files before passing them to the gRPC client;
+            # other providers keep their existing reference handling.
+            local_path = local_media_path_from_url(url)
+            target = drawthings_masks if is_mask else drawthings_references
+            if local_path:
+                target.append({
+                    "path": local_path,
+                    "name": item.get("name") or os.path.basename(local_path),
+                    "weight": item.get("weight", 1.0),
+                })
+            elif url:
+                target.append(item)
+            if url:
+                seen_sources.add(url)
+        for reference in (mask_images or []):
+            item = dict(reference) if isinstance(reference, dict) else {"url": reference}
+            url = str(item.get("url") or "").strip()
+            if url and url in seen_sources:
+                continue
+            local_path = local_media_path_from_url(url)
+            if local_path:
+                drawthings_masks.append({
+                    "path": local_path,
+                    "name": item.get("name") or os.path.basename(local_path),
+                    "weight": item.get("weight", 1.0),
+                })
+            elif url:
+                drawthings_masks.append(item)
+        editing_model = draw_things_model_supports_editing(model)
+        if not editing_model and len(drawthings_references) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="当前 Draw Things 模型只支持文生图或单图图生图，不能输入多张参考图。",
+            )
+        if len(drawthings_masks) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="当前 Draw Things 请求只支持一张遮罩图。",
+            )
+        if drawthings_masks and not drawthings_references:
+            raise HTTPException(
+                status_code=400,
+                detail="遮罩需要与一张输入图一起使用。",
+            )
+        try:
+            from CLI.macos.drawthings.draw_things_grpc import generate_draw_things_image
+            # The provider's saved host:port overrides environment defaults.
+            request_options = {
+                "endpoint": provider.get("base_url") or "",
+                "seed": seed,
+                "batch_size": batch_size,
+                "loras": loras or [],
+            }
+            if drawthings_masks:
+                # Draw Things masks belong to ImageGenerationRequest.mask and
+                # must not be counted as a second ordinary reference image.
+                # For an editing model, the first image is the masked base
+                # image and the remaining references stay in the HintProto
+                # stack, matching the official Draw Things ComfyUI node.
+                if editing_model and len(drawthings_references) > 1:
+                    request_options.update(
+                        reference_images=drawthings_references[:1],
+                        hint_images=drawthings_references[1:],
+                        hint_type="shuffle",
+                        mask_images=drawthings_masks,
+                    )
+                else:
+                    request_options.update(
+                        reference_images=drawthings_references,
+                        mask_images=drawthings_masks,
+                    )
+            elif editing_model:
+                request_options.update(
+                    hint_images=drawthings_references,
+                    hint_type="shuffle" if drawthings_references else "",
+                )
+            else:
+                request_options.update(
+                    reference_images=drawthings_references,
+                )
+            image_item, raw = await generate_draw_things_image(
+                prompt, size, model, **request_options
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return image_item, raw
     if provider["id"] == "modelscope":
         return await generate_modelscope_provider_image(prompt, size, model, reference_images, provider)
     if is_codex_provider(provider):
@@ -11232,13 +11920,16 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             local_image_paths = [openai_video_proxy_local_image_path(ref) for ref in refs_for_proxy]
             has_local_images = any(local_image_paths)
             if has_local_images:
-                form_data = [(key, value) for key, value in body.items()]
+                form_data = dict(body)
+                remote_image_urls = []
                 for ref, local_path in zip(refs_for_proxy, local_image_paths):
                     if local_path:
                         continue
                     url = await openai_video_proxy_public_reference_url(ref)
                     if url:
-                        form_data.append(("images", url))
+                        remote_image_urls.append(url)
+                if remote_image_urls:
+                    form_data["images"] = remote_image_urls
                 files = []
                 opened = []
                 try:
@@ -11829,27 +12520,47 @@ async def export_minimax_timeline(payload: MiniMaxTimelineExportRequest):
 async def upload_image(files: List[UploadFile] = File(...)):
     uploaded_files = []
     files_content = []
+    backend_order = get_comfy_backend_upload_order()
+    if not backend_order:
+        raise HTTPException(
+            status_code=502,
+            detail="没有可用的 ComfyUI 后端：请检查已配置地址的服务是否启动，以及端口是否可访问",
+        )
     for file in files:
         content = await file.read()
         files_content.append((file, content))
 
     for file, content in files_content:
-        success_count = 0
         last_result = None
-        for addr in COMFYUI_INSTANCES:
+        upload_errors = []
+        for addr in backend_order:
             try:
                 files_data = {'image': (file.filename, content, file.content_type)}
-                response = requests.post(f"http://{addr}/upload/image", files=files_data, timeout=5)
+                response = requests.post(
+                    f"http://{addr}/upload/image",
+                    files=files_data,
+                    headers={"Connection": "close"},
+                    timeout=(COMFYUI_UPLOAD_CONNECT_TIMEOUT, COMFYUI_UPLOAD_READ_TIMEOUT),
+                )
                 if response.status_code == 200:
                     last_result = response.json()
-                    success_count += 1
+                    clear_comfy_backend_failure(addr)
+                    break
+                else:
+                    upload_errors.append(f"{addr}: HTTP {response.status_code}")
+                    mark_comfy_backend_failed(addr, f"upload HTTP {response.status_code}")
             except Exception as e:
                 print(f"Upload error for {addr}: {e}")
+                upload_errors.append(f"{addr}: {e}")
+                mark_comfy_backend_failed(addr, str(e))
 
-        if success_count > 0 and last_result:
+        if last_result:
             uploaded_files.append({"comfy_name": last_result.get("name", file.filename)})
         else:
-            raise HTTPException(status_code=500, detail="Failed to upload to any backend")
+            detail = "Failed to upload to any backend"
+            if upload_errors:
+                detail += f": {'; '.join(upload_errors[:3])}"
+            raise HTTPException(status_code=502, detail=detail)
 
     return {"files": uploaded_files}
 
@@ -11892,8 +12603,7 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
                 ext = ".bin"
         filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
         path = output_path_for(filename, "input")
-        with open(path, "wb") as f:
-            f.write(content)
+        write_uploaded_content_atomic(path, content)
         uploaded.append({"url": output_url_for(filename, "input"), "name": file.filename or filename, "kind": kind, "mime": content_type})
     return {"files": uploaded}
 
@@ -11925,13 +12635,12 @@ async def upload_ai_base64(payload: Base64UploadRequest):
         kind, ext = "image", ".png"
     filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
     path = output_path_for(filename, "input")
-    with open(path, "wb") as f:
-        f.write(content)
+    write_uploaded_content_atomic(path, content)
     return {"files": [{"url": output_url_for(filename, "input"), "name": payload.name or filename, "kind": kind}]}
 
 @app.post("/api/comfyui/upload-base64")
 async def upload_comfyui_base64(payload: Base64UploadRequest):
-    """base64 方式把图片传到 ComfyUI 各后端的 input 目录，返回 comfy 用文件名（供 UXP 做 ComfyUI 图生图）。"""
+    """Upload a base64 image to one reachable ComfyUI backend."""
     raw = (payload.data or "").strip()
     ct = (payload.content_type or "").split(";", 1)[0].strip().lower()
     if raw.startswith("data:"):
@@ -11947,16 +12656,34 @@ async def upload_comfyui_base64(payload: Base64UploadRequest):
     _, ext = _local_upload_kind_ext(payload.name or "", ct or "image/png")
     filename = f"dx_{uuid.uuid4().hex[:12]}{ext or '.png'}"
     comfy_name = None
-    for addr in COMFYUI_INSTANCES:
+    upload_errors = []
+    backend_order = get_comfy_backend_upload_order()
+    if not backend_order:
+        raise HTTPException(
+            status_code=502,
+            detail="没有可用的 ComfyUI 后端：请检查已配置地址的服务是否启动，以及端口是否可访问",
+        )
+    for addr in backend_order:
         try:
             resp = requests.post(f"http://{addr}/upload/image",
-                                 files={'image': (filename, content, ct or 'image/png')}, timeout=10)
+                                 files={'image': (filename, content, ct or 'image/png')},
+                                 headers={"Connection": "close"},
+                                 timeout=(COMFYUI_UPLOAD_CONNECT_TIMEOUT, COMFYUI_UPLOAD_READ_TIMEOUT))
             if resp.status_code == 200:
                 comfy_name = resp.json().get("name", filename)
+                clear_comfy_backend_failure(addr)
+                break
+            upload_errors.append(f"{addr}: HTTP {resp.status_code}")
+            mark_comfy_backend_failed(addr, f"upload HTTP {resp.status_code}")
         except Exception as exc:
             print(f"ComfyUI base64 upload error for {addr}: {exc}")
+            upload_errors.append(f"{addr}: {exc}")
+            mark_comfy_backend_failed(addr, str(exc))
     if not comfy_name:
-        raise HTTPException(status_code=502, detail="上传到 ComfyUI 失败")
+        detail = "上传到 ComfyUI 失败"
+        if upload_errors:
+            detail += f": {'; '.join(upload_errors[:3])}"
+        raise HTTPException(status_code=502, detail=detail)
     return {"name": comfy_name}
 
 def _local_upload_kind_ext(filename, content_type):
@@ -11978,6 +12705,25 @@ def _local_upload_kind_ext(filename, content_type):
             ext = ".jpg" if "jpeg" in ct else ".webp" if "webp" in ct else ".gif" if "gif" in ct else ".png"
         return "image", ext
     return None, ext
+
+def write_uploaded_content_atomic(path: str, content: bytes):
+    directory = os.path.dirname(path) or "."
+    prefix = f".{os.path.basename(path)}."
+    temp_path = ""
+    try:
+        fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=".part", dir=directory)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        temp_path = ""
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 def _local_upload_display_name(filename):
     # 文件名形如 up_<hex>_<原始名>；去掉前缀还原展示名
@@ -13225,6 +13971,26 @@ async def ai_models():
 async def api_providers():
     return {"providers": public_api_providers()}
 
+@app.get("/api/drawthings/models")
+async def drawthings_models():
+    provider = next((item for item in load_api_providers() if item.get("id") == "drawthings"), None)
+    if not provider:
+        return {
+            "connected": False,
+            "models": [],
+            "model_metadata": [],
+            "loras": [],
+            "message": "Draw Things provider 尚未添加",
+        }
+    result = await fetch_models_from_upstream(provider.get("base_url") or "", "", "grpc", "openai")
+    return {
+        "connected": bool(result.get("ok")),
+        "models": result.get("image_models") or [],
+        "model_metadata": result.get("model_metadata") or [],
+        "loras": result.get("loras") or [],
+        "message": result.get("message") or "",
+    }
+
 @app.put("/api/providers")
 async def save_providers(payload: List[ApiProviderPayload]):
     providers = []
@@ -13323,6 +14089,8 @@ def protocol_from_payload(payload):
         return "runninghub"
     if provider_id == "jimeng":
         return "jimeng"
+    if provider_id == "drawthings":
+        return "grpc"
     base_url = str(getattr(payload, "base_url", "") or "").strip().lower()
     if "runninghub.cn" in base_url or "runninghub.ai" in base_url:
         return "runninghub"
@@ -13333,6 +14101,8 @@ def api_key_from_payload(payload, protocol: str = ""):
     explicit = str(getattr(payload, "api_key", "") or "").strip()
     provider_id = str(getattr(payload, "provider_id", "") or "").strip().lower()
     protocol = str(protocol or protocol_from_payload(payload) or "").strip().lower()
+    if protocol == "grpc":
+        return ""
     if explicit:
         return explicit
     if provider_id:
@@ -13585,6 +14355,27 @@ async def test_provider_connection(payload: TestConnectionPayload):
             "protocol": "runninghub",
             "raw": payload_models.get("raw"),
         }
+    if protocol == "grpc":
+        try:
+            from CLI.macos.drawthings.draw_things_grpc import list_draw_things_models
+            result = await list_draw_things_models(payload.base_url)
+        except Exception as exc:
+            result = {"connected": False, "models": [], "error": str(exc)}
+        models = result.get("models") or []
+        return {
+            "ok": bool(result.get("connected")),
+            "protocol": "grpc",
+            "status": 200 if result.get("connected") else 0,
+            "message": "Draw Things gRPCServerCLI 已连接" if result.get("connected") else (result.get("error") or "Draw Things gRPCServerCLI 未连接"),
+            "model_count": len(models),
+            "image_models": models,
+            "chat_models": [],
+            "video_models": [],
+            "all": models,
+            "model_metadata": result.get("model_metadata") or [],
+            "loras": result.get("loras") or [],
+            "raw": result,
+        }
     base_url = (payload.base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -13829,6 +14620,27 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
         payload = gemini_cli_models_payload(raw={"status": status})
         payload["message"] = status.get("message") or payload["message"]
         return payload
+    if protocol == "grpc":
+        try:
+            from CLI.macos.drawthings.draw_things_grpc import list_draw_things_models
+            result = await list_draw_things_models(base_url)
+        except Exception as exc:
+            result = {"connected": False, "models": [], "error": str(exc)}
+        models = result.get("models") or []
+        return {
+            "ok": bool(result.get("connected")),
+            "protocol": "grpc",
+            "status": 200 if result.get("connected") else 0,
+            "message": "Draw Things gRPCServerCLI 已连接" if result.get("connected") else (result.get("error") or "Draw Things gRPCServerCLI 未连接"),
+            "total": len(models),
+            "image_models": models,
+            "chat_models": [],
+            "video_models": [],
+            "all": models,
+            "model_metadata": result.get("model_metadata") or [],
+            "loras": result.get("loras") or [],
+            "raw": result,
+        }
     if protocol == "jimeng":
         return {
             "total": len(JIMENG_DEFAULT_IMAGE_MODELS) + len(JIMENG_DEFAULT_VIDEO_MODELS),
@@ -13961,6 +14773,8 @@ async def fetch_upstream_models(provider_id: str):
         return await fetch_models_from_upstream("", "", "codex", provider.get("image_request_mode") or "openai")
     if is_gemini_cli_provider(provider):
         return await fetch_models_from_upstream("", "", "gemini-cli", provider.get("image_request_mode") or "openai")
+    if is_draw_things_provider(provider):
+        return await fetch_models_from_upstream(provider.get("base_url") or "", "", "grpc", provider.get("image_request_mode") or "openai")
     api_key = os.getenv(runninghub_wallet_key_env(), "") if provider["id"] == "runninghub" else ""
     if not api_key:
         api_key = provider_env_key_value(provider["id"])
@@ -13974,9 +14788,13 @@ async def build_online_image_result(payload: OnlineImageRequest):
     model = selected_model(payload.model, default_model)
     request_size = snap_size_to_multiple(payload.size, 16)
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    mask_refs = [ref.dict() for ref in payload.mask_images if ref.url]
     image_refs = image_references(refs)
     count = max(1, min(8, int(payload.n or 1)))
-    operation = str(payload.operation or "").strip().lower()
+    batch_size = max(1, min(8, int(payload.batch_size or 1))) if is_draw_things_provider(provider) else 1
+    if batch_size > 1:
+        count = 1
+    operation = str(getattr(payload, "operation", "") or "").strip().lower()
     if operation == "upscale":
         if not is_jimeng_provider(provider):
             raise HTTPException(status_code=400, detail="图片放大目前仅支持即梦（Dreamina）平台")
@@ -13989,7 +14807,8 @@ async def build_online_image_result(payload: OnlineImageRequest):
         else:
             image_data, raw_item = await generate_ai_image(
                 payload.prompt, request_size, payload.quality, model, image_refs, provider["id"],
-                payload.aspect_ratio, payload.resolution,
+                payload.aspect_ratio, payload.resolution, payload.seed, batch_size=batch_size,
+                loras=payload.loras, mask_images=mask_refs,
             )
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
@@ -14033,7 +14852,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "provider_name": provider.get("name") or provider["id"],
         "task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
         "request_id": raw.get("id") if isinstance(raw, dict) else None,
-        "params": {"provider_id": provider["id"], "model": model, "size": request_size, "requested_size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs},
+        "params": {"provider_id": provider["id"], "model": model, "size": request_size, "requested_size": payload.size, "aspect_ratio": payload.aspect_ratio, "resolution": payload.resolution, "quality": payload.quality, "n": count, "batch_size": batch_size, "reference_images": refs, "mask_images": mask_refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
     save_to_history(result)
@@ -14914,13 +15733,55 @@ def agnes_video_frame_count(duration, fps=24):
     return min(441, max(9, 8 * n + 1)), frame_rate
 
 async def agnes_video_image_url(ref):
-    url = str(getattr(ref, "url", "") or "").strip()
+    if isinstance(ref, dict):
+        url = str(ref.get("url", "") or "").strip()
+        original_urls = [ref.get("originalLocalUrl", ""), ref.get("original_url", ""), ref.get("source_url", "")]
+    else:
+        url = str(getattr(ref, "url", "") or "").strip()
+        original_urls = [getattr(ref, "originalLocalUrl", ""), getattr(ref, "original_url", ""), getattr(ref, "source_url", "")]
     if not url:
         return ""
-    if url.startswith("http://") or url.startswith("https://"):
-        return url
-    uploaded = await upload_local_video_to_cloud(url, "auto")
-    return uploaded.get("url") or ""
+
+    local_ref = ""
+    for value in original_urls:
+        local_ref = local_media_reference_path(value)
+        if local_ref:
+            break
+    local_ref = local_ref or local_media_reference_path(url)
+    remote_error = ""
+    if url.startswith(("http://", "https://")):
+        try:
+            await verify_public_media_url(url, "image/png")
+            return url
+        except HTTPException as exc:
+            remote_error = str(exc.detail)
+
+    if local_ref:
+        upload_error = ""
+        try:
+            uploaded = await upload_local_video_to_cloud(local_ref, "auto")
+            uploaded_url = str((uploaded or {}).get("url") or "").strip()
+            if uploaded_url.startswith(("http://", "https://")):
+                return uploaded_url
+        except HTTPException as exc:
+            upload_error = str(exc.detail)
+        public_url = local_asset_public_url(local_ref)
+        if public_url:
+            try:
+                await verify_public_media_url(public_url, "image/png")
+                return public_url
+            except HTTPException as exc:
+                upload_error = f"{upload_error or '云端上传失败'}；公网回源地址无效：{exc.detail}"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agnes 参考图无法转成可下载的公网图片：{upload_error[:200] or remote_error[:200] or '云端上传失败'}。请检查网络后重试。"
+        )
+
+    if url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail=f"Agnes 参考图公网地址无效：{remote_error[:240] or '无法下载图片'}")
+    if url.startswith("data:image/"):
+        raise HTTPException(status_code=400, detail="Agnes 图生视频暂不接受 data:image；请使用画布中的本地图片或公网图片 URL")
+    raise HTTPException(status_code=400, detail=f"Agnes 参考图地址无法识别：{url[:160]}")
 
 async def wait_for_agnes_video_task(client, provider, video_id, model):
     base_url = video_api_root(provider)
@@ -17309,6 +18170,83 @@ async def update_canvas(canvas_id: str, payload: CanvasSaveRequest):
     await manager.broadcast_canvas_updated(canvas_id, int(canvas.get("updated_at") or now_ms()), payload.client_id)
     return {"canvas": canvas}
 
+@app.post("/api/canvases/{canvas_id}/logs/delete")
+async def delete_canvas_log(canvas_id: str, payload: DeleteCanvasLogRequest):
+    log_id = str(payload.log_id or "").strip()
+    if not log_id:
+        raise HTTPException(status_code=400, detail="缺少日志 ID")
+
+    def remove_log_record():
+        with CANVAS_LOCK:
+            canvas = load_canvas(canvas_id)
+            current_updated_at = int(canvas.get("updated_at") or 0)
+            if payload.base_updated_at and current_updated_at and int(payload.base_updated_at) < current_updated_at:
+                raise HTTPException(status_code=409, detail={
+                    "message": "画布已被其他页面更新，请刷新后重试。",
+                    "canvas": canvas,
+                    "updated_at": current_updated_at,
+                })
+            logs = list(canvas.get("logs") or [])
+            target = next((item for item in logs if str(item.get("id") or "") == log_id), None)
+            if not target:
+                raise HTTPException(status_code=404, detail="生成日志不存在")
+
+            candidate_paths = []
+            if payload.delete_unreferenced_media:
+                for url in collect_local_media_urls(target.get("outputs") or []):
+                    path = generated_media_path_from_url(url)
+                    if path and path not in candidate_paths:
+                        candidate_paths.append(path)
+
+            reset_node_ids = []
+            if payload.reset_referencing_nodes and candidate_paths:
+                reset_node_ids = reset_canvas_result_nodes_for_media(canvas, candidate_paths)
+
+            canvas["logs"] = [item for item in logs if str(item.get("id") or "") != log_id]
+            save_canvas(canvas)
+            return canvas, candidate_paths, reset_node_ids
+
+    canvas, candidate_paths, reset_node_ids = await asyncio.to_thread(remove_log_record)
+
+    def cleanup_unreferenced_media():
+        removed_files = []
+        skipped_referenced = []
+        removed_previews = 0
+        deletable_paths = []
+        for path in candidate_paths:
+            if persisted_json_references_media_path(path):
+                skipped_referenced.append(os.path.basename(path))
+                continue
+            deletable_paths.append(path)
+        prune_generation_history_for_media(deletable_paths)
+        for path in deletable_paths:
+            try:
+                removed_previews += delete_media_preview_cache(path)
+                os.remove(path)
+                removed_files.append(os.path.basename(path))
+            except OSError:
+                skipped_referenced.append(os.path.basename(path))
+        return removed_files, skipped_referenced, removed_previews
+
+    removed_files = []
+    skipped_referenced = []
+    removed_previews = 0
+    if payload.delete_unreferenced_media:
+        def locked_cleanup():
+            with CANVAS_LOCK:
+                return cleanup_unreferenced_media()
+        removed_files, skipped_referenced, removed_previews = await asyncio.to_thread(locked_cleanup)
+
+    await manager.broadcast_canvas_updated(canvas_id, int(canvas.get("updated_at") or now_ms()))
+    return {
+        "ok": True,
+        "canvas": canvas,
+        "removed_files": removed_files,
+        "removed_previews": removed_previews,
+        "reset_node_ids": reset_node_ids,
+        "skipped_referenced": skipped_referenced,
+    }
+
 @app.delete("/api/canvases/{canvas_id}")
 async def delete_canvas(canvas_id: str):
     canvas = load_canvas_any(canvas_id)
@@ -18246,17 +19184,48 @@ def generate(req: GenerateRequest):
                     "_meta": node_inputs.get("_meta") if isinstance(node_inputs.get("_meta"), dict) else {"title": str(node_inputs.get("class_type"))},
                 }
 
+        prune_optional_comfy_workflow_images(workflow, workflow_path, req.params)
+
+        # Custom workflows can put their seed on any node, so the generic
+        # random value above is not necessarily the value sent to ComfyUI.
+        # Collect the numeric seed inputs after applying all frontend params.
+        seed_values = {}
+        for node_id, node_data in workflow.items():
+            inputs = node_data.get("inputs") if isinstance(node_data, dict) else None
+            if not isinstance(inputs, dict):
+                continue
+            for input_name, value in inputs.items():
+                normalized_name = str(input_name or "").strip().lower().replace("-", "_").replace(" ", "_")
+                if normalized_name not in {"seed", "noise_seed", "random_seed"}:
+                    continue
+                try:
+                    seed_values[f"{node_id}:{input_name}"] = int(float(value))
+                except (TypeError, ValueError):
+                    continue
+        if seed_values:
+            seed = next(iter(seed_values.values()))
+
         p = {"prompt": workflow, "client_id": CLIENT_ID}
         data = json.dumps(p).encode('utf-8')
         try:
-            post_req = urllib.request.Request(f"http://{target_backend}/prompt", data=data)
-            prompt_id = json.loads(urllib.request.urlopen(post_req, timeout=10).read())['prompt_id']
+            post_req = urllib.request.Request(
+                f"http://{target_backend}/prompt",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Connection": "close",
+                },
+            )
+            prompt_id = json.loads(
+                urllib.request.urlopen(post_req, timeout=COMFYUI_HTTP_TIMEOUT).read()
+            )['prompt_id']
         except urllib.error.HTTPError as e:
             error_body = e.read().decode('utf-8')
             raise Exception(comfy_prompt_error_message(e.code, error_body))
 
         history_data = None
-        for i in range(COMFYUI_HISTORY_TIMEOUT):
+        history_deadline = time.monotonic() + COMFYUI_HISTORY_TIMEOUT
+        while time.monotonic() < history_deadline:
             try:
                 res = get_comfy_history(target_backend, prompt_id)
                 if prompt_id in res:
@@ -18264,7 +19233,7 @@ def generate(req: GenerateRequest):
                     break
             except Exception:
                 pass
-            time.sleep(1)
+            time.sleep(min(1, max(0, history_deadline - time.monotonic())))
 
         if not history_data:
             raise Exception("ComfyUI 渲染超时")
@@ -18356,6 +19325,7 @@ def generate(req: GenerateRequest):
             "items": local_items,
             "outputs": local_urls,
             "seed": seed,
+            "seed_values": seed_values,
             "timestamp": current_timestamp,
             "type": req.type,
             "workflow_json": req.workflow_json,
@@ -18400,6 +19370,8 @@ class WorkflowField(BaseModel):
     step: Optional[float] = None
     options: List[str] = []
     random_enabled: bool = False
+    auto: str = ""
+    image_count_min: Optional[int] = None
 
 class WorkflowConfig(BaseModel):
     title: str = ""

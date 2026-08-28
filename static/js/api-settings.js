@@ -64,6 +64,8 @@ let rhWorkflowEditorZoom = document.getElementById('rhWorkflowEditorZoom');
 const imageModelList = document.getElementById('imageModelList');
 const chatModelList = document.getElementById('chatModelList');
 const videoModelList = document.getElementById('videoModelList');
+const chatModelsBlock = document.getElementById('chatModelsBlock');
+const baseUrlLabel = document.getElementById('baseUrlLabel');
 const msLoraBlock = document.getElementById('msLoraBlock');
 const msLoraList = document.getElementById('msLoraList');
 const recommendApiOverlay = document.getElementById('recommendApiOverlay');
@@ -93,11 +95,14 @@ const CODEX_DEFAULT_CHAT_MODELS = ['gpt-5.5'];
 const GEMINI_CLI_DEFAULT_IMAGE_MODELS = ['auto'];
 const GEMINI_CLI_DEFAULT_CHAT_MODELS = ['auto'];
 const CLI_PROTOCOLS = new Set(['jimeng', 'codex', 'gemini-cli']);
+const DRAW_THINGS_DEFAULT_ENDPOINT = '127.0.0.1:7859';
 const API_PROTOCOLS = ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex', 'gemini-cli'];
+API_PROTOCOLS.push('tudou', 'grpc');
 const CLI_PROVIDER_PRESETS = {
     jimeng:{id:'jimeng', name:'即梦 CLI', protocol:'jimeng'},
     codex:{id:'codex', name:'GPT CLI', protocol:'codex'},
-    'gemini-cli':{id:'gemini-cli', name:'Antigravity CLI', protocol:'gemini-cli'}
+    'gemini-cli':{id:'gemini-cli', name:'Antigravity CLI', protocol:'gemini-cli'},
+    drawthings:{id:'drawthings', name:'Draw Things gRPCServerCLI', protocol:'grpc'}
 };
 const ONBOARDING_GUIDES = {
     modelscope:{
@@ -291,8 +296,8 @@ const RECOMMENDED_APIS = [
         perkClass:'recommend-free-tag',
         advantages:['免费额度可用', '支持 Agnes 图像与视频接口', 'OpenAI 兼容地址配置简单'],
         image_models:['agnes-image-2.1-flash', 'agnes-image-2.0-flash'],
-        chat_models:[],
-        video_models:['agnes-video-v2.0']
+        chat_models:['agnes-2.5-flash'],
+        video_models:['agnes-video-v2.0', 'agnes-video-2.5-flash']
     }
 ];
 const RECOMMEND_GROUPS = [
@@ -416,7 +421,7 @@ function deriveIdFromName(name, existingId){
 function updateIdPreview(){
     const item = provider();
     if(!item) return;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng';
+    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'drawthings';
     const idPreview = document.getElementById('idPreview');
     if(!idPreview) return;
     if(isBuiltin){
@@ -803,23 +808,27 @@ function syncEditor(){
         ? 'runninghub'
         : item.id === 'volcengine'
         ? 'volcengine'
+        : item.id === 'drawthings'
+        ? 'grpc'
         : (protocolInput?.value || 'openai');
     item.base_url = CLI_PROTOCOLS.has(selectedProtocol)
         ? ''
         : selectedProtocol === 'runninghub'
         ? normalizeRunningHubBaseUrl(baseInput.value)
+        : selectedProtocol === 'grpc'
+        ? (baseInput.value.trim() || DRAW_THINGS_DEFAULT_ENDPOINT)
         : baseInput.value.trim();
     // 固定平台不从协议下拉读取
     item.protocol = selectedProtocol;
     item.image_request_mode = normalizeImageRequestMode(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol)
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol) || selectedProtocol === 'grpc'
             ? 'openai'
             : lockedApi
             ? lockedApi.image_request_mode
             : (imageRequestModeInput?.value || item.image_request_mode)
     );
     item.image_edit_route = normalizeImageEditRoute(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol)
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol) || selectedProtocol === 'grpc'
             ? 'general'
             : (imageEditRouteInput?.value || item.image_edit_route)
     );
@@ -864,6 +873,7 @@ function updateProtocolFromInput(){
     document.body.classList.toggle('show-jimeng', item.protocol === 'jimeng');
     document.body.classList.toggle('show-codex', item.protocol === 'codex');
     document.body.classList.toggle('show-gemini-cli', item.protocol === 'gemini-cli');
+    document.body.classList.toggle('show-drawthings', item.protocol === 'grpc' || item.id === 'drawthings');
     clearVerifyResult();
     // 协议会改变整个表单（如即梦 CLI 账户面板、默认模型、Key 占位）。renderEditor 是唯一切换这些的入口，
     // 这里复跑一次让面板立即出现；保存并恢复 Key 输入框，避免推荐流程里先填的 Key 被 renderEditor 清空。
@@ -2518,12 +2528,12 @@ function renderEditor(){
     if(imageRequestModeInput){
         const requestedMode = normalizeImageRequestMode(item.image_request_mode);
         imageRequestModeInput.value = requestedMode;
-        imageRequestModeInput.disabled = Boolean(lockedApi) || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
+        imageRequestModeInput.disabled = Boolean(lockedApi) || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase()) || String(protocolInput?.value || item.protocol || '').toLowerCase() === 'grpc';
         imageRequestModeInput.title = lockedApi ? '推荐平台使用固定图片协议' : '';
     }
     if(imageEditRouteInput){
         imageEditRouteInput.value = normalizeImageEditRoute(item.image_edit_route);
-        imageEditRouteInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
+        imageEditRouteInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase()) || String(protocolInput?.value || item.protocol || '').toLowerCase() === 'grpc';
     }
     keyInput.value = '';
     keyInput.placeholder = item.has_key ? `${tr('api.keepCurrentKey')} ${item.key_preview || ''}` : tr('api.enterKey');
@@ -2535,6 +2545,7 @@ function renderEditor(){
     const isJimeng = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'jimeng';
     const isCodex = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'codex';
     const isGeminiCli = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'gemini-cli';
+    const isDrawThings = item.id === 'drawthings' || String(protocolInput?.value || item.protocol || '').toLowerCase() === 'grpc';
     if(isRunningHub){
         ensureRunningHubLists(item);
         if(rhFreeKeyInput){
@@ -2587,6 +2598,31 @@ function renderEditor(){
         keyInput.placeholder = 'Antigravity CLI 使用本机 agy 登录态，无需 API Key';
         keyHint.textContent = '请先安装 Antigravity CLI，并在终端执行 agy 完成登录';
     }
+    if(isDrawThings){
+        item.base_url = item.base_url || DRAW_THINGS_DEFAULT_ENDPOINT;
+        item.protocol = 'grpc';
+        // Draw Things gRPCServerCLI only provides image generation on macOS M chips.
+        editorTitle.textContent = `${item.name || item.id}${tr('api.drawThingsMacOnly')}`;
+        baseInput.value = item.base_url;
+        baseInput.placeholder = DRAW_THINGS_DEFAULT_ENDPOINT;
+        if(baseUrlLabel) baseUrlLabel.textContent = 'gRPCServerCLI 地址（主机:端口）';
+        keyInput.placeholder = 'Draw Things gRPCServerCLI 默认使用本机 TLS 加密连接，无需 API Key';
+        keyHint.textContent = '请先手动启动 Draw Things gRPCServerCLI，模型列表会通过 Echo() 读取';
+        item.image_models = Array.isArray(item.image_models) ? item.image_models : [];
+        item.chat_models = [];
+        item.video_models = [];
+    } else if(baseUrlLabel){
+        baseUrlLabel.textContent = tr('api.baseUrl') || '请求地址';
+    }
+    if(chatModelsBlock){
+        chatModelsBlock.hidden = isDrawThings;
+        chatModelsBlock.style.display = isDrawThings ? 'none' : '';
+    }
+    const pickerChatTab = document.getElementById('pickerChatTab');
+    if(pickerChatTab){
+        pickerChatTab.hidden = isDrawThings;
+        pickerChatTab.style.display = isDrawThings ? 'none' : '';
+    }
     document.body.classList.toggle('show-ms', isModelScope);
     document.body.classList.toggle('show-runninghub', isRunningHub);
     document.body.classList.toggle('show-volcengine', isVolcengine);
@@ -2594,6 +2630,7 @@ function renderEditor(){
     document.body.classList.toggle('show-jimeng', isJimeng);
     document.body.classList.toggle('show-codex', isCodex);
     document.body.classList.toggle('show-gemini-cli', isGeminiCli);
+    document.body.classList.toggle('show-drawthings', isDrawThings);
     updateApimartDomesticHint(item);
     renderProviderOnboarding(item);
     renderRecommendApi();
@@ -3250,8 +3287,10 @@ async function fetchModels(){
     const baseUrl = baseInput.value.trim();
     const apiKey = currentProviderApiKey(item);
     const isJimeng = (protocolInput?.value || '') === 'jimeng';
-    const isCliProtocol = CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
-    if(!baseUrl && !isJimeng && !isCliProtocol){ alert('请先填写请求地址'); return; }
+    const currentProtocol = String(protocolInput?.value || item.protocol || '').toLowerCase();
+    const isCliProtocol = CLI_PROTOCOLS.has(currentProtocol);
+    const isDrawThings = currentProtocol === 'grpc' || item.id === 'drawthings';
+    if(!baseUrl && !isJimeng && !isCliProtocol && !isDrawThings){ alert('请先填写请求地址'); return; }
     if(btn){ btn.disabled = true; btn.querySelector('span').textContent = tr('api.fetchingModels') || '拉取中...'; }
     setStatus(tr('api.fetchingModels') || '正在从上游拉取模型列表...');
     try {
@@ -3279,7 +3318,9 @@ async function fetchModels(){
         // 启用「选择模型」按钮，并 statusbar 显示已拉取数量
         const openBtn = document.getElementById('openPickerBtn');
         if(openBtn){ openBtn.disabled = false; openBtn.style.opacity = '1'; }
-        const extra = (runninghubContext || detectedProtocol === 'runninghub' || item.id === 'runninghub')
+        const extra = (isDrawThings || detectedProtocol === 'grpc')
+            ? ' · Draw Things gRPCServerCLI'
+            : (runninghubContext || detectedProtocol === 'runninghub' || item.id === 'runninghub')
             ? ` · RunningHub OpenAPI${runninghubModelSourceNote(data)}`
             : (detectedProtocol === 'volcengine' || isVolcengineProvider(item)) ? ' · 已识别方舟协议，火山聊天建议改填 ep-... 接入点' : '';
         const imageModeExtra = normalizeImageRequestMode(imageRequestModeInput?.value || item.image_request_mode) === 'openai-json' ? ' · 图片接口已设为 OpenAI JSON' : '';
@@ -3300,8 +3341,9 @@ let pickerVisibleIds = [];
 function openModelPicker(){
     const item = provider();
     if(!item || !lastFetchedAll.length){ alert('没有拉取到模型'); return; }
-    const existing = { image: new Set(item.image_models||[]), chat: new Set(item.chat_models||[]), video: new Set(item.video_models||[]) };
-    const allIds = new Set([...lastFetchedAll, ...(item.image_models||[]), ...(item.chat_models||[]), ...(item.video_models||[])]);
+    const isDrawThings = item.id === 'drawthings' || String(item.protocol || '').toLowerCase() === 'grpc';
+    const existing = { image: new Set(item.image_models||[]), chat: new Set(isDrawThings ? [] : (item.chat_models||[])), video: new Set(isDrawThings ? [] : (item.video_models||[])) };
+    const allIds = new Set([...lastFetchedAll, ...(item.image_models||[]), ...(isDrawThings ? [] : (item.chat_models||[])), ...(isDrawThings ? [] : (item.video_models||[]))]);
     pickerState = { category: {}, selected: {} };
     allIds.forEach(id => {
         // 类别归属：用户已配置 > 关键字建议 > 默认 chat
@@ -3311,7 +3353,7 @@ function openModelPicker(){
         else if(existing.chat.has(id)) cat = 'chat';
         else if(lastFetchedSuggestion?.image?.has(id)) cat = 'image';
         else if(lastFetchedSuggestion?.video?.has(id)) cat = 'video';
-        else cat = 'chat';
+        else cat = isDrawThings ? 'image' : 'chat';
         pickerState.category[id] = cat;
         // 默认勾选状态：已在用户配置里的 = 勾选；新拉的 = 不勾选（让用户主动选）
         pickerState.selected[id] = existing.image.has(id) || existing.chat.has(id) || existing.video.has(id);
@@ -3392,6 +3434,7 @@ function selectPickerCat(cat){
 }
 function applyModelPicker(){
     const item = provider(); if(!item) return;
+    const isDrawThings = item.id === 'drawthings' || String(item.protocol || '').toLowerCase() === 'grpc';
     const image = [], chat = [], video = [];
     const modelNames = {};
     Object.entries(pickerState.selected).forEach(([id, sel]) => {
@@ -3404,8 +3447,8 @@ function applyModelPicker(){
         if(label && label !== id) modelNames[id] = label;
     });
     item.image_models = image;
-    item.chat_models = chat;
-    item.video_models = video;
+    item.chat_models = isDrawThings ? [] : chat;
+    item.video_models = isDrawThings ? [] : video;
     item.model_names = modelNames;
     renderModels('image'); renderModels('chat'); renderModels('video');
     renderMsLoras();
@@ -3594,9 +3637,13 @@ async function addCliProvider(kind){
     }
     item.id = preset.id;
     item.name = item.name || preset.name;
-    item.base_url = '';
+    item.base_url = preset.protocol === 'grpc' ? (item.base_url || DRAW_THINGS_DEFAULT_ENDPOINT) : '';
     item.protocol = preset.protocol;
-    if(preset.protocol === 'jimeng'){
+    if(preset.protocol === 'grpc'){
+        item.image_models = unique(item.image_models || []);
+        item.chat_models = [];
+        item.video_models = [];
+    } else if(preset.protocol === 'jimeng'){
         item.image_models = unique([...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_IMAGE_MODELS]);
         item.video_models = unique([...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_VIDEO_MODELS]);
         item.chat_models = unique(item.chat_models || []);
@@ -3612,7 +3659,7 @@ async function addCliProvider(kind){
         selectedId = item.id;
         renderEditor();
         if(protocolInput) protocolInput.value = preset.protocol;
-        setStatus(`${preset.name} 已添加，使用本机登录态，无需填写 API Key。`);
+        setStatus(preset.protocol === 'grpc' ? `${preset.name} 已添加，请先启动 gRPCServerCLI。` : `${preset.name} 已添加，使用本机登录态，无需填写 API Key。`);
     }
 }
 function deleteProvider(){
@@ -3758,23 +3805,32 @@ async function saveProviders(){
     providers.forEach(item => {
         item.id = normalizeId(item.id);
         applyLockedRecommendedProtocol(item);
-        item.protocol = item.id === 'runninghub'
+        item.protocol = item.id === 'drawthings'
+            ? 'grpc'
+            : item.id === 'runninghub'
             ? 'runninghub'
             : item.id === 'volcengine'
             ? 'volcengine'
             : API_PROTOCOLS.includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
         const isCliProtocol = CLI_PROTOCOLS.has(item.protocol);
+        const isDrawThings = item.protocol === 'grpc' || item.id === 'drawthings';
         item.image_request_mode = normalizeImageRequestMode(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol
+            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol || isDrawThings
                 ? 'openai'
                 : item.image_request_mode
         );
         item.image_edit_route = normalizeImageEditRoute(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol
+            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol || isDrawThings
                 ? 'general'
                 : item.image_edit_route
         );
         if(isCliProtocol) applyCliProtocolDefaults(item, item.protocol);
+        if(isDrawThings){
+            item.base_url = item.base_url || DRAW_THINGS_DEFAULT_ENDPOINT;
+            item.image_models = unique(item.image_models || []);
+            item.chat_models = [];
+            item.video_models = [];
+        }
         if(item.id === 'runninghub'){
             item.base_url = normalizeRunningHubBaseUrl(item.base_url);
             item.image_models = unique(item.image_models || []);
@@ -3818,7 +3874,7 @@ async function saveProviders(){
                 id:item.id,
                 name:item.name,
                 base_url:item.base_url,
-                protocol:(item.id === 'modelscope') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : (item.protocol || 'openai'),
+                protocol:(item.id === 'drawthings') ? 'grpc' : (item.id === 'modelscope') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : (item.protocol || 'openai'),
                 image_request_mode:item.image_request_mode || 'openai',
                 image_edit_route:item.image_edit_route || 'general',
                 image_generation_endpoint:item.image_generation_endpoint || '',

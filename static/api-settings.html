@@ -16,12 +16,12 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.08.01.1785292594"></script>
-    <script src="/static/vendor/js/lucide.js?v=2026.08.01.1785292594"></script>
-    <script src="/static/js/theme.js?v=2026.08.01.1785292593"></script>
-    <script src="/static/js/i18n.js?v=2026.08.01.1785292592"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=2026.08.01.1785292588">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=2026.08.01.1785292587">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.08.04.1785381710"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.08.04.1785381710"></script>
+    <script src="/static/js/theme.js?v=2026.08.04.1785381710"></script>
+    <script src="/static/js/i18n.js?v=2026.08.04.1785381710"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.08.04.1785381710">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=2026.08.04.1785394410">
 </head>
 <body>
     <div class="page">
@@ -46,6 +46,7 @@
                             <button class="cli-quick-btn" type="button" onclick="addCliProvider('jimeng')"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>即梦 CLI</span></button>
                             <button class="cli-quick-btn" type="button" onclick="addCliProvider('codex')"><i data-lucide="terminal" class="w-3.5 h-3.5"></i><span>GPT CLI</span></button>
                             <button class="cli-quick-btn" type="button" onclick="addCliProvider('gemini-cli')"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i><span>Antigravity CLI</span></button>
+                            <button class="cli-quick-btn" type="button" onclick="addCliProvider('drawthings')"><i data-lucide="cpu" class="w-3.5 h-3.5"></i><span>Draw Things gRPC</span></button>
                             <div class="cli-quick-note">需要先安装 CLI文件夹中的依赖。</div>
                         </div>
                     </div>
@@ -80,7 +81,7 @@
                                 <input id="idInput" type="hidden">
                             </label>
                             <label class="field full api-base-url-field">
-                                <span class="label" data-i18n="api.baseUrl">请求地址</span>
+                                <span id="baseUrlLabel" class="label" data-i18n="api.baseUrl">请求地址</span>
                                 <div class="field-frame"><input id="baseInput" type="text" placeholder="https://api.example.com/v1"></div>
                                 <div class="ms-hint">
                                     <span class="ms-line"><span data-i18n="api.msChinaEndpoint">国内默认请求地址：</span><span class="inline-code">https://api-inference.modelscope.cn/v1</span></span>
@@ -272,6 +273,7 @@
                                         <option value="jimeng">即梦 CLI</option>
                                         <option value="codex">OpenAI Codex CLI</option>
                                         <option value="gemini-cli">Antigravity CLI</option>
+                                        <option value="grpc">Draw Things gRPCServerCLI</option>
                                     </select>
                                 </div>
                                 <div class="field-frame image-request-mode-wrap">
@@ -332,7 +334,7 @@
                         </div>
                     </div>
                     <div class="model-grid">
-                        <section class="block">
+                        <section id="chatModelsBlock" class="block">
                             <div class="block-head">
                                 <div>
                                     <div class="block-title" data-i18n="api.imageModels">生图模型</div>
@@ -426,7 +428,7 @@
                 <div class="picker-cat-tabs">
                     <button class="picker-cat-tab active" data-cat="all" onclick="selectPickerCat('all')">全部 <span class="cat-count">0</span></button>
                     <button class="picker-cat-tab" data-cat="image" onclick="selectPickerCat('image')">生图 <span class="cat-count">0</span></button>
-                    <button class="picker-cat-tab" data-cat="chat" onclick="selectPickerCat('chat')">LLM <span class="cat-count">0</span></button>
+                    <button id="pickerChatTab" class="picker-cat-tab" data-cat="chat" onclick="selectPickerCat('chat')">LLM <span class="cat-count">0</span></button>
                     <button class="picker-cat-tab" data-cat="video" onclick="selectPickerCat('video')">视频 <span class="cat-count">0</span></button>
                 </div>
             </div>
@@ -566,6 +568,6 @@
         </div>
     </div>
 
-    <script src="/static/js/api-settings.js?v=2026.08.01.1785465375"></script>
+    <script src="/static/js/api-settings.js?v=2026.08.04.1785994999"></script>
 </body>
 </html>
