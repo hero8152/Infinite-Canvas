@@ -13060,11 +13060,16 @@ function renderInputThumbsRow(node){
             : smartPreviewImgHtml(img, 256, 'draggable="false"');
         const count = (mediaCounters[kind] = (mediaCounters[kind] || 0) + 1);
         const label = kind === 'audio' ? `音频${count}` : kind === 'video' ? `视频${count}` : `图${count}`;
+        const referenceMarker = kind === 'image' ? count : 0;
+        const markerHint = referenceMarker
+            ? (window.StudioI18n?.lang?.() === 'en' ? `Click to insert @${referenceMarker}` : `单击插入 @${referenceMarker}`)
+            : '';
         const sourceUrl = img.originalLocalUrl || img.url || '';
         const key = inputRefKey(img);
         const removable = manualRefKeys.has(key);
         const removeBtn = removable ? `<button class="input-thumb-remove" type="button" data-input-remove-reference="${escapeHtml(inputRefKey(img))}" title="删除参考图" aria-label="删除参考图">×</button>` : '';
-        return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${removable ? 'input-manual-ref' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" title="${escapeHtml(`${img.name || tr('smart.inputNum').replace('{n}', String(i + 1))} · ${title}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${removeBtn}</div>`;
+        const tooltip = [img.name || tr('smart.inputNum').replace('{n}', String(i + 1)), title, markerHint].filter(Boolean).join(' · ');
+        return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${removable ? 'input-manual-ref' : ''}" draggable="false" data-thumb-index="${i}" data-reference-marker="${referenceMarker || ''}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" title="${escapeHtml(tooltip)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${removeBtn}</div>`;
     }).join('');
     inputThumbsRow.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${dedup.length > 1 ? `<span class="input-thumb-count">${escapeHtml(tr('smart.inputCount').replace('{n}', String(dedup.length)))}</span>` : ''}</div><div class="input-thumb-actions">${addButton}</div>`;
     bindSmartPreviewImageFallbacks(inputThumbsRow);
@@ -13092,6 +13097,7 @@ function bindInputThumbsDrag(node, items, manualRefKeys=new Set()){
     if(!inputThumbsRow) return;
     let thumbDragIndex = -1;
     inputThumbsRow.querySelectorAll('.input-thumb').forEach(el => {
+        let didDrag = false;
         const index = Number(el.dataset.thumbIndex || -1);
         const item = items[index];
         const key = inputRefKey(item);
@@ -13101,10 +13107,15 @@ function bindInputThumbsDrag(node, items, manualRefKeys=new Set()){
         el.addEventListener('click', e => {
             e.preventDefault();
             e.stopPropagation();
+            if(didDrag){ didDrag = false; return; }
+            if(e.button !== 0 || e.target.closest?.('[data-input-remove-reference]')) return;
+            const referenceNumber = Number(el.dataset.referenceMarker || 0);
+            if(referenceNumber > 0) insertInputReferenceMarker(referenceNumber);
         });
         if(!el.draggable) return;
         el.addEventListener('dragstart', e => {
             e.stopPropagation();
+            didDrag = true;
             thumbDragIndex = index;
             el.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
@@ -13116,6 +13127,7 @@ function bindInputThumbsDrag(node, items, manualRefKeys=new Set()){
             thumbDragIndex = -1;
             clearInputThumbDropMarkers();
             el.classList.remove('dragging');
+            setTimeout(() => { didDrag = false; }, 0);
         });
         el.addEventListener('dragover', e => {
             const manualFromKey = e.dataTransfer.getData('application/x-smart-manual-ref');
@@ -14391,6 +14403,40 @@ function setPromptCaretToEnd(){
     sel.removeAllRanges();
     sel.addRange(range);
     mentionRange = range.cloneRange();
+}
+function promptRangeIsUsable(range){
+    const container = range?.commonAncestorContainer;
+    return Boolean(container && (container === promptInput || promptInput.contains(container)));
+}
+function insertInputReferenceMarker(referenceNumber){
+    const number = Math.floor(Number(referenceNumber));
+    if(!promptInput || !Number.isFinite(number) || number < 1 || promptInput.dataset.promptLocked === '1') return false;
+    const marker = `@${number}`;
+    const savedPromptRange = promptRangeIsUsable(mentionRange) ? mentionRange.cloneRange() : null;
+    promptInput.focus();
+    const sel = window.getSelection();
+    // Clicking a thumbnail may move the live browser selection away from the
+    // contenteditable before the click handler runs. Prefer the last caret or
+    // selection captured from the prompt itself.
+    let range = savedPromptRange
+        ? savedPromptRange
+        : (sel?.rangeCount ? sel.getRangeAt(0) : null);
+    if(!promptRangeIsUsable(range)){
+        range = document.createRange();
+        range.selectNodeContents(promptInput);
+        range.collapse(false);
+    }
+    range.deleteContents();
+    const markerNode = document.createTextNode(marker);
+    range.insertNode(markerNode);
+    range.setStartAfter(markerNode);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    mentionRange = range.cloneRange();
+    promptInput.dispatchEvent(new Event('input', {bubbles:true}));
+    promptInput.focus();
+    return true;
 }
 function toggleAssetMentionPickerFromThumbs(){
     if(!selectedNode()) return;
@@ -18602,6 +18648,9 @@ promptInput.addEventListener('input', () => {
 promptInput.addEventListener('keyup', maybeOpenMentionPicker);
 promptInput.addEventListener('mouseup', saveMentionRange);
 promptInput.addEventListener('focus', saveMentionRange);
+document.addEventListener('selectionchange', () => {
+    if(document.activeElement === promptInput) saveMentionRange();
+});
 promptInput.addEventListener('keydown', event => {
     if(event.key === 'Escape') closeMentionPicker();
 });
