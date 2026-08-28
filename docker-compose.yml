@@ -1,0 +1,25 @@
+services:
+  infinite-canvas:
+    build: .
+    image: infinite-canvas:latest
+    container_name: infinite-canvas
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    extra_hosts:
+      # 容器内通过 host.docker.internal 访问宿主机服务（如本机 ComfyUI）
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 应用运行时产生的数据全部用命名卷持久化（不随容器销毁丢失，也不进 git）
+      - canvas-data:/app/data
+      - canvas-output:/app/output
+      - canvas-assets:/app/assets
+      # 根目录的持久化状态文件（global_config.json / history.json / API/.env）
+      # 已由 Dockerfile 做成软链接，统一指向此目录卷中的真实文件
+      - canvas-state:/app/_state
+
+volumes:
+  canvas-data:
+  canvas-output:
+  canvas-assets:
+  canvas-state:

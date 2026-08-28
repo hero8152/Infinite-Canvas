@@ -85,3 +85,55 @@ Commercial use is prohibited.
 
 <img width="2196" height="1040" alt="image" src="https://github.com/user-attachments/assets/6d823668-cde2-4836-8332-1858efe5f520" />
 <img width="2214" height="771" alt="image" src="https://github.com/user-attachments/assets/52e10958-753f-45ba-a50e-3bbec27be436" />
+
+----
+
+## Linux / Docker 部署
+
+项目默认监听 `0.0.0.0:3000`，Windows（`run.bat`）、macOS（`mac-启动服务.sh`）请参考原有说明，下面补充 Linux 与 Docker 两种方式。
+
+### Linux 直接运行
+
+```bash
+git clone https://github.com/hero8152/Infinite-Canvas.git
+cd Infinite-Canvas
+
+# 1. 安装系统图像库依赖 + 创建 .venv 并安装 Python 依赖
+bash install.sh
+
+# 2. 启动（默认 http://127.0.0.1:3000/）
+bash start.sh
+```
+
+`install.sh` 会自动识别 `apt`/`dnf`/`yum` 安装 Pillow 需要的系统库，并把所有 Python 依赖装进 `.venv`。若 `install.sh` 需要权限会提示输入 sudo 密码。
+
+### Docker Compose 运行
+
+需要本机装有 Docker 与 Docker Compose 插件。
+
+```bash
+# 在项目根目录
+docker compose up -d --build
+
+# 查看日志
+docker compose logs -f
+```
+
+- 服务监听 `3000`，访问 `http://127.0.0.1:3000/`。
+- 停止：`docker compose down`（命名卷数据会保留）。
+- 数据持久化：画布/会话/素材库（`data`）、生成结果（`output`、`assets`）以及 `global_config.json`、`history.json`、`API/.env` 均通过命名卷持久化，删除/重建容器数据不丢失。
+- 重新拉取/重建：`docker compose up -d --build`。
+
+> 说明：`data/output/assets`、`global_config.json`、`history.json`、`API/.env` 属于运行时数据，已加入 `.gitignore`，不再纳入版本控制。
+
+#### 容器内访问宿主机服务（本地 ComfyUI）
+
+容器与宿主机网络是隔离的：容器内 `127.0.0.1:8188` 指向容器自身，**访问不到宿主机上的 ComfyUI**。若要在 Docker 部署中使用本机 ComfyUI：
+
+- 请在项目左下角的 ComfyUI 设置里，把地址填为 `http://host.docker.internal:8188`（compose 已通过 `extra_hosts` 提供该域名，Linux Docker 20.10+ 可用）；
+- 不要把地址填成 `127.0.0.1:8188`，否则会报 `Connection refused`；
+- 若 ComfyUI 部署在另一台机器上，则直接填那台机器的 IP，如 `http://192.168.1.10:8188`。
+
+#### WebSocket 依赖
+
+`requirements.txt` 已包含 `websockets`（WebSocket 库）。若日志出现 `No supported WebSocket library detected` 或 `/ws/stats` 返回 404，说明运行环境的 WebSocket 库缺失，执行 `python -m pip install websockets`（Docker 方式重建镜像 `docker compose up -d --build`）即可。
