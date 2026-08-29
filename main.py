@@ -9249,27 +9249,20 @@ def apimart_veo31_resolution(resolution: str) -> str:
     value = aliases.get(value, value)
     return value if value in {"720p", "1080p", "4k"} else "720p"
 
-def apimart_upload_file_payload(path: str):
-    """Return (filename, bytes, content_type), keeping APIMart VEO images under the documented 10MB limit."""
-    max_bytes = 9_500_000
+def apimart_upload_file_payload(path: str, max_bytes: int = 0):
+    """Return (filename, bytes, content_type)，保证不超过上传上限。
+
+    max_bytes 传 0 时用默认上限；413 降档重试时传更小的值。
+    """
+    limit = int(max_bytes) if max_bytes and max_bytes > 0 else apimart_upload_max_bytes()
     size = os.path.getsize(path)
-    if size <= max_bytes:
+    if size <= limit:
         with open(path, "rb") as fh:
             return os.path.basename(path), fh.read(), content_type_for_path(path)
-    with Image.open(path) as img:
-        img = img.convert("RGBA")
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[-1])
-        quality = 92
-        while quality >= 62:
-            buf = BytesIO()
-            bg.save(buf, format="JPEG", quality=quality, optimize=True)
-            data = buf.getvalue()
-            if len(data) <= max_bytes:
-                name = os.path.splitext(os.path.basename(path))[0] + ".jpg"
-                return name, data, "image/jpeg"
-            quality -= 8
-    raise ValueError("图片超过 10MB，且压缩后仍无法满足 VEO3.1 图片限制")
+    with open(path, "rb") as fh:
+        data = fh.read()
+    name_hint = os.path.splitext(os.path.basename(path))[0]
+    return apimart_compress_image(data, limit, name_hint)
 
 def invalid_video_image_preview(value: str) -> str:
     text = str(value or "")
@@ -9302,12 +9295,28 @@ def extract_apimart_asset_url(payload):
             return found
     return ""
 
-def apimart_upload_payload_from_bytes(data: bytes, mime: str, name_hint: str = "image"):
-    """把内存中的图片字节按 APIMart 的 10MB 限制压缩为可上传 payload。"""
-    max_bytes = 9_500_000
-    ext = mimetypes.guess_extension(mime or "image/png") or ".png"
-    if len(data) <= max_bytes and (mime or "").lower() in ("image/png", "image/jpeg", "image/webp"):
-        return f"{name_hint}{ext}", data, (mime or "image/png")
+# APIMart 上传接口的真实体积上限。
+# 实测：apib.ai 前置 nginx 的 client_max_body_size 是 1m（1048576 字节），
+# 文件超过约 1MB 就会被 413 Request Entity Too Large 直接拒绝，而且这个 413
+# 来自 nginx 网关，根本到不了 APIMart 应用层 —— 所以报错里看不到任何业务错误信息。
+# 之前写 9.5MB 是按 APIMart 文档的 10MB 来的，跟中转站实际配置对不上，导致
+# 1MB~9.5MB 之间的图片全部上传失败。
+# 留 ~90KB 余量给 multipart 边界、字段名等开销。不同中转站限制可能不同，
+# 可用环境变量 APIMART_UPLOAD_MAX_BYTES 覆盖。
+def apimart_upload_max_bytes() -> int:
+    raw = str(os.getenv("APIMART_UPLOAD_MAX_BYTES") or "").strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 950_000
+    return value if 50_000 <= value <= 20_000_000 else 950_000
+
+def apimart_compress_image(data: bytes, max_bytes: int, name_hint: str = "image"):
+    """把图片压到 max_bytes 以内，返回 (filename, bytes, content_type)。
+
+    先降 JPEG 质量，压不下去再逐级缩放分辨率，避免 12MB 这种大图
+    靠单纯降质量永远压不到 1MB 以内。
+    """
     with Image.open(BytesIO(data)) as img:
         has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
         if has_alpha:
@@ -9317,15 +9326,35 @@ def apimart_upload_payload_from_bytes(data: bytes, mime: str, name_hint: str = "
             target = bg
         else:
             target = img.convert("RGB")
+        # 第一轮：只降质量不缩放，尽量保住分辨率
         quality = 92
-        while quality >= 62:
+        while quality >= 60:
             buf = BytesIO()
             target.save(buf, format="JPEG", quality=quality, optimize=True)
             payload = buf.getvalue()
             if len(payload) <= max_bytes:
                 return f"{name_hint}.jpg", payload, "image/jpeg"
             quality -= 8
-    raise ValueError("data URL 图片超过 10MB，且压缩后仍无法满足 APIMart 限制")
+        # 第二轮：逐级缩放后再降质量
+        for scale in (0.85, 0.7, 0.55, 0.4, 0.28):
+            width = max(64, int(target.width * scale))
+            height = max(64, int(target.height * scale))
+            resized = target.resize((width, height), Image.LANCZOS)
+            for quality in (88, 80, 72, 64):
+                buf = BytesIO()
+                resized.save(buf, format="JPEG", quality=quality, optimize=True)
+                payload = buf.getvalue()
+                if len(payload) <= max_bytes:
+                    return f"{name_hint}.jpg", payload, "image/jpeg"
+    raise ValueError(f"图片压缩后仍超过上传上限（{max_bytes} 字节）")
+
+def apimart_upload_payload_from_bytes(data: bytes, mime: str, name_hint: str = "image", max_bytes: int = 0):
+    """把内存中的图片字节压到上传上限以内。max_bytes 传 0 时用默认上限。"""
+    limit = int(max_bytes) if max_bytes and max_bytes > 0 else apimart_upload_max_bytes()
+    ext = mimetypes.guess_extension(mime or "image/png") or ".png"
+    if len(data) <= limit and (mime or "").lower() in ("image/png", "image/jpeg", "image/webp"):
+        return f"{name_hint}{ext}", data, (mime or "image/png")
+    return apimart_compress_image(data, limit, name_hint)
 
 def apimart_upload_raw_file_payload(path: str):
     with open(path, "rb") as fh:
@@ -9387,17 +9416,23 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
             header, encoded = ref_url.split(";base64,", 1)
             mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "image/png"
             raw = base64.b64decode(encoded)
-            filename, content, ct = apimart_upload_payload_from_bytes(raw, mime, name_hint="canvas_image")
-            resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
-            if resp.status_code in (200, 201):
-                rj = resp.json()
-                url = extract_apimart_asset_url(rj)
-                if valid_apimart_video_image_input(url):
-                    return url
-                print(f"APIMart 上传 data URL 返回中未找到可用 asset/url: {str(rj)[:300]}")
-                return "ERR:APIMart 上传响应未包含可用 URL"
-            print(f"APIMart 上传 data URL 失败 ({resp.status_code}): {resp.text[:300]}")
-            return f"ERR:APIMart 上传失败({resp.status_code})"
+            base_limit = apimart_upload_max_bytes()
+            for limit in (base_limit, base_limit // 2, base_limit // 4):
+                filename, content, ct = apimart_upload_payload_from_bytes(raw, mime, name_hint="canvas_image", max_bytes=limit)
+                resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
+                if resp.status_code in (200, 201):
+                    rj = resp.json()
+                    url = extract_apimart_asset_url(rj)
+                    if valid_apimart_video_image_input(url):
+                        return url
+                    print(f"APIMart 上传 data URL 返回中未找到可用 asset/url: {str(rj)[:300]}")
+                    return "ERR:APIMart 上传响应未包含可用 URL"
+                if resp.status_code != 413:
+                    print(f"APIMart 上传 data URL 失败 ({resp.status_code}): {resp.text[:300]}")
+                    return f"ERR:APIMart 上传失败({resp.status_code})"
+                print(f"APIMart 上传 data URL 被网关拒绝（413），降档到 {limit // 2 if limit > 1 else limit} 字节重试")
+            print("APIMart 上传 data URL 始终被 413 拒绝（已降档重试）")
+            return "ERR:APIMart 上传被网关拒绝(413)：画布图片压缩后仍超过上游大小限制，请缩小画布导出尺寸或配置 PUBLIC_MEDIA_BASE_URL"
         except ValueError as e:
             return f"ERR:{e}"
         except Exception as e:
@@ -9410,17 +9445,25 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
             print(f"APIMart 上传跳过：本地文件不存在 {ref_url}")
             return "ERR:本地文件不存在或已被删除"
         try:
-            filename, content, ct = apimart_upload_file_payload(path)
-            resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
-            if resp.status_code in (200, 201):
-                rj = resp.json()
-                url = extract_apimart_asset_url(rj)
-                if valid_apimart_video_image_input(url):
-                    return url
-                print(f"APIMart 文件上传返回中未找到可用 asset/url: {str(rj)[:300]}")
-                return "ERR:APIMart 上传响应未包含可用 URL"
-            print(f"APIMart 文件上传失败 ({resp.status_code}): {resp.text[:300]}")
-            return f"ERR:APIMart 上传失败({resp.status_code})"
+            base_limit = apimart_upload_max_bytes()
+            # 默认上限是按 1m 网关限制设的；万一上游限制更严（413），
+            # 逐级把上限砍半重压一次，而不是直接把 413 抛给用户。
+            for limit in (base_limit, base_limit // 2, base_limit // 4):
+                filename, content, ct = apimart_upload_file_payload(path, max_bytes=limit)
+                resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
+                if resp.status_code in (200, 201):
+                    rj = resp.json()
+                    url = extract_apimart_asset_url(rj)
+                    if valid_apimart_video_image_input(url):
+                        return url
+                    print(f"APIMart 文件上传返回中未找到可用 asset/url: {str(rj)[:300]}")
+                    return "ERR:APIMart 上传响应未包含可用 URL"
+                if resp.status_code != 413:
+                    print(f"APIMart 文件上传失败 ({resp.status_code}): {resp.text[:300]}")
+                    return f"ERR:APIMart 上传失败({resp.status_code})"
+                print(f"APIMart 文件上传被网关拒绝（413），降档到 {limit // 2 if limit > 1 else limit} 字节重试：{ref_url}")
+            print(f"APIMart 文件上传始终被 413 拒绝（已降档重试）：{ref_url}")
+            return "ERR:APIMart 上传被网关拒绝(413)：图片即使压缩后仍超过上游大小限制，请换更小的图片或配置 PUBLIC_MEDIA_BASE_URL"
         except ValueError as e:
             return f"ERR:{e}"
         except Exception as e:
@@ -16189,7 +16232,8 @@ async def canvas_video(payload: CanvasVideoRequest):
                 if payload.images and not image_with_roles and not image_payload:
                     first_url, first_reason = invalid_images[0] if invalid_images else ("", "未知错误")
                     sample = invalid_video_image_preview(first_url)
-                    raise HTTPException(status_code=400, detail=f"输入图片无法转换为视频接口支持的格式：{sample}\n原因：{first_reason}\n请确认本地文件存在且不超过 10MB；VEO3.1 需要图片是 APIMart 可访问的 http/https / asset:// / data URL。")
+                    size_hint = f"上传接口实际体积上限约 {apimart_upload_max_bytes() // 1024} KB（超出会被网关直接 413 拒绝，可用 APIMART_UPLOAD_MAX_BYTES 调整）"
+                    raise HTTPException(status_code=400, detail=f"输入图片无法转换为视频接口支持的格式：{sample}\n原因：{first_reason}\n请确认本地文件存在且 {size_hint}；VEO3.1 需要图片是 APIMart 可访问的 http/https / asset:// / data URL。")
                 # --- APIMart 请求体 ---
                 if is_veo31:
                     model = apimart_model
