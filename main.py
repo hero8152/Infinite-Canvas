@@ -9228,6 +9228,22 @@ def apimart_veo31_duration(duration) -> int:
 def is_apimart_veo31_model(model: str) -> bool:
     return str(model or "").strip().lower().startswith("veo3.1")
 
+def is_apimart_minimax_h3_model(model: str) -> bool:
+    return str(model or "").strip().lower().replace(" ", "") in {"minimax-h3", "minimaxh3", "minimax_h3"}
+
+def apimart_minimax_h3_resolution(resolution) -> str:
+    """MiniMax-H3 只接受 2K 或 768P，传别的（含通用的 480p 默认值）会直接 400。
+
+    界面上的选项是 480p/720p/1080p 和 1k/2k/4k，需要映射过去：
+    想要高清的（2k/4k/high/hd）给 2K，其余（含留空）给 768P。
+    """
+    value = str(resolution or "").strip().lower()
+    if value in {"2K", "768P"}:
+        return value
+    if value in {"2k", "4k", "high", "hd", "2160p", "1440p"}:
+        return "2K"
+    return "768P"
+
 def apimart_veo31_model(model: str) -> str:
     value = str(model or "").strip().lower()
     aliases = {
@@ -16256,12 +16272,14 @@ async def canvas_video(payload: CanvasVideoRequest):
                     if model != "veo3.1-lite":
                         body["official_fallback"] = False
                 else:
+                    model = selected_model(payload.model, "doubao-seedance-2.0")
                     body = {
                         "prompt": payload.prompt,
-                        "model": selected_model(payload.model, "doubao-seedance-2.0"),
+                        "model": model,
                         "duration": apimart_video_duration(payload.duration),
                         "size": apimart_video_size(payload.aspect_ratio or payload.size),
-                        "resolution": payload.resolution or "480p",
+                        # MiniMax-H3 只认 2K / 768P，通用的 480p 默认值会被它拒绝
+                        "resolution": apimart_minimax_h3_resolution(payload.resolution) if is_apimart_minimax_h3_model(model) else (payload.resolution or "480p"),
                     }
                     if image_with_roles and video_payload:
                         raise HTTPException(status_code=400, detail="APIMart Seedance 的 image_with_roles 不能和 video_urls 同时使用，请只保留图片首尾帧或参考视频其中一种。")
