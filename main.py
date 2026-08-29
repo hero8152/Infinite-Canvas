@@ -13903,13 +13903,80 @@ async def probe_volcengine_auto_detect(client, base_url: str, api_key: str):
         "raw": {"task_probe": task_probe, "openai_compat_probe": compat_probe.get("raw")},
     }
 
+def clean_upstream_model_id(value) -> str:
+    """清洗上游返回的模型 id。
+
+    部分中转站（如 APIMART）会把 id 包成 JSON 数组字符串，例如
+    ``["doubao-seedance-1-0-pro-quality"]``。不清洗的话脏 id 会直接存进配置，
+    后续实际调用必然失败。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list) and parsed:
+                text = str(parsed[0])
+            elif isinstance(parsed, str):
+                text = parsed
+        except Exception:
+            text = text.strip("[]")
+    text = text.strip().strip('"').strip("'").strip()
+    # 多值残留（逗号或空格分隔）只取第一段
+    if "," in text:
+        text = text.split(",", 1)[0].strip().strip('"').strip("'")
+    return text
+
+# ——— 上游模型自动分类 ———
+# 分三层判定，避免纯子串匹配的互相误伤（例如 imagen-4.0 会被 gen-4 命中、
+# wan2.7-image 会被 wan2 命中）：
+#   1) 排除词：语音/向量/审核类一律归 chat，任何情况都不算生成模型
+#   2) 任务标记：名字里写明了 video/image/edit 的，按标记走（最可靠）
+#   3) 厂商或模型名：靠厂商词判断，且必须没有被对侧任务标记否定
+# 新增模型厂商时往 *_VENDOR_KEYS 里加词即可，不需要动函数体。
+
+CHAT_MODEL_OVERRIDE_KEYS = [
+    "moderation", "embedding", "whisper", "transcribe", "tts", "realtime", "ocr",
+]
+VIDEO_TASK_MARKER_KEYS = [
+    "video", "t2v", "i2v", "r2v", "v2v", "s2v", "txt2video", "img2video",
+    "text-to-video", "image-to-video",
+]
+IMAGE_TASK_MARKER_KEYS = [
+    "image", "img2img", "txt2img", "inpaint", "outpaint", "upscale",
+    "text-to-image", "image-to-image", "image-edit",
+]
+VIDEO_VENDOR_KEYS = [
+    "veo", "sora", "kling", "hailuo", "vidu", "pixverse", "skyreels", "seedance",
+    "wan2", "wanx", "wan-", "doubao-1", "minimax-h3", "hunyuan-video", "cogvideo",
+    "runway", "gen-3-", "gen-4-", "luma", "pika", "jimeng", "animate", "framepack",
+    "seedvr", "happyhorse", "omni-flash",
+    # 音频/音乐生成：界面上归入视频桶（同为生成类任务），避免整批漏掉
+    "suno", "flowmusic", "musicgen", "mureka",
+]
+IMAGE_VENDOR_KEYS = [
+    "banana", "dalle", "dall-e", "imagen", "flux", "stable-diffusion", "stable-",
+    "sdxl", "sd3", "midjourney", "ideogram", "fal-ai", "z-image", "qwen-image",
+    "klein", "seedream", "recraft", "omnigen", "pixart", "playground", "kolors",
+    "hidream", "seededit", "kontext", "grok-imagine",
+]
+
 def classify_upstream_model(mid):
     lc = str(mid or "").lower()
-    video_keys = ["veo", "sora", "wan2", "wanx", "doubao-seedance", "doubao-1", "kling", "hailuo", "video", "t2v-", "i2v-", "s2v"]
-    if any(k in lc for k in video_keys):
+    if not lc:
+        return "chat"
+    if any(k in lc for k in CHAT_MODEL_OVERRIDE_KEYS):
+        return "chat"
+    # video 标记优先：image-to-video / video-edit 这类本质仍是视频生成，
+    # 名字里同时出现 image 和 video 时按视频算。
+    if any(k in lc for k in VIDEO_TASK_MARKER_KEYS):
         return "video"
-    image_keys = ["banana", "image", "dalle", "dall-e", "imagen", "flux", "stable", "sdxl", "midjourney", "nano-banana", "ideogram", "fal-ai", "z-image", "qwen-image", "klein", "seedream", "doubao-seedream", "text-to-image", "image-to-image"]
-    if any(k in lc for k in image_keys):
+    if any(k in lc for k in IMAGE_TASK_MARKER_KEYS):
+        return "image"
+    if any(k in lc for k in VIDEO_VENDOR_KEYS):
+        return "video"
+    if any(k in lc for k in IMAGE_VENDOR_KEYS):
         return "image"
     return "chat"
 
@@ -13928,10 +13995,11 @@ def parse_upstream_models(raw, protocol="openai"):
         else:
             mid = ""
         if mid:
-            mid = str(mid)
+            mid = clean_upstream_model_id(mid)
             if protocol == "gemini" and mid.startswith("models/"):
                 mid = mid[len("models/"):]
-            ids.append(mid)
+            if mid:
+                ids.append(mid)
     ids = sorted(set(ids))
     grouped = {"image": [], "chat": [], "video": []}
     for mid in ids:
