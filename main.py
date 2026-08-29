@@ -1874,16 +1874,8 @@ CIVITAI_SEARCH_API = "https://search-new.civitai.com/multi-search"
 CIVITAI_SEARCH_KEY = "8c46eb2508e21db1e9828a97968d91ab1ca1caa5f70a00e88a2ba1e286603b61"
 CIVITAI_IMG_CDN = "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA"
 
-async def civitai_meili_search(query: str, limit: int, cursor: str):
-    """通过 Civitai 的 Meilisearch 搜索图片（真正的关键词搜索，返回 prompt+tags）。"""
-    offset = int(cursor) if str(cursor).isdigit() else 0
-    body = {"queries": [{
-        "q": query,
-        "indexUid": "images_v6",
-        "limit": limit,
-        "offset": offset,
-        "filter": ["(poi != true) AND (combinedNsfwLevel=1)"]
-    }]}
+async def _meili_post(body: dict):
+    """向 Civitai Meilisearch 发送搜索请求。"""
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {CIVITAI_SEARCH_KEY}"}
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0)) as client:
@@ -1894,32 +1886,52 @@ async def civitai_meili_search(query: str, limit: int, cursor: str):
         raise HTTPException(status_code=429, detail="Civitai 限流：请稍后再试")
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail=f"Civitai 搜索错误：{resp.status_code}")
-    data = resp.json()
+    return resp.json()
+
+
+def _build_meili_item(h: dict):
+    url = h.get("url") or ""
+    if not url:
+        return None
+    prompt = h.get("prompt") or ""
+    stats = h.get("stats") or {}
+    return {
+        "id": h.get("id"),
+        "image": f"{CIVITAI_IMG_CDN}/{url}/original=true/{url}.jpeg",
+        "thumb": f"{CIVITAI_IMG_CDN}/{url}/width=500/{url}.jpeg",
+        "prompt": prompt,
+        "promptZh": "",
+        "title": "",
+        "description": prompt[:100],
+        "width": h.get("width"),
+        "height": h.get("height"),
+        "model": "",
+        "username": (h.get("user") or {}).get("username") or "",
+        "tags": h.get("tagNames") or [],
+        "reactionCount": stats.get("reactionCountAllTime") or 0,
+    }
+
+
+async def civitai_meili_search(query: str, limit: int, cursor: str):
+    """搜索图片：按 Meilisearch 默认相关性排序（关键词匹配度优先），
+    保证搜什么像什么。注意：sort 与 filter 同时使用会破坏相关性，故只用 filter。"""
+    offset = int(cursor) if str(cursor).isdigit() else 0
+    body = {"queries": [{
+        "q": query,
+        "indexUid": "images_v6",
+        "limit": limit,
+        "offset": offset,
+        "filter": ["(poi != true) AND (combinedNsfwLevel=1)"]
+    }]}
+    data = await _meili_post(body)
     result = (data.get("results") or [{}])[0]
     hits = result.get("hits") or []
     total = result.get("estimatedTotalHits") or 0
-    items = []
-    for h in hits:
-        url = h.get("url") or ""
-        if not url: continue
-        prompt = h.get("prompt") or ""
-        items.append({
-            "id": h.get("id"),
-            "image": f"{CIVITAI_IMG_CDN}/{url}/original=true/{url}.jpeg",
-            "thumb": f"{CIVITAI_IMG_CDN}/{url}/width=500/{url}.jpeg",
-            "prompt": prompt,
-            "promptZh": "",
-            "title": "",
-            "description": prompt[:100],
-            "width": h.get("width"),
-            "height": h.get("height"),
-            "model": "",
-            "username": (h.get("user") or {}).get("username") or "",
-            "tags": h.get("tagNames") or [],
-        })
+    items = [it for it in (_build_meili_item(h) for h in hits) if it]
     next_offset = offset + limit
     has_more = bool(hits) and next_offset < total
     return {"items": items, "cursor": str(next_offset) if has_more else "", "hasMore": has_more, "total": total}
+
 
 @app.get("/api/inspire-civitai")
 async def inspire_civitai(request: Request, cursor: str = "", limit: int = 24, sort: str = "Most Reactions", tag: str = ""):

@@ -17341,7 +17341,8 @@ const INSPIRE_SORTS = [
 ];
 // 搜索方案A：中文分类 chips（映射 Civitai 英文 tag）
 const INSPIRE_TAGS = [
-    {zh:'全部', tag:''},
+    {zh:'热门', tag:'', sort:'Most Reactions'},
+    {zh:'最新', tag:'', sort:'Newest'},
     {zh:'人物', tag:'1girl'},
     {zh:'风景', tag:'landscape'},
     {zh:'动漫', tag:'anime'},
@@ -17370,7 +17371,9 @@ const INSPIRE_ZH_EN = {
     '骑士':'knight','巫师':'wizard','飞船':'spaceship','汽车':'car','美食':'food','食物':'food','甜点':'food','少女':'1girl','男神':'1boy',
     '海报':'poster','宣传海报':'poster','设计':'design','logo':'logo','图标':'icon','壁纸':'wallpaper','头像':'avatar','封面':'cover',
     '产品':'product','商品':'product','电商':'e-commerce','包装':'packaging','名片':'business card','插画':'illustration',
-    '二次元':'anime','国风':'chinese style','古风':'chinese style','像素风':'pixel art','蒸汽波':'vaporwave','暗黑':'dark','唯美':'aesthetic'
+    '二次元':'anime','国风':'chinese style','古风':'chinese style','像素风':'pixel art','蒸汽波':'vaporwave','暗黑':'dark','唯美':'aesthetic',
+    '营销':'marketing','活动':'event','页':'page','页面':'page','女性':'female','男性':'male','男':'male','女':'female','正面':'front view',
+    '健身':'fitness','教练':'coach','扁平':'flat','渲染':'render','3d':'3d','科技':'technology','简约':'minimalist','背景':'background','模板':'template'
 };
 // 「更多标签」分组面板数据（中文标签 → Civitai 英文 tag）
 const INSPIRE_TAG_GROUPS = [
@@ -17390,7 +17393,7 @@ let inspireTag = '';
 let inspireLoadedCount = 0;
 let inspireSeenIds = new Set();   // 浏览去重
 const _inspireCache = {};          // TTL 缓存
-const INSPIRE_CACHE_TTL = 15 * 60 * 1000;  // 15 分钟
+const INSPIRE_CACHE_TTL = 3 * 60 * 60 * 1000;  // 3 小时（热门/最新榜单刷新频率）
 // ---- API Key 管理 ----
 function getCivitaiKey(){ try { return localStorage.getItem('civitai_api_key') || ''; } catch(e){ return ''; } }
 function saveCivitaiKey(k){ try { if(k) localStorage.setItem('civitai_api_key', k); else localStorage.removeItem('civitai_api_key'); } catch(e){} }
@@ -17427,13 +17430,18 @@ function toggleInspirePanel(open=!inspireOpen){
 function renderInspireCats(){
     const wrap = document.getElementById('inspireCats');
     if(!wrap) return;
-    const chips = INSPIRE_TAGS.map(c => `<button class="inspire-cat ${c.tag === inspireTag ? 'active' : ''}" type="button" data-inspire-tag="${escapeAttr(c.tag)}">${escapeHtml(c.zh)}</button>`).join('');
+    const chips = INSPIRE_TAGS.map(c => {
+        const active = (c.tag === inspireTag) && (!c.sort || c.sort === inspireSort);
+        return `<button class="inspire-cat ${active ? 'active' : ''}" type="button" data-inspire-tag="${escapeAttr(c.tag)}" data-inspire-sort="${escapeAttr(c.sort || '')}">${escapeHtml(c.zh)}</button>`;
+    }).join('');
     wrap.innerHTML = chips + '<button class="inspire-cat more" type="button" id="inspireMoreBtn">更多标签 ▾</button>';
     wrap.querySelectorAll('[data-inspire-tag]').forEach(btn => {
         btn.onclick = () => {
             const tag = btn.dataset.inspireTag || '';
-            if(tag === inspireTag) return;
+            const sort = btn.dataset.inspireSort || '';
+            if(tag === inspireTag && (!sort || sort === inspireSort)) return;
             inspireTag = tag;
+            if(sort) inspireSort = sort;   // 热门/最新 切换排序
             const search = document.getElementById('inspireSearch');
             if(search) search.value = '';
             closeInspireMoreTags();
@@ -17661,6 +17669,35 @@ function initInspireScroll(){
         if(sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 500) loadInspirePage(false);
     });
 }
+// ---- 搜索翻译：逐词最大匹配（支持多词中文短语，如"电商海报"→"e-commerce poster"）----
+function maxMatchTranslate(str){
+    // 最大匹配分词：从左到右，每步取词典中最长的匹配词翻译并消费，未匹配的字跳过
+    const result = [];
+    let i = 0;
+    const maxLen = 6;
+    while(i < str.length){
+        let matched = null;
+        for(let len = Math.min(maxLen, str.length - i); len > 0; len--){
+            const seg = str.substr(i, len);
+            if(INSPIRE_ZH_EN[seg]){ matched = INSPIRE_ZH_EN[seg]; i += len; break; }
+        }
+        if(matched){ result.push(matched); }
+        else { i++; }
+    }
+    return result.join(' ');
+}
+function translateSearchQuery(raw){
+    raw = String(raw || '').trim();
+    if(!raw) return '';
+    if(INSPIRE_ZH_EN[raw]) return INSPIRE_ZH_EN[raw];   // 整句命中词典
+    if(/^[\x00-\x7F]+$/.test(raw)) return raw;          // 纯英文/数字原样返回
+    const translated = raw.split(/\s+/).map(token => {
+        if(INSPIRE_ZH_EN[token]) return INSPIRE_ZH_EN[token];
+        if(/^[\x00-\x7F]+$/.test(token)) return token;   // 英文/数字 token 保留
+        return maxMatchTranslate(token);                  // 中文短语最大匹配翻译
+    }).filter(Boolean).join(' ').trim();
+    return translated || raw;                            // 翻译为空时回退原样
+}
 // ---- 搜索 A+B：中文词典映射 + 回车/按钮触发 ----
 function initInspireSearch(){
     const input = document.getElementById('inspireSearch');
@@ -17669,7 +17706,7 @@ function initInspireSearch(){
     input.dataset.inspireSearchInit = '1';
     const doSearch = () => {
         const raw = input.value.trim();
-        const tag = raw ? (INSPIRE_ZH_EN[raw] || raw) : '';   // 中文→英文，未命中则原样
+        const tag = translateSearchQuery(raw);   // 中文逐词翻译成英文（支持多词短语）
         inspireTag = tag;
         renderInspireCats();
         resetInspireAndLoad();
