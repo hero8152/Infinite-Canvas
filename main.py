@@ -196,20 +196,26 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "2026.06.04"
-GITHUB_REPO_URL = "https://github.com/hero8152/Infinite-Canvas"
-GITHUB_VERSION_URL = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION"
-GITHUB_TREE_URL = "https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1"
-GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main"
+APP_VERSION = "2026.08.29"
+# 本分支已脱离上游 hero8152/Infinite-Canvas，自动更新指向自有仓库 mufanmu/Infinite-Canvas-agent
+GITHUB_REPO_URL = "https://github.com/mufanmu/Infinite-Canvas-agent"
+GITHUB_VERSION_URL = "https://raw.githubusercontent.com/mufanmu/Infinite-Canvas-agent/main/VERSION"
+GITHUB_TREE_URL = "https://api.github.com/repos/mufanmu/Infinite-Canvas-agent/git/trees/main?recursive=1"
+GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/mufanmu/Infinite-Canvas-agent/main"
 GITHUB_UPDATE_NOTES_URL = GITHUB_RAW_ROOT + "/static/update-notes.json"
-MODELSCOPE_REPO_URL = "https://modelscope.ai/studios/daniel8152/Infinite-Canvas"
-MODELSCOPE_RAW_ROOT = "https://www.modelscope.ai/studios/daniel8152/Infinite-Canvas/raw/main"
+# 更新源：ModelScope 备份源已禁用（原指向上游 daniel8152 的空间，会把上游代码拉下来覆盖本分支改造）
+# 常量保留为空串，流程中已跳过该源；将来若有自己的 ModelScope 空间，填回这 6 个常量并恢复流程即可。
+# 注意：下面这组常量是【更新源】，不要和 579 行起的【ModelScope AI 服务商】配置混淆，后者是生图/聊天用的，必须保留。
+MODELSCOPE_REPO_URL = ""
+MODELSCOPE_RAW_ROOT = ""
 # ModelScope 仓库默认分支为 master；raw 网页路径会返回 HTML，必须用仓库文件 API 才能拿到纯文本
 # 注意：.ai 站命名空间为小写 daniel8152，API 路径大小写敏感（推送/文件 API 用大写会 404/拒绝）
-MODELSCOPE_FILE_API_ROOT = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infinite-Canvas/repo?Revision=master&FilePath="
-MODELSCOPE_VERSION_URL = MODELSCOPE_FILE_API_ROOT + "VERSION"
-MODELSCOPE_UPDATE_NOTES_URL = MODELSCOPE_FILE_API_ROOT + "static/update-notes.json"
-MODELSCOPE_TREE_URL = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infinite-Canvas/repo/files?Revision=master&Recursive=true"
+MODELSCOPE_FILE_API_ROOT = ""
+MODELSCOPE_VERSION_URL = ""
+MODELSCOPE_UPDATE_NOTES_URL = ""
+MODELSCOPE_TREE_URL = ""
+# 更新源开关：False = 单源（GitHub）。置 True 且填好上面常量即可恢复双源。
+UPDATE_SOURCE_MODELSCOPE_ENABLED = False
 
 @app.on_event("startup")
 async def startup_event():
@@ -1700,10 +1706,11 @@ def fetch_remote_update_notes(url: str, version: str = "", timeout: float = 5.0)
 def fetch_update_notes_with_fallback(preferred_source: str, version: str, timeout: float = 3.0) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     urls = {
         "github": GITHUB_UPDATE_NOTES_URL,
-        "modelscope": MODELSCOPE_UPDATE_NOTES_URL,
     }
+    if UPDATE_SOURCE_MODELSCOPE_ENABLED and MODELSCOPE_UPDATE_NOTES_URL:
+        urls["modelscope"] = MODELSCOPE_UPDATE_NOTES_URL
     preferred = preferred_source if preferred_source in urls else "github"
-    order = [preferred, "modelscope" if preferred == "github" else "github"]
+    order = [preferred] + [s for s in urls if s != preferred]
     notes_by_source: Dict[str, Any] = {}
     best_notes: Dict[str, Any] = {"version": version, "items": []}
     for source in order:
@@ -2137,13 +2144,15 @@ def app_info():
                 "tree_url": GITHUB_TREE_URL,
                 "update_notes_url": GITHUB_UPDATE_NOTES_URL,
             },
-            "modelscope": {
-                "label": "ModelScope",
-                "repo_url": MODELSCOPE_REPO_URL,
-                "version_url": MODELSCOPE_VERSION_URL,
-                "tree_url": MODELSCOPE_TREE_URL,
-                "update_notes_url": MODELSCOPE_UPDATE_NOTES_URL,
-            },
+            **({
+                "modelscope": {
+                    "label": "ModelScope",
+                    "repo_url": MODELSCOPE_REPO_URL,
+                    "version_url": MODELSCOPE_VERSION_URL,
+                    "tree_url": MODELSCOPE_TREE_URL,
+                    "update_notes_url": MODELSCOPE_UPDATE_NOTES_URL,
+                },
+            } if UPDATE_SOURCE_MODELSCOPE_ENABLED else {}),
         },
         "update_notes": read_local_update_notes(version),
     }
@@ -2186,11 +2195,12 @@ def update_connectivity_targets() -> List[Tuple[str, str, str, bool]]:
         ("GitHub 更新列表", GITHUB_TREE_URL, "github", True),
         ("GitHub 版本文件", GITHUB_VERSION_URL, "github", True),
         ("GitHub 主页", "https://github.com/", "github", False),
+        ("Google 连通性", "https://www.google.com/generate_204", "reference", False),
+    ] + ([
         ("ModelScope 版本文件", MODELSCOPE_VERSION_URL, "modelscope", True),
         ("ModelScope 空间页面", MODELSCOPE_REPO_URL, "modelscope", False),
         ("ModelScope 主页", "https://modelscope.cn/", "modelscope", False),
-        ("Google 连通性", "https://www.google.com/generate_204", "reference", False),
-    ]
+    ] if UPDATE_SOURCE_MODELSCOPE_ENABLED else [])
 
 @app.get("/api/update-connectivity/probe")
 def update_connectivity_probe(name: str):
@@ -2268,9 +2278,11 @@ def version_gt(a: str, b: str) -> bool:
 
 @app.get("/api/check-update")
 def check_update():
-    """服务端检测 GitHub 与 ModelScope 两个源的远端版本（走系统代理，避免浏览器跨域/被墙）。"""
+    """服务端检测远端版本（走系统代理，避免浏览器跨域/被墙）。
+
+    本分支只跟自有仓库 mufanmu/Infinite-Canvas-agent 比对；原 ModelScope 备份源指向上游，已禁用。
+    """
     current = current_app_version()
-    # 并发检测两个源，避免串行 8s+8s 拖慢首屏更新提示
     holder: Dict[str, Dict[str, Any]] = {}
     def _probe(key: str, url: str):
         item = fetch_remote_version(url, timeout=5.0)
@@ -2278,17 +2290,19 @@ def check_update():
         holder[key] = item
     threads = [
         Thread(target=_probe, args=("github", GITHUB_VERSION_URL), daemon=True),
-        Thread(target=_probe, args=("modelscope", MODELSCOPE_VERSION_URL), daemon=True),
     ]
+    if UPDATE_SOURCE_MODELSCOPE_ENABLED and MODELSCOPE_VERSION_URL:
+        threads.append(Thread(target=_probe, args=("modelscope", MODELSCOPE_VERSION_URL), daemon=True))
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=5.5)
     github = holder.get("github") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": GITHUB_VERSION_URL, "source": "github"}
-    modelscope = holder.get("modelscope") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": MODELSCOPE_VERSION_URL, "source": "modelscope"}
+    modelscope = holder.get("modelscope")
     best: Dict[str, Any] = {}
-    for item in (github, modelscope):
-        if item["ok"] and item["version"]:
+    candidates = [github] + ([modelscope] if modelscope else [])
+    for item in candidates:
+        if item and item["ok"] and item["version"]:
             if not best or version_gt(item["version"], best["version"]):
                 best = {"source": item["source"], "version": item["version"]}
     update_available = bool(best and version_gt(best["version"], current))
@@ -2296,16 +2310,18 @@ def check_update():
     if best and best.get("version"):
         best_notes, notes_by_source = fetch_update_notes_with_fallback(str(best.get("source") or "github"), best["version"], timeout=3.0)
         best["update_notes"] = best_notes if best_notes.get("ok") else {"version": best["version"], "items": []}
-    return {
+    result = {
         "current": current,
         "github": github,
-        "modelscope": modelscope,
         "latest": best,
         "update_notes": best.get("update_notes") if best else {},
         "update_notes_sources": notes_by_source,
         "update_available": update_available,
-        "reachable": bool(github["ok"] or modelscope["ok"]),
+        "reachable": bool(github["ok"]),
     }
+    if modelscope:
+        result["modelscope"] = modelscope
+    return result
 
 def update_allowed_file(path: str) -> bool:
     path = str(path or "").replace("\\", "/").lstrip("/")
@@ -2566,7 +2582,10 @@ UPDATE_SOURCE_LABELS = {"github": "GitHub", "modelscope": "ModelScope"}
 def normalize_update_source(value: str) -> str:
     source = str(value or "github").strip().lower()
     if source == "ms":
-        return "modelscope"
+        source = "modelscope"
+    if source == "modelscope" and not UPDATE_SOURCE_MODELSCOPE_ENABLED:
+        # 本分支只认自有仓库，任何指向上游 ModelScope 空间的请求一律降级为 GitHub 源
+        return "github"
     if source not in {"github", "modelscope"}:
         return "github"
     return source
@@ -2574,6 +2593,8 @@ def normalize_update_source(value: str) -> str:
 def stage_update_from_source(source: str, staging_root: str) -> Tuple[List[str], List[str], List[str]]:
     """下载指定源的更新文件到 staging，返回 (root_files, static_files, files)。失败抛异常。"""
     if source == "modelscope":
+        if not (UPDATE_SOURCE_MODELSCOPE_ENABLED and MODELSCOPE_VERSION_URL):
+            raise RuntimeError("ModelScope 更新源已禁用，只能使用 GitHub 源")
         download_modelscope_update_files(staging_root)
         return staged_update_file_list(staging_root)
     root_files, static_files, files = github_update_file_list()
@@ -2734,10 +2755,13 @@ def update_from_github(req: UpdateRequest = UpdateRequest()):
     staging_root = ""
     requested_source = normalize_update_source(req.source)
     # 冗余设计：先用用户选择的源，失败后自动切换到另一个源兜底，全部失败才报错
+    # 本分支禁用上游 ModelScope 源，候选里只保留 GitHub（normalize_update_source 已降级）
     source_order = [requested_source]
     if req.fallback:
         other = "modelscope" if requested_source == "github" else "github"
-        source_order.append(other)
+        other = normalize_update_source(other)
+        if other != requested_source:
+            source_order.append(other)
     try:
         backup_root = ""
         backup_manifest: Dict[str, Any] = {}

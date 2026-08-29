@@ -10,11 +10,12 @@ Supports comfyui/API calls/modelscope calls
 > **当前版本：v2.1**（查看 [版本更新大纲](./CHANGELOG.md)）
 
 ### 重要提示
-- **自动更新已开启**：更新源指向主项目 [hero8152/Infinite-Canvas](https://github.com/hero8152/Infinite-Canvas)，导航栏会自动检测并提示新版本。
+- **自动更新已开启**：更新源指向本仓库 [mufanmu/Infinite-Canvas-agent](https://github.com/mufanmu/Infinite-Canvas-agent)，左下角版本徽章会自动检测并提示新版本。上游 `hero8152/Infinite-Canvas` 已于 2026-08-28 宣布停更，本分支自此独立维护，不再跟随上游。
+- **版本号规则**：`VERSION` 文件使用日期格式（`YYYY.MM.DD`），发版时改为当天日期即可，只需保证递增。
 - **禁止商业用途**：沿用原作者版权声明（见文末），二次开发须保持开源并注明来源作者。
 - **不要提交 API Key到仓库**：请在软件自带的「API 设置」界面填写 Key/URL，不要写入代码或提交到仓库（`.gitignore` 已排除敏感文件与运行时数据）。
 
-> This fork adds an AI Agent panel to the canvas. Auto-update is enabled and points to the main project hero8152/Infinite-Canvas. Do not commit API keys. Commercial use remains prohibited.
+> This fork adds an AI Agent panel to the canvas. Auto-update points to this repo (mufanmu/Infinite-Canvas-agent), not the upstream project. Do not commit API keys. Commercial use remains prohibited.
 
 ### 版本更新日志
 
