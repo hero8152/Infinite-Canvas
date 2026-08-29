@@ -2725,8 +2725,19 @@ function renderVideoAspectControl(){
     </div>`;
 }
 function renderVideoResolutionControl(){
-    const options = [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P']];
-    const value = settings.videoResolution || '';
+    // MiniMax-H3 只接受 2K / 768P，其余模型保留通用档位
+    const isMinimax = /minimax[-_ ]?h3/i.test(String(settings.videoModel || '').trim());
+    const options = isMinimax
+        ? [['2K','2K'], ['768P','768P']]
+        : [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P']];
+    let value = settings.videoResolution || '';
+    if(isMinimax && value !== '2K' && value !== '768P'){
+        value = '768P';
+        settings.videoResolution = value;
+    } else if(!isMinimax && (value === '2K' || value === '768P')){
+        value = '';
+        settings.videoResolution = value;
+    }
     const labelMap = Object.fromEntries(options);
     return `<div class="smart-control resolution-control">
         <button class="smart-pill" type="button"><i data-lucide="monitor"></i><span>${escapeHtml(labelMap[value] || value || tr('smart.videoResAuto'))}</span></button>
@@ -4191,8 +4202,19 @@ function bindDynamicParams(){
             event.preventDefault();
             event.stopPropagation();
             markControlInteracting(btn);
-            setDynamicSetting(btn.dataset.smartParam, btn.dataset.smartValue);
-            if(btn.dataset.smartParam === 'videoDuration') renderDynamicParams();
+            const param = btn.dataset.smartParam;
+            setDynamicSetting(param, btn.dataset.smartValue);
+            if(param === 'videoModel'){
+                // MiniMax-H3 只接受 2K/768P：切换模型时联动纠正分辨率
+                const isMinimax = /minimax[-_ ]?h3/i.test(String(settings.videoModel || '').trim());
+                if(isMinimax && settings.videoResolution !== '2K' && settings.videoResolution !== '768P'){
+                    settings.videoResolution = '768P';
+                } else if(!isMinimax && (settings.videoResolution === '2K' || settings.videoResolution === '768P')){
+                    settings.videoResolution = '';
+                }
+                renderDynamicParams();
+            }
+            if(param === 'videoDuration') renderDynamicParams();
         };
     });
     dynamicParams.querySelectorAll('[data-size-scope]').forEach(btn => {
