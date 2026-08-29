@@ -12,6 +12,7 @@ Supports comfyui/API calls/modelscope calls
 ### 重要提示
 - **自动更新已开启**：更新源指向本仓库 [mufanmu/Infinite-Canvas-agent](https://github.com/mufanmu/Infinite-Canvas-agent)，左下角版本徽章会自动检测并提示新版本。上游 `hero8152/Infinite-Canvas` 已于 2026-08-28 宣布停更，本分支自此独立维护，不再跟随上游。
 - **版本号规则**：`VERSION` 文件使用日期格式（`YYYY.MM.DD`），发版时改为当天日期即可，只需保证递增。
+- **可选：配置 GitHub Token**：GitHub 对未认证 API 限流 60 次/小时（按出口 IP 计），自动更新列文件清单时可能触发 403。设置环境变量 `GITHUB_TOKEN` 后限额提升到 5000 次/小时，不设置则行为不变。公开仓库用无权限的空 token 即可，无需勾选任何 scope。
 - **禁止商业用途**：沿用原作者版权声明（见文末），二次开发须保持开源并注明来源作者。
 - **不要提交 API Key到仓库**：请在软件自带的「API 设置」界面填写 Key/URL，不要写入代码或提交到仓库（`.gitignore` 已排除敏感文件与运行时数据）。
 

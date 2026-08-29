@@ -2171,7 +2171,7 @@ def connectivity_probe(name: str, url: str, timeout: float = 5.0) -> Dict[str, A
     try:
         response = requests.get(
             url,
-            headers={"User-Agent": "Infinite-Canvas-Updater"},
+            headers=github_auth_headers({"User-Agent": "Infinite-Canvas-Updater"}),
             timeout=timeout,
             stream=True,
             proxies=urllib.request.getproxies() or None,
@@ -2329,14 +2329,25 @@ def update_allowed_file(path: str) -> bool:
         return False
     return path in {"main.py", "VERSION"} or path.startswith("static/")
 
-# 缓存 GitHub Tree API 响应（含 ETag），减少 60 次/h 限流压力
+# 缓存 GitHub Tree API 响应（含 ETag），减少限流压力
 GITHUB_TREE_CACHE: Dict[str, Any] = {"etag": "", "data": None, "expires_at": 0.0}
+
+# 可选：配置 GitHub Personal Access Token 可把 API 限额从 60 次/h 提到 5000 次/h。
+# 未配置时行为与原来完全一致（匿名访问）。本仓库是公开仓库，token 只需 public_repo 只读权限即可，
+# 也可用无任何权限的空 token（GitHub 对带 token 的请求单独按 5000/h 计）。
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
+
+def github_auth_headers(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    merged = dict(headers or {})
+    if GITHUB_TOKEN:
+        merged["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    return merged
 
 def github_get(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 30) -> requests.Response:
     try:
         response = requests.get(
             url,
-            headers=headers or {},
+            headers=github_auth_headers(headers),
             timeout=timeout,
             proxies=urllib.request.getproxies() or None,
         )
