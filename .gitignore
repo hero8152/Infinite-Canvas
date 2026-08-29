@@ -10,3 +10,6 @@ data/
 __pycache__/
 *.pyc
 history.json
+
+# 调试产物
+.qoder/
