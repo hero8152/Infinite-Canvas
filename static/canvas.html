@@ -16,13 +16,13 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.07.22.1784282603"></script>
-    <script src="/static/vendor/js/lucide.js?v=2026.07.22.1784282603"></script>
-    <script src="/static/js/theme.js?v=2026.07.22.1784282603"></script>
-    <script src="/static/js/touch-mouse.js?v=2026.07.22.1784282603"></script>
-    <script src="/static/js/i18n.js?v=2026.07.22.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.07.22.1784774601">
-    <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.22.1784282603">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.08.04.1785292594"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.08.04.1785292594"></script>
+    <script src="/static/js/theme.js?v=2026.08.04.1785292593"></script>
+    <script src="/static/js/touch-mouse.js?v=2026.08.04.1785292587"></script>
+    <script src="/static/js/i18n.js?v=2026.08.04.1785292592"></script>
+    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.04.1785857167">
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.08.04.1785292588">
 </head>
 <body>
     <div id="shell" class="shell no-canvas">
@@ -45,6 +45,7 @@
                     <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
                     <button class="tool-btn" onclick="addMsGenNode()"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.msGenerate">MS生成</span></button>
                     <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
+                    <button class="tool-btn" onclick="addMiniMaxNode()"><i data-lucide="sparkles" class="w-4 h-4"></i><span>MiniMax</span></button>
                     <button class="tool-btn" onclick="addRhNode()"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
                     <button class="tool-btn" onclick="addComfyNode()"><i data-lucide="workflow" class="w-4 h-4"></i>ComfyUI</button>
                     <button class="tool-btn" onclick="addLTXDirectorNode()"><i data-lucide="film" class="w-4 h-4"></i><span data-i18n="canvas.ltxDirector">LTX Director</span></button>
@@ -71,8 +72,10 @@
                 <button class="menu-btn" onclick="menuAdd('loop')"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
+                <button class="menu-btn" onclick="menuAdd('midjourney')"><i data-lucide="panel-top" class="w-4 h-4"></i><span>Midjourney</span></button>
                 <button class="menu-btn" onclick="menuAdd('msgen')"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.modelscopeGenerate">Modelscope生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
+                <button class="menu-btn" onclick="menuAdd('minimax')"><i data-lucide="sparkles" class="w-4 h-4"></i><span>MiniMax H3</span></button>
                 <button class="menu-btn" onclick="menuAdd('rh')"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('comfy')"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.comfyGenerate">ComfyUI 生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('ltxDirector')"><i data-lucide="film" class="w-4 h-4"></i><span data-i18n="canvas.ltxDirector">LTX Director</span></button>
@@ -350,7 +353,7 @@
         </div>
     </div>
 
-    <script src="/static/js/ltx-director-timeline.js?v=2026.07.22.1784282603"></script>
-    <script src="/static/js/canvas.js?v=2026.07.22.1784774601"></script>
+    <script src="/static/js/ltx-director-timeline.js?v=2026.08.04.1785292592"></script>
+    <script src="/static/js/canvas.js?v=2026.08.04.1785856416"></script>
 </body>
 </html>

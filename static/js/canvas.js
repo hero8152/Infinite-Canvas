@@ -7,6 +7,12 @@ function trf(key, values={}){
 function langIsEn(){ return window.StudioI18n?.lang?.() === 'en'; }
 const CANVAS_UPLOAD_MAX = 20;
 const CANVAS_REFERENCE_IMAGE_MAX = 20;
+const CANVAS_MINIMAX_REF_IMAGE_MAX = 9;
+const CANVAS_MINIMAX_REF_VIDEO_MAX = 3;
+const CANVAS_MINIMAX_REF_AUDIO_MAX = 3;
+const CANVAS_MINIMAX_DEFAULT_ENGINE = 'comfyui';
+const CANVAS_MINIMAX_RUNNINGHUB_WORKFLOW_ID = '2084608321469898754';
+const CANVAS_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE = 'Minimax-多参视频生成';
 function actionFailed(labelKey, detail=''){
     const label = tr(labelKey);
     return langIsEn() ? `${label} failed${detail ? `: ${detail}` : ''}` : `${label}失败${detail ? `：${detail}` : ''}`;
@@ -130,8 +136,10 @@ function bindCanvasPreviewImageFallbacks(root=document){
     });
 }
 const CANVAS_SELECTED_HIGH_RES_DELAY = 320;
+const CANVAS_HIGH_RES_ZOOM_THRESHOLD = 0.86;
 let canvasSelectedHighResTimer = 0;
 let canvasSelectedHighResSeq = 0;
+let canvasImageResolutionSyncTimer = 0;
 const canvasSelectedHighResLoaded = new Set();
 const canvasSelectedHighResLoading = new Map();
 function canvasImageEditorIsOpen(){
@@ -154,15 +162,25 @@ function preloadCanvasSelectedHighRes(src){
     canvasSelectedHighResLoading.set(src, task);
     return task;
 }
+function canvasViewportWantsHighRes(){
+    return Number(viewport?.scale || 1) >= CANVAS_HIGH_RES_ZOOM_THRESHOLD;
+}
+function canvasImageNearViewport(img){
+    if(!img?.isConnected || !board) return false;
+    const boardRect = board.getBoundingClientRect();
+    const rect = img.getBoundingClientRect();
+    const margin = 220;
+    return rect.right >= boardRect.left - margin && rect.left <= boardRect.right + margin
+        && rect.bottom >= boardRect.top - margin && rect.top <= boardRect.bottom + margin;
+}
 function syncCanvasSelectedImageResolution(root=nodesEl){
     const selectedImages = [];
+    const wantHighRes = canvasViewportWantsHighRes();
     root.querySelectorAll?.('.node img[data-preview-src][data-original-src]').forEach(img => {
         if(img.dataset.previewKind === 'video') return;
-        const nodeEl = img.closest('.node');
-        const selectedNode = Boolean(nodeEl?.dataset?.id && selected.has(nodeEl.dataset.id));
         const preview = img.dataset.previewSrc || '';
         const original = img.dataset.originalSrc || img.dataset.url || '';
-        if(!selectedNode){
+        if(!wantHighRes || !canvasImageNearViewport(img)){
             delete img.dataset.selectedHighResTarget;
             if(preview && img.getAttribute('src') !== preview) img.src = preview;
             return;
@@ -187,11 +205,17 @@ function syncCanvasSelectedImageResolution(root=nodesEl){
         if(seq !== canvasSelectedHighResSeq || canvasImageEditorIsOpen()) return;
         selectedImages.forEach(({img, target}) => {
             if(!img.isConnected || img.dataset.selectedHighResTarget !== target) return;
-            const nodeEl = img.closest('.node');
-            if(!nodeEl?.dataset?.id || !selected.has(nodeEl.dataset.id)) return;
+            if(!canvasViewportWantsHighRes() || !canvasImageNearViewport(img)) return;
             if(canvasSelectedHighResLoaded.has(target) && img.getAttribute('src') !== target) img.src = target;
         });
     }, CANVAS_SELECTED_HIGH_RES_DELAY);
+}
+function scheduleCanvasImageResolutionSync(root=nodesEl, delay=120){
+    if(canvasImageResolutionSyncTimer) clearTimeout(canvasImageResolutionSyncTimer);
+    canvasImageResolutionSyncTimer = setTimeout(() => {
+        canvasImageResolutionSyncTimer = 0;
+        syncCanvasSelectedImageResolution(root);
+    }, Math.max(0, Number(delay) || 0));
 }
 function applyLanguage(lang){
     if(lang && window.StudioI18n) StudioI18n.set(lang);
@@ -497,6 +521,17 @@ const SIZE_MAP = {
     ultrawide: { '1k':'1280x544', '2k':'2048x880', '4k':'3840x1648' },
     ultratall: { '1k':'544x1280', '2k':'880x2048', '4k':'1648x3840' }
 };
+const API_RATIO_VALUES = {
+    square:'1:1',
+    portrait:'2:3',
+    landscape:'3:2',
+    portrait43:'3:4',
+    landscape43:'4:3',
+    story:'9:16',
+    wide:'16:9',
+    ultrawide:'21:9',
+    ultratall:'9:21'
+};
 const RES_LONG_SIDE = { '1k':1536, '2k':2048, '4k':3840 };
 const RES_PIXEL_LIMIT = { '1k':1572864, '2k':4194304, '4k':8294400 };
 const CUSTOM_IMAGE_MODELS_KEY = 'canvas_custom_image_models';
@@ -633,6 +668,23 @@ function imageApiProviders(){
     const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
         .filter(p => p.id !== 'modelscope' && p.enabled !== false && (p.image_models || []).length);
     return providers;
+}
+function midjourneyApiProviders(){
+    return (apiProviders.length ? apiProviders : [])
+        .filter(provider => provider.enabled !== false && (
+            String(provider.protocol || '').toLowerCase() === 'apimart'
+            || /(^|\.)apimart\.ai(?:\/|$)/i.test(String(provider.base_url || ''))
+        ));
+}
+function resolveMidjourneyProviderId(id){
+    const providers = midjourneyApiProviders();
+    return providers.find(provider => provider.id === id)?.id || providers[0]?.id || '';
+}
+function midjourneyProviderOptions(selectedId){
+    const selected = resolveMidjourneyProviderId(selectedId);
+    const providers = midjourneyApiProviders();
+    if(!providers.length) return '<option value="" disabled selected>请先配置 APIMart 平台</option>';
+    return providers.map(provider => `<option value="${escapeHtml(provider.id)}" ${provider.id === selected ? 'selected' : ''}>${escapeHtml(provider.name || provider.id)}</option>`).join('');
 }
 function providerById(id){
     return (apiProviders.length ? apiProviders : defaultApiProviders()).find(p => p.id === id) || imageApiProviders()[0] || defaultApiProviders()[0];
@@ -1141,16 +1193,10 @@ function screenToWorld(clientX, clientY){
     const rect = board.getBoundingClientRect();
     return { x:(clientX - rect.left - viewport.x) / viewport.scale, y:(clientY - rect.top - viewport.y) / viewport.scale };
 }
-function canvasWheelZoomFactor(event, pageSize){
-    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? pageSize : 1;
-    const isMac = /^Mac/.test(navigator.platform || '');
-    const sensitivity = 0.0008;
-    const macMultiplier = isMac ? 1.15 : 1;
-    return Math.exp(-event.deltaY * unit * sensitivity * macMultiplier);
-}
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
     scheduleMinimapRender();
+    scheduleCanvasImageResolutionSync(nodesEl, 120);
 }
 function estimatedNodeRect(n){
     const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(n.id)}"]`);
@@ -2521,6 +2567,14 @@ function addGeneratorNode(point){
     const model = allImageModels(providerId)[0] || '';
     return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, ratio:'square', resolution:defaultApiImageResolution(model), customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
 }
+function addMidjourneyNode(point){
+    const p = point || defaultPoint(140, 0);
+    return addNode({
+        id:uid('mj'), type:'midjourney', x:p.x, y:p.y,
+        apiProvider:resolveMidjourneyProviderId(''), mode:'imagine', size:'1:1', version:'6.1', speed:'relax',
+        inputs:[], running:false, lastTaskId:'', lastAction:'', lastTaskStatus:'', lastImageCount:0, lastPrompt:'', mjModalTaskId:'', mjModalPrompt:''
+    });
+}
 function addMsGenNode(point){
     const p = point || defaultPoint(140, 0);
     return addNode({
@@ -2568,6 +2622,30 @@ function addVideoNode(point){
         useFrameRoles:false,
         multimodal:false,
         tempShLinks:[],
+        inputs:[],
+        running:false
+    });
+}
+function addMiniMaxNode(point){
+    const p = point || defaultPoint(170, 0);
+    return addNode({
+        id:uid('mmx'),
+        type:'minimax',
+        x:p.x,
+        y:p.y,
+        w:980,
+        h:720,
+        minimaxEngine:CANVAS_MINIMAX_DEFAULT_ENGINE,
+        workflow:'MiniMax_H3.json',
+        minimaxRunningHubWorkflowId:CANVAS_MINIMAX_RUNNINGHUB_WORKFLOW_ID,
+        rhPayment:'free',
+        duration:8,
+        aspectRatio:'16:9',
+        megapixels:0.4,
+        selectedSegmentId:'',
+        playhead:0,
+        segments:[],
+        materials:[],
         inputs:[],
         running:false
     });
@@ -3151,9 +3229,11 @@ function linkCreateOptions(state){
         if(['image','prompt','loop','group','promptGroup','llm','output'].includes(node.type)){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
+                {type:'midjourney', label:'Midjourney', icon:'panel-top'},
                 {type:'msgen', label:tr('canvas.modelscopeGenerate'), icon:'cloud-lightning'},
                 {type:'comfy', label:tr('canvas.comfyGenerate'), icon:'workflow'},
                 {type:'rh', label:tr('canvas.rhGenerate'), icon:'workflow'},
+                {type:'minimax', label:'MiniMax H3', icon:'sparkles'},
                 {type:'ltxDirector', label:tr('canvas.ltxDirector'), icon:'film'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
                 ...(node.type === 'output' ? [] : [{type:'llm', label:'LLM', icon:'message-square-text'}])
@@ -3202,8 +3282,10 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
         {type:'output', label:'Output', icon:'circle-dot'},
         ...(CANVAS_IMAGE_OUTPUT_TYPES.includes(node.type) ? [
             {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
+            {type:'midjourney', label:'Midjourney', icon:'panel-top'},
             {type:'msgen', label:tr('canvas.modelscopeGenerate'), icon:'cloud-lightning'},
             {type:'comfy', label:tr('canvas.comfyGenerate'), icon:'workflow'},
+            {type:'minimax', label:'MiniMax H3', icon:'sparkles'},
             {type:'ltxDirector', label:tr('canvas.ltxDirector'), icon:'film'},
             {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'}
         ] : [])
@@ -3525,8 +3607,10 @@ function createNodeByType(type, point){
     if(type === 'group') return addGroupNode(point);
     if(type === 'llm') return addLLMNode(point);
     if(type === 'generator') return addGeneratorNode(point);
+    if(type === 'midjourney') return addMidjourneyNode(point);
     if(type === 'msgen') return addMsGenNode(point);
     if(type === 'video') return addVideoNode(point);
+    if(type === 'minimax') return addMiniMaxNode(point);
     if(type === 'rh') return addRhNode(point);
     if(type === 'comfy') return addComfyNode(point);
     if(type === 'ltxDirector') return addLTXDirectorNode(point);
@@ -3540,8 +3624,10 @@ function menuAdd(type){
     if(type === 'loop') addLoopNode(menuPoint);
     if(type === 'llm') addLLMNode(menuPoint);
     if(type === 'generator') addGeneratorNode(menuPoint);
+    if(type === 'midjourney') addMidjourneyNode(menuPoint);
     if(type === 'msgen') addMsGenNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
+    if(type === 'minimax') addMiniMaxNode(menuPoint);
     if(type === 'rh') addRhNode(menuPoint);
     if(type === 'comfy') addComfyNode(menuPoint);
     if(type === 'ltxDirector') addLTXDirectorNode(menuPoint);
@@ -5964,6 +6050,10 @@ function pendingPreviewSizeForRun(node, options={}){
     if(node?.type === 'comfy' && (node.mode || 'text') === 'text'){
         return normalizedPendingPreviewSize({w:Number(node.width || 1024), h:Number(node.height || 1024)});
     }
+    if(node?.type === 'minimax'){
+        const [w, h] = miniMaxAspectValue(node.aspectRatio || '16:9').split(':').map(Number);
+        return normalizedPendingPreviewSize({w:w || 16, h:h || 9});
+    }
     return pendingPreviewSizeFromRefs(options.refs || []);
 }
 function pendingOutputStyle(pending){
@@ -6025,7 +6115,7 @@ function restoreOutputScrolls(state){
     });
 }
 function isNodeControl(target){
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .minimax-canvas-workbench, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -6061,10 +6151,10 @@ function renderNode(node){
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'minimax' ? 'MiniMax H3' : node.type === 'midjourney' ? 'Midjourney' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','rh'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -6216,8 +6306,10 @@ function renderNode(node){
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
     if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
+    if(node.type === 'midjourney') body.appendChild(renderMidjourneyBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
+    if(node.type === 'minimax') body.appendChild(renderMiniMaxBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'comfy') body.appendChild(renderComfyBody(node));
     if(node.type === 'ltxDirector') body.appendChild(renderLTXDirectorBody(node));
@@ -6240,8 +6332,8 @@ function renderNode(node){
         if(e.button !== 0 || !isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','output'].includes(node.type);
+    const canInput = ['generator','midjourney','comfy','ltxDirector','output','llm','msgen','video','rh','minimax'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','midjourney','comfy','ltxDirector','llm','msgen','video','rh','minimax','output'].includes(node.type);
     if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -6273,6 +6365,20 @@ function bindOutputWrap(wrap, node){
     const playBtn = wrap.querySelector('.canvas-video-play');
     const del = wrap.querySelector('.output-del');
     const recoverQuery = wrap.querySelector('.output-recover-query');
+    const outputDragUrl = () => img?.dataset.url || video?.dataset.url || audio?.dataset.url || wrap.dataset.outputUrl || '';
+    wrap.draggable = Boolean(outputDragUrl());
+    wrap.ondragstart = e => {
+        const url = outputDragUrl();
+        if(!url || e.target.closest('button,audio,video')) return;
+        e.stopPropagation();
+        wrap.dataset.dragging = '1';
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('application/x-canvas-output-image', url);
+        e.dataTransfer.setData('text/uri-list', url);
+        e.dataTransfer.setData('text/plain', url);
+        if(img) setOutputDragPreview(e, img);
+    };
+    wrap.ondragend = () => setTimeout(() => { delete wrap.dataset.dragging; }, 0);
     if(img){
         img.draggable = true;
         img.ondragstart = e => {
@@ -6286,7 +6392,7 @@ function bindOutputWrap(wrap, node){
         img.ondragend = () => setTimeout(() => { delete img.dataset.dragging; }, 0);
         img.onclick = e => {
             e.stopPropagation();
-            if(img.dataset.dragging) return;
+            if(img.dataset.dragging || wrap.dataset.dragging) return;
             openOutputLightbox(img.dataset.url, node);
         };
     }
@@ -6411,8 +6517,10 @@ function defaultNodeSize(type){
     if(type === 'loop') return {w:336, h:0};
     if(type === 'llm') return {w:420, h:590};
     if(type === 'generator') return {w:380, h:0};
+    if(type === 'midjourney') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:400, h:0};
+    if(type === 'minimax') return {w:980, h:720};
     if(type === 'rh') return {w:430, h:0};
     if(type === 'comfy') return {w:420, h:460};
     if(type === 'ltxDirector') return {w:1000, h:800};
@@ -8504,6 +8612,100 @@ function renderGeneratorBody(node){
     bindCascadeButtons(wrap, node.id);
     return wrap;
 }
+function midjourneyModalHtml(node, maskRef){
+    if(!node.mjModalTaskId) return '';
+    const hasMask = Boolean(maskRef?.url);
+    return `<div class="mj-modal-panel"><div class="mj-action-title">局部重绘</div><textarea class="mj-modal-prompt" placeholder="描述要替换的内容">${escapeHtml(node.mjModalPrompt || node.lastPrompt || '')}</textarea><div class="mj-modal-mask ${hasMask ? 'ready' : ''}"><i data-lucide="${hasMask ? 'brush' : 'image-off'}"></i><span>${hasMask ? `遮罩已连接：${escapeHtml(maskRef.name || 'mask')}` : '连接遮罩图片节点后才能提交'}</span></div><button type="button" class="mj-reroll mj-modal-submit" ${hasMask && !node.running ? '' : 'disabled'}><i data-lucide="wand-sparkles"></i>${node.running ? '提交中...' : '提交局部重绘'}</button></div>`;
+}
+function midjourneyContinuationHtml(node){
+    if(!node.lastTaskId || node.mjModalTaskId) return '';
+    if(['blend','edit'].includes(node.lastAction)) return '';
+    const isSingle = Number(node.lastImageCount || 0) === 1;
+    if(!isSingle){
+        if(['8.1','8.2'].includes(String(node.version || '')) && node.lastAction !== 'blend' && node.lastAction !== 'edit'){
+            return `<div class="mj-actions"><div class="mj-action-title">v8 重塑</div><div class="mj-action-grid">${[1,2,3,4].map(index => `<button type="button" data-mj-action="remix_subtle" data-index="${index}" title="轻微重塑第 ${index} 张">R${index}</button>`).join('')}</div><div class="mj-action-grid">${[1,2,3,4].map(index => `<button type="button" data-mj-action="remix_strong" data-index="${index}" title="强烈重塑第 ${index} 张">R+${index}</button>`).join('')}</div><button class="mj-reroll" type="button" data-mj-action="reroll"><i data-lucide="refresh-cw"></i>重新生成</button></div>`;
+        }
+        return `<div class="mj-actions"><div class="mj-action-title">选择四宫格图片</div><div class="mj-action-grid">${[1,2,3,4].map(index => `<button type="button" data-mj-action="upscale" data-index="${index}" title="放大第 ${index} 张">U${index}</button>`).join('')}</div><div class="mj-action-grid">${[1,2,3,4].map(index => `<button type="button" data-mj-action="variation" data-index="${index}" title="生成第 ${index} 张的弱变体">V${index}</button>`).join('')}</div><button class="mj-reroll" type="button" data-mj-action="reroll"><i data-lucide="refresh-cw"></i>重新生成</button></div>`;
+    }
+    return `<div class="mj-actions"><div class="mj-action-title">单图细化</div><div class="mj-text-action-grid"><button type="button" data-mj-action="low_variation" data-index="1">弱变体</button><button type="button" data-mj-action="high_variation" data-index="1">强变体</button><button type="button" data-mj-action="zoom" data-zoom-ratio="1.5">扩图 1.5x</button><button type="button" data-mj-action="zoom" data-zoom-ratio="2">扩图 2x</button></div><div class="mj-pan-grid"><button type="button" data-mj-action="pan" data-direction="left" title="向左扩展"><i data-lucide="arrow-left"></i></button><button type="button" data-mj-action="pan" data-direction="up" title="向上扩展"><i data-lucide="arrow-up"></i></button><button type="button" data-mj-action="inpaint" title="局部重绘"><i data-lucide="brush"></i></button><button type="button" data-mj-action="pan" data-direction="right" title="向右扩展"><i data-lucide="arrow-right"></i></button></div></div>`;
+}
+function renderMidjourneyBody(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body midjourney-body';
+    node.apiProvider = resolveMidjourneyProviderId(node.apiProvider || '');
+    node.mode = ['imagine','blend','edit'].includes(node.mode) ? node.mode : 'imagine';
+    node.size = /^\d{1,2}:\d{1,2}$/.test(String(node.size || '')) ? node.size : '1:1';
+    node.version = String(node.version || '6.1');
+    node.speed = ['relax','fast','turbo'].includes(node.speed) ? node.speed : 'relax';
+    const sources = orderedSources(node, generatorSources(node));
+    const mediaInputs = sources.filter(src => src.refs?.some(ref => mediaKindForRef(ref) === 'image'));
+    const promptInputs = sources.filter(src => src.prompt && !src.refs?.length);
+    const maskRef = mediaInputs.flatMap(source => source.refs || []).find(ref => String(ref.role || '').toLowerCase() === 'mask') || null;
+    const hasProvider = Boolean(node.apiProvider);
+    const taskText = node.lastTaskId ? `任务 ${escapeHtml(node.lastTaskId.slice(-14))}` : '生成四宫格后可选图';
+    const runLabel = node.running ? '提交中...' : '生成四宫格';
+    wrap.innerHTML = `
+        <div class="prompt-list mb-3"></div>
+        <div class="midjourney-input-head"><span>参考图片</span><span>最多 4 张</span></div>
+        <div class="input-list mj-input-list"></div>
+        <div class="gen-settings mj-settings">
+            <div class="gen-settings-row">
+                <select class="select-lite mj-mode"><option value="imagine" ${node.mode === 'imagine' ? 'selected' : ''}>生成</option><option value="blend" ${node.mode === 'blend' ? 'selected' : ''}>融合</option><option value="edit" ${node.mode === 'edit' ? 'selected' : ''}>编辑</option></select>
+                <select class="select-lite mj-provider">${midjourneyProviderOptions(node.apiProvider)}</select>
+                <select class="select-lite mj-version">
+                    ${['8.2','8.1','7','6.1','5.2','5.1'].map(version => `<option value="${version}" ${node.version === version ? 'selected' : ''}>v${version}</option>`).join('')}
+                </select>
+            </div>
+            <div class="gen-settings-row">
+                <select class="select-lite mj-size">
+                    ${['1:1','3:4','4:3','9:16','16:9','21:9'].map(size => `<option value="${size}" ${node.size === size ? 'selected' : ''}>${size}</option>`).join('')}
+                </select>
+                <select class="select-lite mj-speed">
+                    <option value="relax" ${node.speed === 'relax' ? 'selected' : ''}>Relax</option>
+                    <option value="fast" ${node.speed === 'fast' ? 'selected' : ''}>Fast</option>
+                    <option value="turbo" ${node.speed === 'turbo' ? 'selected' : ''}>Turbo</option>
+                </select>
+            </div>
+        </div>
+        <div class="mj-task-line ${node.lastTaskId ? 'ready' : ''}"><i data-lucide="clock-3"></i><span>${taskText}</span></div>
+        <div class="gen-run-row"><button class="gen-btn mj-run" ${node.running || !hasProvider ? 'disabled' : ''}><i data-lucide="wand-sparkles" class="w-4 h-4"></i>${runLabel}</button>${cascadeBtnHtml(node)}</div>
+        ${midjourneyContinuationHtml(node)}
+        ${midjourneyModalHtml(node, maskRef)}
+        ${retryBarHtml(node)}
+    `;
+    renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
+    renderImageInputList(wrap.querySelector('.mj-input-list'), node, mediaInputs);
+    ['mode','provider','version','size','speed'].forEach(field => {
+        const input = wrap.querySelector(`.mj-${field}`);
+        if(!input) return;
+        input.onchange = event => {
+            event.stopPropagation();
+            node[field === 'provider' ? 'apiProvider' : field] = event.target.value;
+            scheduleSave();
+            if(field === 'provider' || field === 'mode') render();
+        };
+    });
+    wrap.querySelector('.mj-run').onclick = event => { event.stopPropagation(); runCanvasGenerate(node.id); };
+    wrap.querySelectorAll('[data-mj-action]').forEach(button => {
+        button.onclick = event => {
+            event.stopPropagation();
+            runMidjourneyAction(node.id, button.dataset.mjAction, Number(button.dataset.index || 0), {
+                direction:button.dataset.direction || '',
+                zoomRatio:Number(button.dataset.zoomRatio || 0) || null
+            });
+        };
+    });
+    const modalPrompt = wrap.querySelector('.mj-modal-prompt');
+    if(modalPrompt){
+        modalPrompt.oninput = event => { node.mjModalPrompt = event.target.value; scheduleSave(); };
+    }
+    const modalSubmit = wrap.querySelector('.mj-modal-submit');
+    if(modalSubmit){
+        modalSubmit.onclick = event => { event.stopPropagation(); runMidjourneyModal(node.id, maskRef); };
+    }
+    bindCascadeButtons(wrap, node.id);
+    return wrap;
+}
 function renderVideoBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body';
@@ -8640,6 +8842,576 @@ function renderVideoBody(node){
     wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     return wrap;
+}
+function miniMaxEngine(node){
+    return node?.minimaxEngine === 'runninghub' ? 'runninghub' : CANVAS_MINIMAX_DEFAULT_ENGINE;
+}
+function miniMaxAspectValue(value){
+    const text = String(value || '').trim();
+    const match = text.match(/\d+\s*:\s*\d+/);
+    return match ? match[0].replace(/\s+/g, '') : '16:9';
+}
+function miniMaxRefsForNode(node){
+    const sources = orderedSources(node, generatorSources(node));
+    return {
+        sources,
+        prompt:sources.map(src => src.prompt).filter(Boolean).join('\n\n'),
+        refs:sources.flatMap(src => src.refs || []).filter(ref => ref?.url)
+    };
+}
+function miniMaxNormalizeRef(ref){
+    if(!ref?.url) return null;
+    return {...ref, kind:mediaKindForRef(ref)};
+}
+function miniMaxUniqueRefs(refs=[]){
+    const seen = new Set();
+    return (refs || []).map(miniMaxNormalizeRef).filter(Boolean).filter(ref => {
+        const key = `${ref.kind}:${ref.url}`;
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+function miniMaxRefSummary(refs=[]){
+    const counts = refs.reduce((map, ref) => {
+        const kind = mediaKindForRef(ref);
+        map[kind] = (map[kind] || 0) + 1;
+        return map;
+    }, {});
+    const parts = [];
+    if(counts.image) parts.push(`${counts.image} 图`);
+    if(counts.video) parts.push(`${counts.video} 视频`);
+    if(counts.audio) parts.push(`${counts.audio} 音频`);
+    return parts.join(' · ') || 'No refs';
+}
+function miniMaxEnsureSegment(node){
+    node.minimaxEngine = miniMaxEngine(node);
+    node.workflow = node.workflow || 'MiniMax_H3.json';
+    node.minimaxRunningHubWorkflowId = node.minimaxRunningHubWorkflowId || CANVAS_MINIMAX_RUNNINGHUB_WORKFLOW_ID;
+    node.rhPayment = node.rhPayment || 'free';
+    node.aspectRatio = miniMaxAspectValue(node.aspectRatio || '16:9');
+    node.megapixels = Number.isFinite(Number(node.megapixels)) ? Number(node.megapixels) : 0.4;
+    node.segments = Array.isArray(node.segments) ? node.segments : [];
+    if(!node.segments.length){
+        node.segments.push({id:uid('seg'), start:0, duration:Number(node.duration || 8) || 8, prompt:'', refs:[], result:null, results:[], trimIn:0, trimOut:Number(node.duration || 8) || 8});
+    }
+    node.segments.forEach((seg, index) => {
+        if(!seg.id) seg.id = uid('seg');
+        seg.start = Math.max(0, Number(seg.start || 0) || 0);
+        seg.duration = Math.max(0.5, Number(seg.duration || node.duration || 8) || 8);
+        seg.prompt = String(seg.prompt || '');
+        seg.aspectRatio = miniMaxAspectValue(seg.aspectRatio || node.aspectRatio || '16:9');
+        seg.megapixels = Number.isFinite(Number(seg.megapixels)) ? Number(seg.megapixels) : Number(node.megapixels || 0.4);
+        const refBuckets = seg.refs && typeof seg.refs === 'object' && !Array.isArray(seg.refs) ? seg.refs : {};
+        const migrated = [
+            ...(Array.isArray(seg.refs) ? seg.refs : []),
+            ...(Array.isArray(seg.refItems) ? seg.refItems : []),
+            ...['image','video','audio'].flatMap(kind => Array.isArray(refBuckets[kind]) ? refBuckets[kind].map(ref => ({...ref, kind})) : [])
+        ];
+        seg.refs = miniMaxUniqueRefs(migrated).slice(0, CANVAS_MINIMAX_REF_IMAGE_MAX + CANVAS_MINIMAX_REF_VIDEO_MAX + CANVAS_MINIMAX_REF_AUDIO_MAX);
+        seg.result = seg.result && seg.result.url ? {...seg.result, kind:seg.result.kind || mediaKindForOutputItem(seg.result)} : null;
+        seg.results = Array.isArray(seg.results) ? seg.results.filter(item => outputUrlValue(item)) : [];
+        seg.trimIn = Math.max(0, Math.min(Number(seg.trimIn || 0), Math.max(0, seg.duration - 0.1)));
+        seg.trimOut = Math.max(seg.trimIn + 0.1, Math.min(seg.duration, Number(seg.trimOut || seg.duration) || seg.duration));
+        if(index > 0){
+            const prev = node.segments[index - 1];
+            seg.start = Math.max(seg.start, Number(prev.start || 0) + Number(prev.duration || 0));
+        }
+    });
+    if(!node.selectedSegmentId || !node.segments.some(seg => seg.id === node.selectedSegmentId)) node.selectedSegmentId = node.segments[0].id;
+    node.duration = Math.max(1, ...node.segments.map(seg => Number(seg.start || 0) + Number(seg.duration || 0)));
+    node.materials = Array.isArray(node.materials) ? node.materials.filter(item => outputUrlValue(item)) : [];
+    return node.segments.find(seg => seg.id === node.selectedSegmentId) || node.segments[0];
+}
+function miniMaxSelectedSegment(node){
+    return miniMaxEnsureSegment(node);
+}
+function miniMaxTimelineTotal(node){
+    miniMaxEnsureSegment(node);
+    return Math.max(1, Number(node.duration || 0), ...node.segments.map(seg => Number(seg.start || 0) + Number(seg.duration || 0)));
+}
+function miniMaxActiveSegmentAt(node, time){
+    miniMaxEnsureSegment(node);
+    const safeTime = Math.max(0, Number(time || 0));
+    return (node.segments || []).find(seg => safeTime >= Number(seg.start || 0) && safeTime <= Number(seg.start || 0) + Number(seg.duration || 0)) || miniMaxSelectedSegment(node);
+}
+function miniMaxCompactSegments(node){
+    if(!node?.segments?.length) return;
+    node.segments.sort((a, b) => Number(a.start || 0) - Number(b.start || 0));
+    let cursor = 0;
+    node.segments.forEach(seg => {
+        seg.start = cursor;
+        seg.duration = Math.max(0.5, Number(seg.duration || 1) || 1);
+        cursor += seg.duration;
+    });
+    node.duration = Math.max(1, cursor);
+    node.playhead = Math.min(Number(node.playhead || 0), node.duration);
+}
+function miniMaxExplicitRefsForSegment(seg){
+    return miniMaxUniqueRefs(seg?.refs || []);
+}
+function miniMaxRefsForSegment(node, seg){
+    const own = miniMaxExplicitRefsForSegment(seg);
+    if(own.length) return own;
+    const upstream = miniMaxRefsForNode(node).refs;
+    return miniMaxUniqueRefs(upstream).slice(0, CANVAS_MINIMAX_REF_IMAGE_MAX + CANVAS_MINIMAX_REF_VIDEO_MAX + CANVAS_MINIMAX_REF_AUDIO_MAX);
+}
+function miniMaxMediaHtml(item, label='Media'){
+    const url = outputUrlValue(item);
+    const kind = mediaKindForOutputItem(item) || mediaKindForRef(item);
+    if(kind === 'image' && url) return canvasPreviewImgHtml(url, 512, 'draggable="false"');
+    if(kind === 'video' && url) return `<div class="minimax-lite-media is-video">${canvasVideoPreviewHtml(url, 512, 'draggable="false"')}<span>${escapeHtml(item?.name || label)}</span></div>`;
+    const icon = kind === 'audio' ? 'file-audio' : kind === 'video' ? 'film' : 'sparkles';
+    return `<div class="minimax-lite-media is-${escapeAttr(kind || 'file')}"><i data-lucide="${icon}"></i><span>${escapeHtml(item?.name || label)}</span></div>`;
+}
+function miniMaxPlayerHtml(seg){
+    const item = seg?.result?.url ? seg.result : null;
+    if(!item) return `<div class="minimax-player-empty"><i data-lucide="clapperboard"></i><span>Current segment</span></div>`;
+    const kind = mediaKindForOutputItem(item);
+    if(kind === 'audio') return `<div class="minimax-player-empty"><i data-lucide="file-audio"></i><span>${escapeHtml(item.name || 'Audio')}</span><audio src="${escapeAttr(canvasDisplayMediaUrl(item.url, item.name || 'audio'))}" controls preload="metadata"></audio></div>`;
+    if(kind === 'image') return `<div class="minimax-player-image">${canvasPreviewImgHtml(item.url, 1024, 'draggable="false"')}</div>`;
+    return canvasVideoPlayerHtml(item.url, 'data-minimax-player="1"');
+}
+function miniMaxSetSegmentResult(node, seg, item){
+    if(!node || !seg || !outputUrlValue(item)) return false;
+    const url = outputUrlValue(item);
+    const result = typeof item === 'object' ? {...item, url, kind:item.kind || 'video'} : {url, kind:'video', name:'minimax.mp4'};
+    seg.result = result;
+    seg.results = Array.isArray(seg.results) ? seg.results : [];
+    if(!seg.results.some(existing => outputUrlValue(existing) === url)) seg.results.unshift(result);
+    node.materials = Array.isArray(node.materials) ? node.materials : [];
+    if(!node.materials.some(existing => outputUrlValue(existing) === url)) node.materials.unshift({...result, segmentId:seg.id, createdAt:Date.now()});
+    return true;
+}
+function miniMaxDownloadItem(item){
+    const url = outputUrlValue(item);
+    if(!url) return;
+    const link = document.createElement('a');
+    link.href = canvasDisplayMediaUrl(url, item?.name || canvasFileNameFromUrl(url) || 'minimax.mp4');
+    link.download = safeDownloadFileName(item?.name || canvasFileNameFromUrl(url) || 'minimax.mp4', 'minimax.mp4');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+function miniMaxSegmentRefsByKind(refs, kind){
+    return miniMaxUniqueRefs(refs).filter(ref => mediaKindForRef(ref) === kind);
+}
+function miniMaxSetPlayheadDom(wrap, node, time){
+    const total = miniMaxTimelineTotal(node);
+    const safeTime = Math.max(0, Math.min(total, Number(time || 0)));
+    node.playhead = safeTime;
+    const pct = total ? (safeTime / total) * 100 : 0;
+    wrap.querySelectorAll('[data-minimax-playhead]').forEach(head => { head.style.left = `${pct}%`; });
+    const label = wrap.querySelector('[data-minimax-time-label]');
+    if(label){
+        const fmt = value => `${(Number(value || 0)).toFixed(Number(value || 0) % 1 ? 1 : 0)}s`;
+        label.textContent = `${fmt(safeTime)} / ${fmt(total)}`;
+    }
+    return safeTime;
+}
+function miniMaxSyncPlayerDom(wrap, seg, time, play=false){
+    const stage = wrap.querySelector('[data-minimax-player-stage]');
+    if(!stage || !seg) return;
+    const nextUrl = seg.result?.url || '';
+    if(stage.dataset.minimaxPlayerSegment !== seg.id || stage.dataset.minimaxPlayerUrl !== nextUrl){
+        stage.dataset.minimaxPlayerSegment = seg.id || '';
+        stage.dataset.minimaxPlayerUrl = nextUrl;
+        const content = stage.querySelector('[data-minimax-player-content]');
+        if(content) content.innerHTML = miniMaxPlayerHtml(seg);
+        refreshIcons();
+    }
+    const media = stage.querySelector('[data-minimax-player]');
+    if(media){
+        const rel = Math.max(0, Number(time || 0) - Number(seg.start || 0));
+        try { media.currentTime = Math.min(Math.max(0, rel), Number(seg.duration || rel) || rel); } catch(e) {}
+        if(play) media.play?.().catch(() => {});
+        else media.pause?.();
+    }
+}
+function miniMaxApplyTimelineTime(wrap, node, time, play=false){
+    const safeTime = miniMaxSetPlayheadDom(wrap, node, time);
+    const seg = miniMaxActiveSegmentAt(node, safeTime);
+    if(seg?.id && seg.id !== node.selectedSegmentId){
+        node.selectedSegmentId = seg.id;
+        refreshNodes([node.id]);
+        scheduleSave();
+        return;
+    }
+    miniMaxSyncPlayerDom(wrap, seg, safeTime, play);
+}
+function miniMaxStartPaneResize(e, node, pane){
+    e.preventDefault();
+    e.stopPropagation();
+    const wrap = e.currentTarget?.closest?.('.minimax-canvas-workbench');
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startLibrary = Math.max(170, Math.min(520, Number(node.minimaxLibraryW || 190)));
+    const startPreview = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 220)));
+    const startVideo = Math.max(48, Math.min(180, Number(node.minimaxVideoTrackH || 74)));
+    const startRefLane = Math.max(30, Math.min(130, Number(node.minimaxRefLaneH || 36)));
+    const refLanes = Math.max(1, wrap?.querySelectorAll?.('.minimax-ref-lane')?.length || 1);
+    document.body.classList.add('canvas-minimax-pane-resize');
+    const applyVars = () => {
+        if(!wrap) return;
+        wrap.querySelector('.minimax-wb-body')?.style.setProperty('--minimax-library-w', `${Math.max(170, Math.min(520, Number(node.minimaxLibraryW || 190)))}px`);
+        const main = wrap.querySelector('.minimax-wb-main');
+        if(main){
+            main.style.setProperty('--minimax-preview-h', `${Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 220)))}px`);
+            main.style.setProperty('--minimax-video-h', `${Math.max(48, Math.min(180, Number(node.minimaxVideoTrackH || 74)))}px`);
+            main.style.setProperty('--minimax-ref-lane-h', `${Math.max(30, Math.min(130, Number(node.minimaxRefLaneH || 36)))}px`);
+            main.style.setProperty('--minimax-ref-h', `${Math.max(78, refLanes * Math.max(30, Math.min(130, Number(node.minimaxRefLaneH || 36))))}px`);
+        }
+    };
+    const onMove = move => {
+        move.preventDefault();
+        const dx = (move.clientX - startX) / viewport.scale;
+        const dy = (move.clientY - startY) / viewport.scale;
+        if(pane === 'library') node.minimaxLibraryW = Math.round(Math.max(170, Math.min(520, startLibrary + dx)));
+        if(pane === 'preview') node.minimaxPreviewH = Math.round(Math.max(130, Math.min(760, startPreview + dy)));
+        if(pane === 'video') node.minimaxVideoTrackH = Math.round(Math.max(48, Math.min(180, startVideo + dy)));
+        if(pane === 'refs') node.minimaxRefLaneH = Math.round(Math.max(30, Math.min(130, startRefLane + dy)));
+        applyVars();
+    };
+    const onUp = () => {
+        document.body.classList.remove('canvas-minimax-pane-resize');
+        window.removeEventListener('mousemove', onMove, true);
+        window.removeEventListener('mouseup', onUp, true);
+        window.removeEventListener('blur', onUp, true);
+        scheduleSave();
+    };
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+    window.addEventListener('blur', onUp, true);
+}
+function renderMiniMaxBody(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'minimax-canvas-workbench';
+    const selected = miniMaxSelectedSegment(node);
+    const total = miniMaxTimelineTotal(node);
+    const playhead = Math.max(0, Math.min(total, Number(node.playhead || 0)));
+    const playheadPct = total > 0 ? (playhead / total) * 100 : 0;
+    const fmt = value => `${(Number(value || 0)).toFixed(Number(value || 0) % 1 ? 1 : 0)}s`;
+    const previewH = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 220)));
+    const videoTrackH = Math.max(48, Math.min(180, Number(node.minimaxVideoTrackH || 74)));
+    const refLaneH = Math.max(30, Math.min(130, Number(node.minimaxRefLaneH || 36)));
+    const libraryW = Math.max(170, Math.min(520, Number(node.minimaxLibraryW || 190)));
+    const ticks = Array.from({length:Math.min(13, Math.max(3, Math.ceil(total) + 1))}).map((_, i, arr) => {
+        const ratio = arr.length <= 1 ? 0 : i / (arr.length - 1);
+        return `<span class="minimax-tick" style="left:${ratio * 100}%"><b>${fmt(total * ratio)}</b></span>`;
+    }).join('');
+    const segmentsHtml = node.segments.map((seg, index) => {
+        const left = total ? (Number(seg.start || 0) / total) * 100 : 0;
+        const width = total ? Math.max(5, (Number(seg.duration || 1) / total) * 100) : 100;
+        const active = seg.id === selected?.id;
+        const result = seg.result?.url ? seg.result : null;
+        const refCount = miniMaxExplicitRefsForSegment(seg).length;
+        return `<div class="minimax-tl-clip ${active ? 'active' : ''} ${result ? 'has-result' : ''}" data-minimax-segment="${escapeAttr(seg.id)}" data-minimax-drop-segment="${escapeAttr(seg.id)}" style="left:${left}%;width:${Math.min(width, 100 - left)}%" title="Clip ${index + 1}">
+            <div class="minimax-clip-media">${result ? miniMaxMediaHtml(result, `Clip ${index + 1}`) : `<div class="minimax-clip-empty"><i data-lucide="sparkles"></i></div>`}</div>
+            <div class="minimax-clip-meta"><b>Clip ${index + 1}</b><span>${fmt(seg.start)} - ${fmt(Number(seg.start || 0) + Number(seg.duration || 0))}</span></div>
+            ${refCount ? `<span class="minimax-clip-ref-count"><i data-lucide="paperclip"></i>${refCount}</span>` : ''}
+            ${node.segments.length > 1 ? `<button type="button" class="minimax-clip-delete" data-minimax-delete-segment="${escapeAttr(seg.id)}" title="删除片段"><i data-lucide="trash-2"></i></button>` : ''}
+        </div>`;
+    }).join('');
+    const selectedRefs = miniMaxExplicitRefsForSegment(selected);
+    const refLanes = Math.max(1, selectedRefs.length, ...node.segments.map(seg => miniMaxExplicitRefsForSegment(seg).length));
+    const refsHtml = Array.from({length:refLanes}).map((_, laneIndex) => {
+        const clips = node.segments.map(seg => {
+            const left = total ? (Number(seg.start || 0) / total) * 100 : 0;
+            const width = total ? Math.max(5, (Number(seg.duration || 1) / total) * 100) : 100;
+            const ref = miniMaxExplicitRefsForSegment(seg)[laneIndex] || null;
+            const active = seg.id === selected?.id;
+            return `<div class="minimax-ref-clip ${active ? 'active' : ''} ${ref ? 'has-ref' : 'is-empty'}" data-minimax-ref-segment="${escapeAttr(seg.id)}" data-minimax-segment="${escapeAttr(seg.id)}" data-minimax-drop-segment="${escapeAttr(seg.id)}" style="left:${left}%;width:${Math.min(width, 100 - left)}%">
+                <div class="minimax-ref-media">${ref ? miniMaxMediaHtml(ref, `Ref ${laneIndex + 1}`) : `<div class="minimax-clip-empty"><i data-lucide="paperclip"></i></div>`}</div>
+                ${ref ? `<button type="button" data-minimax-delete-ref="${escapeAttr(`${seg.id}:${laneIndex}`)}" title="移除参考"><i data-lucide="x"></i></button>` : ''}
+                <span class="minimax-ref-counts">${ref ? escapeHtml(ref.name || `Ref ${laneIndex + 1}`) : `Ref ${laneIndex + 1}`}</span>
+            </div>`;
+        }).join('');
+        return `<div class="minimax-ref-lane">${clips}</div>`;
+    }).join('');
+    const upstream = miniMaxRefsForNode(node);
+    const assets = miniMaxUniqueRefs([...node.segments.flatMap(seg => seg.refs || []), ...upstream.refs]).slice(0, 36);
+    const assetsHtml = assets.length ? assets.map((item, index) => `<div class="minimax-material-card minimax-asset-item" draggable="true" data-minimax-asset-index="${index}" title="${escapeAttr(item.name || mediaKindForRef(item))}">
+        ${miniMaxMediaHtml(item, item.name || mediaKindForRef(item))}<span>${escapeHtml(mediaKindForRef(item))}</span>
+    </div>`).join('') : `<div class="minimax-library-empty"><i data-lucide="database"></i><span>Assets</span></div>`;
+    const materialsHtml = (node.materials || []).slice(0, 24).map((item, index) => `<div class="minimax-material-card minimax-output-item" draggable="true" data-minimax-material-index="${index}" title="${escapeAttr(item.name || 'Output')}">
+        ${miniMaxMediaHtml(item, 'Output')}
+        <button type="button" data-minimax-download-material="${index}" title="下载"><i data-lucide="download"></i></button>
+        <button type="button" data-minimax-use-material="${index}" title="设为当前片段"><i data-lucide="replace"></i></button>
+    </div>`).join('') || `<div class="minimax-library-empty"><i data-lucide="inbox"></i><span>Output</span></div>`;
+    const segDuration = Math.max(0.5, Number(selected?.duration || 8) || 8);
+    const imageCount = miniMaxSegmentRefsByKind(selectedRefs, 'image').length;
+    const videoCount = miniMaxSegmentRefsByKind(selectedRefs, 'video').length;
+    const audioCount = miniMaxSegmentRefsByKind(selectedRefs, 'audio').length;
+    const overLimit = imageCount > CANVAS_MINIMAX_REF_IMAGE_MAX || videoCount > CANVAS_MINIMAX_REF_VIDEO_MAX || audioCount > CANVAS_MINIMAX_REF_AUDIO_MAX;
+    wrap.innerHTML = `
+        <div class="minimax-wb-toolbar">
+            <div class="minimax-brand"><i data-lucide="clapperboard"></i><span>MiniMax H3</span><b data-minimax-time-label>${fmt(playhead)} / ${fmt(total)}</b></div>
+            <div class="minimax-transport"><button type="button" data-minimax-play title="播放"><i data-lucide="play"></i></button><button type="button" data-minimax-add-segment title="新增片段"><i data-lucide="plus"></i></button></div>
+            <div class="minimax-top-actions"><button type="button" data-minimax-download-current ${selected?.result?.url ? '' : 'disabled'} title="下载当前片段"><i data-lucide="download"></i></button></div>
+        </div>
+        <div class="minimax-wb-body" style="--minimax-library-w:${libraryW}px">
+            <div class="minimax-library minimax-asset-bin"><span class="minimax-pane-resize minimax-library-resize" data-minimax-pane-resize="library"></span><div class="minimax-library-head"><i data-lucide="database"></i><span>Assets</span></div><div class="minimax-library-list">${assetsHtml}</div><div class="minimax-library-head minimax-output-head"><i data-lucide="folder-output"></i><span>Output</span></div><div class="minimax-library-list minimax-output-list">${materialsHtml}</div></div>
+            <div class="minimax-wb-main" style="--minimax-preview-h:${previewH}px;--minimax-video-h:${videoTrackH}px;--minimax-ref-lane-h:${refLaneH}px;--minimax-ref-h:${Math.max(78, refLanes * refLaneH)}px">
+                <div class="minimax-player-stage" data-minimax-player-stage="1" data-minimax-player-segment="${escapeAttr(selected?.id || '')}" data-minimax-player-url="${escapeAttr(selected?.result?.url || '')}"><div class="minimax-player-content" data-minimax-player-content="1">${miniMaxPlayerHtml(selected)}</div><span class="minimax-pane-resize minimax-preview-resize" data-minimax-pane-resize="preview"></span></div>
+                <div class="minimax-edit-timeline" data-minimax-scrub-track="1">
+                    <span class="minimax-pane-resize minimax-video-resize" data-minimax-pane-resize="video"></span>
+                    <span class="minimax-pane-resize minimax-ref-resize" data-minimax-pane-resize="refs"></span>
+                    <div class="minimax-timeline-controls"><button type="button" data-minimax-play title="播放"><i data-lucide="play"></i></button></div>
+                    <div class="minimax-ruler"><div class="minimax-track-content">${ticks}<span class="minimax-playhead" data-minimax-playhead="1" style="left:${playheadPct}%"></span></div></div>
+                    <div class="minimax-add-gutter minimax-ruler-gutter"></div>
+                    <div class="minimax-track-label minimax-video-label">Video</div>
+                    <div class="minimax-track minimax-video-track"><div class="minimax-track-content">${segmentsHtml}</div></div>
+                    <button type="button" class="minimax-video-add" data-minimax-add-segment title="新增片段"><i data-lucide="plus"></i></button>
+                    <div class="minimax-track-label minimax-ref-label">Refs</div>
+                    <div class="minimax-ref-track"><div class="minimax-ref-content">${refsHtml}</div></div>
+                    <div class="minimax-add-gutter minimax-ref-gutter"></div>
+                </div>
+                <div class="minimax-current-panel">
+                    <div class="minimax-current-head"><div class="minimax-current-title"><span class="minimax-current-dot"></span><b>Clip ${Math.max(1, node.segments.findIndex(seg => seg.id === selected?.id) + 1)}</b><span>${fmt(selected?.start)} - ${fmt(Number(selected?.start || 0) + segDuration)}</span></div><div class="minimax-current-refs"><span><i data-lucide="image"></i>${imageCount}</span><span><i data-lucide="film"></i>${videoCount}</span><span><i data-lucide="file-audio"></i>${audioCount}</span></div></div>
+                    <label class="minimax-prompt-field"><span><i data-lucide="text-cursor-input"></i>Prompt</span><textarea data-minimax-prompt placeholder="Prompt for selected clip">${escapeHtml(selected?.prompt || '')}</textarea></label>
+                    <div class="minimax-clip-parameters"><div class="minimax-section-label"><i data-lucide="sliders-horizontal"></i><span>Clip settings</span></div><div class="minimax-settings minimax-segment-fields">
+                        <label class="minimax-wide-setting minimax-engine-setting"><span>Engine</span><select class="minimax-engine-select" data-minimax-engine><option value="comfyui" ${node.minimaxEngine === 'comfyui' ? 'selected' : ''}>ComfyUI</option><option value="runninghub" ${node.minimaxEngine === 'runninghub' ? 'selected' : ''}>RunningHub</option></select></label>
+                        <label><span>Duration</span><input type="number" min="0.5" max="60" step="0.1" data-minimax-seg-number="duration" value="${escapeAttr(segDuration)}"><b>s</b></label>
+                        <label><span>Megapixels</span><input type="number" min="0.1" max="2" step="0.1" data-minimax-seg-number="megapixels" value="${escapeAttr(selected?.megapixels || node.megapixels || 0.4)}"><b>MP</b></label>
+                        <label class="minimax-wide-setting"><span>Aspect ratio</span><select data-minimax-select="aspectRatio">${['16:9','9:16','1:1','4:3','3:4','21:9','9:21'].map(value => `<option value="${value}" ${value === (selected?.aspectRatio || node.aspectRatio) ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+                        <label class="minimax-wide-setting"><span>Payment</span><select data-minimax-payment>${rhPaymentOptions(node)}</select></label>
+                        <button class="minimax-run ${node.running ? 'running' : ''}" type="button" data-minimax-run ${node.running || overLimit ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'sparkles'}"></i><span>${node.running ? 'Running' : 'Generate clip'}</span></button>
+                    </div></div>
+                </div>
+            </div>
+        </div>
+        ${retryBarHtml(node)}
+    `;
+    bindMiniMaxWorkbench(wrap, node);
+    bindCascadeButtons(wrap, node.id);
+    return wrap;
+}
+function bindMiniMaxWorkbench(wrap, node){
+    wrap.querySelectorAll('button,select,input,textarea,.minimax-tl-clip,.minimax-ref-clip,.minimax-material-card').forEach(el => {
+        el.onmousedown = e => e.stopPropagation();
+        el.onclick = el.onclick || (e => e.stopPropagation());
+    });
+    wrap.querySelectorAll('[data-minimax-pane-resize]').forEach(handle => {
+        handle.onmousedown = e => miniMaxStartPaneResize(e, node, handle.dataset.minimaxPaneResize);
+    });
+    const addRefToSegment = (seg, item) => {
+        if(!seg || !item?.url) return false;
+        const kind = mediaKindForRef(item);
+        const limits = {image:CANVAS_MINIMAX_REF_IMAGE_MAX, video:CANVAS_MINIMAX_REF_VIDEO_MAX, audio:CANVAS_MINIMAX_REF_AUDIO_MAX};
+        if(!limits[kind]) return false;
+        const current = miniMaxUniqueRefs(seg.refs || []);
+        if(current.some(ref => ref.url === item.url)) return false;
+        if(current.filter(ref => mediaKindForRef(ref) === kind).length >= limits[kind]) return false;
+        seg.refs = miniMaxUniqueRefs([...current, {...item, kind}]);
+        return true;
+    };
+    const assetsForNode = () => miniMaxUniqueRefs([...node.segments.flatMap(seg => seg.refs || []), ...miniMaxRefsForNode(node).refs]).slice(0, 36);
+    const resolveDroppedMiniMaxItem = dataTransfer => {
+        const assetIndex = Number(dataTransfer?.getData('application/x-canvas-minimax-asset-index'));
+        if(Number.isFinite(assetIndex)) return {item:assetsForNode()[assetIndex], mode:'ref'};
+        const materialIndex = Number(dataTransfer?.getData('application/x-canvas-minimax-material-index'));
+        if(Number.isFinite(materialIndex)) return {item:node.materials?.[materialIndex], mode:'result'};
+        const canvasUrl = dataTransfer?.getData('application/x-canvas-output-image') || dataTransfer?.getData('text/uri-list') || dataTransfer?.getData('text/plain') || '';
+        const url = String(canvasUrl || '').split(/\r?\n/).find(Boolean) || '';
+        return url ? {item:{url, name:canvasFileNameFromUrl(url) || 'asset', kind:mediaKindForRef({url})}, mode:'ref'} : null;
+    };
+    wrap.querySelectorAll('[data-minimax-scrub-track], .minimax-ruler, .minimax-video-track').forEach(track => {
+        track.onmousedown = e => {
+            if(e.button !== 0 || e.target.closest('button,.minimax-tl-clip,.minimax-ref-clip,.minimax-pane-resize')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const content = wrap.querySelector('.minimax-ruler .minimax-track-content') || track;
+            const rect = content.getBoundingClientRect();
+            const setFromEvent = ev => {
+                ev.preventDefault?.();
+                const ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / Math.max(1, rect.width)));
+                miniMaxApplyTimelineTime(wrap, node, ratio * miniMaxTimelineTotal(node));
+            };
+            const onMove = move => setFromEvent(move);
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove, true);
+                window.removeEventListener('mouseup', onUp, true);
+                window.removeEventListener('blur', onUp, true);
+                scheduleSave();
+            };
+            setFromEvent(e);
+            window.addEventListener('mousemove', onMove, true);
+            window.addEventListener('mouseup', onUp, true);
+            window.addEventListener('blur', onUp, true);
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-drop-segment], .minimax-ref-track, .minimax-video-track').forEach(zone => {
+        zone.ondragover = e => { e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-over'); };
+        zone.ondragleave = e => { e.stopPropagation(); zone.classList.remove('drag-over'); };
+        zone.ondrop = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.remove('drag-over');
+            let segId = zone.dataset.minimaxDropSegment || zone.closest('[data-minimax-drop-segment]')?.dataset.minimaxDropSegment || '';
+            if(!segId){
+                const content = wrap.querySelector('.minimax-ruler .minimax-track-content') || wrap.querySelector('.minimax-video-track');
+                const rect = content?.getBoundingClientRect?.();
+                if(rect){
+                    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+                    segId = miniMaxActiveSegmentAt(node, ratio * miniMaxTimelineTotal(node))?.id || '';
+                }
+            }
+            segId = segId || node.selectedSegmentId;
+            const seg = node.segments.find(item => item.id === segId) || miniMaxSelectedSegment(node);
+            const dropped = resolveDroppedMiniMaxItem(e.dataTransfer);
+            if(!dropped?.item?.url || !seg) return;
+            pushUndo();
+            node.selectedSegmentId = seg.id;
+            const intoVideoTrack = Boolean(zone.closest?.('.minimax-video-track,.minimax-tl-clip') || zone.classList?.contains('minimax-video-track') || zone.classList?.contains('minimax-tl-clip'));
+            const intoRefTrack = Boolean(zone.closest?.('.minimax-ref-track,.minimax-ref-clip') || zone.classList?.contains('minimax-ref-track') || zone.classList?.contains('minimax-ref-clip'));
+            if(dropped.mode === 'result' && intoVideoTrack && !intoRefTrack) miniMaxSetSegmentResult(node, seg, dropped.item);
+            else addRefToSegment(seg, dropped.item);
+            refreshNodes([node.id]);
+            scheduleSave();
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-segment], [data-minimax-ref-segment]').forEach(el => {
+        el.onclick = e => {
+            if(e.target.closest('button')) return;
+            e.stopPropagation();
+            node.selectedSegmentId = el.dataset.minimaxSegment || el.dataset.minimaxRefSegment || node.selectedSegmentId;
+            const seg = miniMaxSelectedSegment(node);
+            node.playhead = Number(seg?.start || 0);
+            refreshNodes([node.id]);
+            scheduleSave();
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-add-segment]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            pushUndo();
+            miniMaxCompactSegments(node);
+            const start = miniMaxTimelineTotal(node);
+            const duration = Math.max(0.5, Number(node.segments.at(-1)?.duration || node.duration || 8) || 8);
+            const seg = {id:uid('seg'), start, duration, prompt:'', refs:[], result:null, results:[], aspectRatio:node.aspectRatio || '16:9', megapixels:Number(node.megapixels || 0.4), trimIn:0, trimOut:duration};
+            node.segments.push(seg);
+            node.selectedSegmentId = seg.id;
+            node.playhead = start;
+            miniMaxCompactSegments(node);
+            refreshNodes([node.id]);
+            scheduleSave();
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-delete-segment]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(node.segments.length <= 1) return;
+            pushUndo();
+            const id = btn.dataset.minimaxDeleteSegment;
+            node.segments = node.segments.filter(seg => seg.id !== id);
+            node.selectedSegmentId = node.segments[0]?.id || '';
+            miniMaxCompactSegments(node);
+            refreshNodes([node.id]);
+            scheduleSave();
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-delete-ref]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const [segId, rawIndex] = String(btn.dataset.minimaxDeleteRef || '').split(':');
+            const seg = node.segments.find(item => item.id === segId);
+            const index = Number(rawIndex);
+            if(!seg || !Number.isFinite(index)) return;
+            pushUndo();
+            const refs = miniMaxExplicitRefsForSegment(seg);
+            refs.splice(index, 1);
+            seg.refs = refs;
+            node.selectedSegmentId = seg.id;
+            refreshNodes([node.id]);
+            scheduleSave();
+        };
+    });
+    const prompt = wrap.querySelector('[data-minimax-prompt]');
+    if(prompt){
+        bindScrollableText(prompt);
+        prompt.oninput = e => {
+            e.stopPropagation();
+            const seg = miniMaxSelectedSegment(node);
+            if(seg) seg.prompt = prompt.value;
+            scheduleSave();
+        };
+    }
+    wrap.querySelectorAll('[data-minimax-engine]').forEach(select => {
+        select.onchange = e => { e.stopPropagation(); node.minimaxEngine = e.target.value === 'runninghub' ? 'runninghub' : 'comfyui'; refreshNodes([node.id]); scheduleSave(); };
+    });
+    wrap.querySelectorAll('[data-minimax-payment]').forEach(select => {
+        select.onchange = e => { e.stopPropagation(); node.rhPayment = e.target.value === 'wallet' ? 'wallet' : 'free'; scheduleSave(); };
+    });
+    wrap.querySelectorAll('[data-minimax-select]').forEach(select => {
+        select.onchange = e => {
+            e.stopPropagation();
+            const seg = miniMaxSelectedSegment(node);
+            if(seg) seg[select.dataset.minimaxSelect] = select.value;
+            node[select.dataset.minimaxSelect] = select.value;
+            scheduleSave();
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-seg-number]').forEach(input => {
+        input.oninput = input.onchange = e => {
+            e.stopPropagation();
+            const seg = miniMaxSelectedSegment(node);
+            if(!seg) return;
+            const value = Number(input.value);
+            if(input.dataset.minimaxSegNumber === 'duration'){
+                seg.duration = Math.max(0.5, value || 0.5);
+                seg.trimOut = Math.min(seg.duration, Math.max(Number(seg.trimOut || seg.duration), Number(seg.trimIn || 0) + 0.1));
+                miniMaxCompactSegments(node);
+                if(e.type === 'change') refreshNodes([node.id]);
+            }
+            if(input.dataset.minimaxSegNumber === 'megapixels'){
+                seg.megapixels = Math.max(0.1, Math.min(2, value || 0.4));
+                node.megapixels = seg.megapixels;
+            }
+            scheduleSave();
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-run]').forEach(btn => {
+        btn.onclick = e => { e.stopPropagation(); runMiniMaxNode(node.id); };
+    });
+    wrap.querySelectorAll('[data-minimax-download-current]').forEach(btn => {
+        btn.onclick = e => { e.stopPropagation(); miniMaxDownloadItem(miniMaxSelectedSegment(node)?.result); };
+    });
+    wrap.querySelectorAll('[data-minimax-download-material]').forEach(btn => {
+        btn.onclick = e => { e.stopPropagation(); miniMaxDownloadItem(node.materials?.[Number(btn.dataset.minimaxDownloadMaterial)]); };
+    });
+    wrap.querySelectorAll('[data-minimax-use-material]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const item = node.materials?.[Number(btn.dataset.minimaxUseMaterial)];
+            const seg = miniMaxSelectedSegment(node);
+            if(!item || !seg) return;
+            pushUndo();
+            miniMaxSetSegmentResult(node, seg, item);
+            refreshNodes([node.id]);
+            scheduleSave();
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-asset-index]').forEach(card => {
+        card.ondragstart = e => {
+            e.stopPropagation();
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('application/x-canvas-minimax-asset-index', card.dataset.minimaxAssetIndex || '');
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-material-index]').forEach(card => {
+        card.ondragstart = e => {
+            e.stopPropagation();
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('application/x-canvas-minimax-material-index', card.dataset.minimaxMaterialIndex || '');
+        };
+    });
+    wrap.querySelectorAll('[data-minimax-play]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const video = wrap.querySelector('[data-minimax-player]');
+            if(video){ video.paused ? video.play?.().catch(() => {}) : video.pause?.(); }
+        };
+    });
 }
 function renderPromptPreview(container, promptInputs){
     if(!container) return;
@@ -9343,6 +10115,113 @@ async function rhBuildWorkflowRequestExtras(node, media, nodeInfoList){
     });
     const workflow = rhPruneWorkflowForMissingFields(config.workflowJson || {}, missingOptional);
     return workflow ? {workflow} : {};
+}
+function miniMaxRunningHubEntry(node=null){
+    const workflows = runningHubEntries('workflow');
+    const currentId = String(node?.minimaxRunningHubWorkflowId || '').trim();
+    const titleKey = CANVAS_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE.toLowerCase().replace(/\s+/g, '');
+    return workflows.find(item => String(item.title || item.name || '').toLowerCase().replace(/\s+/g, '') === titleKey)
+        || workflows.find(item => runningHubEntryId(item, 'workflow') === currentId)
+        || workflows.find(item => runningHubEntryId(item, 'workflow') === CANVAS_MINIMAX_RUNNINGHUB_WORKFLOW_ID)
+        || null;
+}
+function miniMaxRunningHubFieldText(field){
+    return [field?.nodeId, field?.fieldName, field?.label, field?.group, field?.title, field?.description, field?.source]
+        .filter(v => v !== undefined && v !== null)
+        .map(String)
+        .join(' ')
+        .toLowerCase();
+}
+function miniMaxRunningHubFieldMatches(field, patterns=[], fallbackKeys=[]){
+    const key = rhParamKey(field?.nodeId, field?.fieldName);
+    if((fallbackKeys || []).includes(key)) return true;
+    const text = miniMaxRunningHubFieldText(field);
+    return (patterns || []).some(pattern => pattern.test(text));
+}
+function miniMaxRunningHubFullAspectField(field){
+    return /widescreen|portrait|square|画面比例|比例/.test(miniMaxRunningHubFieldText(field) || '') && String(rhDefaultValue(field) || '').includes('(');
+}
+function miniMaxFullAspectLabel(ratio){
+    const clean = miniMaxAspectValue(ratio);
+    if(clean === '16:9') return '16:9 (Widescreen)';
+    if(clean === '9:16') return '9:16 (Portrait)';
+    if(clean === '1:1') return '1:1 (Square)';
+    return clean;
+}
+function miniMaxRunningHubValue(field, desired){
+    if(miniMaxRunningHubFullAspectField(field)) return miniMaxFullAspectLabel(desired);
+    const value = String(desired ?? '');
+    const options = rhExtractFieldOptions(field) || [];
+    if(options.length){
+        const normalized = value.replace(/\s+/g, '');
+        return options.find(opt => String(opt).replace(/\s+/g, '') === normalized)
+            || options.find(opt => String(opt).replace(/\s+/g, '').startsWith(normalized))
+            || value;
+    }
+    return desired;
+}
+function miniMaxSetRunningHubParam(params, fields, patterns, fallbackKeys, desired){
+    const field = (fields || []).find(item => miniMaxRunningHubFieldMatches(item, patterns, fallbackKeys));
+    if(!field) return false;
+    params[rhParamKey(field.nodeId, field.fieldName)] = {value:miniMaxRunningHubValue(field, desired)};
+    return true;
+}
+function miniMaxCompactJson(value, limit=1800){
+    try {
+        const text = JSON.stringify(value);
+        return text.length > limit ? `${text.slice(0, limit)}...` : text;
+    } catch(e) {
+        return String(value || '');
+    }
+}
+function miniMaxDetailedError(message, details={}){
+    const err = new Error(message);
+    err.miniMaxDetails = details;
+    return err;
+}
+function miniMaxRunningHubPayloadError(stage, data, fallback, extra={}){
+    const detailObj = data?.detail && typeof data.detail === 'object' ? data.detail : null;
+    const rawDetail = detailObj?.message || data?.detail || data?.error || data?.message || data?.failReason || data?.msg || fallback || 'RunningHub 失败';
+    const detail = typeof rawDetail === 'object' ? miniMaxCompactJson(rawDetail, 1200) : String(rawDetail || '');
+    const raw = detailObj?.raw || data?.raw || data?.data?.raw || data;
+    const code = detailObj?.code ?? data?.code ?? data?.data?.code ?? raw?.code ?? '';
+    const taskId = detailObj?.taskId || detailObj?.task_id || data?.taskId || data?.task_id || data?.data?.taskId || extra.taskId || '';
+    const parts = [`RunningHub ${stage}失败`, detail].filter(Boolean);
+    if(taskId) parts.push(`taskId=${taskId}`);
+    if(code !== '') parts.push(`code=${code}`);
+    return miniMaxDetailedError(parts.join('：'), {stage, taskId, code, raw, ...(detailObj || {}), ...extra});
+}
+function miniMaxReadableError(error, engine='comfyui'){
+    const text = String(error?.message || error || tr('canvas.generationFailed')).trim();
+    const jsonStart = text.indexOf('{');
+    if(jsonStart < 0) return text;
+    try {
+        const payload = JSON.parse(text.slice(jsonStart));
+        const parts = [];
+        const mainError = payload?.error;
+        if(mainError?.message) parts.push(String(mainError.message));
+        if(mainError?.details && !parts.includes(String(mainError.details))) parts.push(String(mainError.details));
+        Object.entries(payload?.node_errors || {}).slice(0, 3).forEach(([nodeId, nodeError]) => {
+            const details = (nodeError?.errors || []).slice(0, 2).map(item => item?.details || item?.message).filter(Boolean);
+            if(details.length) parts.push(`节点 ${nodeId}${nodeError?.class_type ? `（${nodeError.class_type}）` : ''}：${details.join('；')}`);
+        });
+        const prefix = engine === 'runninghub' ? 'RunningHub 工作流执行失败' : 'ComfyUI 拒绝了工作流';
+        return parts.length ? `${prefix}：${parts.join('；')}` : text;
+    } catch(e) {
+        return text;
+    }
+}
+function miniMaxLogError(error, engine='comfyui'){
+    const base = miniMaxReadableError(error, engine);
+    const details = error?.miniMaxDetails || {};
+    const lines = [base];
+    if(details.taskId && !base.includes(details.taskId)) lines.push(`taskId: ${details.taskId}`);
+    if(details.code !== undefined && details.code !== null && details.code !== '') lines.push(`code: ${details.code}`);
+    if(details.stage) lines.push(`stage: ${details.stage}`);
+    if(details.workflowId) lines.push(`workflowId: ${details.workflowId}`);
+    if(details.nodeInfoList) lines.push(`nodeInfoList: ${miniMaxCompactJson(details.nodeInfoList, 1800)}`);
+    if(details.raw) lines.push(`raw: ${miniMaxCompactJson(details.raw, 4200)}`);
+    return lines.filter(Boolean).join('\n');
 }
 function rhMediaPreviewHtml(ref, kind){
     const safe = escapeAttr(ref?.url || '');
@@ -10152,9 +11031,9 @@ function updateComfyField(node, input, event){
     scheduleSave();
 }
 
-const CANVAS_GENERATOR_TYPES = ['generator','msgen','comfy','ltxDirector','video','rh'];
-const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','msgen','comfy','ltxDirector','rh'];
-const CANVAS_MEDIA_OUTPUT_TYPES = ['generator','msgen','comfy','ltxDirector','video','rh'];
+const CANVAS_GENERATOR_TYPES = ['generator','midjourney','msgen','comfy','ltxDirector','video','rh','minimax'];
+const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','midjourney','msgen','comfy','ltxDirector','rh'];
+const CANVAS_MEDIA_OUTPUT_TYPES = ['generator','midjourney','msgen','comfy','ltxDirector','video','rh','minimax'];
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -10229,7 +11108,7 @@ function syncConnectedOutputsFromGenerated(node, outputs){
     outputNodesForSource(node.id).forEach(out => appendOutputImagesWithoutDuplicates(out, list));
 }
 function generatedImageRefs(node){
-    const keepGeneratedMedia = ['rh','ltxDirector','video'].includes(node?.type);
+    const keepGeneratedMedia = ['rh','ltxDirector','video','minimax'].includes(node?.type);
     return (node?.generatedOutputs || [])
         .map((item, i) => {
             const url = outputUrlValue(item);
@@ -10397,6 +11276,7 @@ function refreshGeneratorInputViews(){
             .filter(src => src.refs?.length);
         renderPromptPreview(el.querySelector('.prompt-list'), sources.filter(src => src.prompt && !src.refs?.length));
         if(gen.type === 'generator') renderImageInputList(el.querySelector('.input-list'), gen, imageInputs);
+        if(gen.type === 'midjourney') renderImageInputList(el.querySelector('.mj-input-list'), gen, imageInputs);
         if(gen.type === 'msgen') renderImageInputList(el.querySelector('.ms-img-list'), gen, imageInputs);
         if(gen.type === 'comfy') renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         if(gen.type === 'ltxDirector'){
@@ -10404,6 +11284,11 @@ function refreshGeneratorInputViews(){
             renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         }
         if(gen.type === 'video') renderVideoImageInputs(el.querySelector('.video-img-list'), gen, imageInputs);
+        if(gen.type === 'minimax'){
+            miniMaxEnsureSegment(gen);
+            refreshNodes([gen.id]);
+            return;
+        }
         if(gen.type === 'rh'){
             const media = rhMediaSources(gen);
             if(rhCurrentKind(gen) === 'model') renderPromptPreview(el.querySelector('.rh-prompt-list'), media.sources.filter(src => src.prompt && !src.refs?.length));
@@ -10500,6 +11385,164 @@ async function runGenerator(genId, opts={}){
         showErrorModal(err.message || tr('canvas.generationFailed'), tr('canvas.apiFailed'));
     }
 }
+async function midjourneyRequest(path, options={}){
+    const {cascadeTargetId='', ...init} = options;
+    const response = await cascadeFetch(path, init, cascadeTargetId ? {cascadeTargetId} : {});
+    if(!response.ok) throw new Error(await responseErrorMessage(response, 'Midjourney 请求失败'));
+    return response.json();
+}
+async function waitMidjourneyTask(providerId, taskId, options={}){
+    while(true){
+        const cascadeTargetId = cascadeTargetIdFromOptions(options);
+        if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
+        const result = await midjourneyRequest(`/api/midjourney/tasks/${encodeURIComponent(taskId)}?provider_id=${encodeURIComponent(providerId)}`, {cascadeTargetId});
+        if(result.status === 'succeeded') return result;
+        if(result.status === 'failed') throw new Error(result.error || 'Midjourney 任务失败');
+        await sleep(2200);
+    }
+}
+async function completeMidjourneyRun(node, out, run, result, append=false){
+    const outputs = result.image_items?.length ? result.image_items : (result.images || []);
+    if(!outputs.length) throw new Error('Midjourney 任务没有返回图片');
+    run.request = requestMetaFromResult(result);
+    run.request.task_id = result.task_id || node.lastTaskId || '';
+    appendOutputImages(out, outputs, run.refs?.[0], [{runMs:nowMs() - Number(run.startedAt || nowMs()), run}]);
+    mergeGeneratedOutputs(node, outputs, append);
+    node.runStatus = 'done';
+    node.runError = '';
+    node.running = false;
+    node.lastTaskStatus = 'SUCCESS';
+    node.lastImageCount = outputs.length;
+    addGenerationLog({run, outputs, runMs:nowMs() - Number(run.startedAt || nowMs())});
+    refreshRunNodes(node, out);
+    scheduleSave();
+}
+async function runMidjourneyNode(nodeId, opts={}){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node || (node.running && !opts.cascade)) return;
+    const providerId = resolveMidjourneyProviderId(node.apiProvider || '');
+    if(!providerId){ showErrorModal('请先在 API 设置中添加 APIMart 平台。', 'Midjourney'); return; }
+    const sources = orderedSources(node, generatorSources(node));
+    const prompt = sources.map(source => source.prompt).filter(Boolean).join('\n\n').trim();
+    const refs = imageRefsOnly(sources.flatMap(source => source.refs || []));
+    const mode = ['imagine','blend','edit'].includes(node.mode) ? node.mode : 'imagine';
+    if(mode === 'blend' && (refs.length < 2 || refs.length > 4)){
+        alert('多图融合需要连接 2 到 4 张图片');
+        return;
+    }
+    if(mode !== 'blend' && !prompt){ alert(tr('canvas.needPrompt')); return; }
+    if(mode === 'edit' && !refs.length){ alert('图片编辑需要连接至少一张图片'); return; }
+    const out = outputForNode(node, 460);
+    const run = runSnapshot(node, prompt, refs);
+    run.taskLabel = mode === 'blend' ? 'Midjourney 多图融合' : mode === 'edit' ? 'Midjourney 图片编辑' : `Midjourney v${node.version || '6.1'}`;
+    run.startedAt = nowMs();
+    node.lastPrompt = prompt;
+    node.running = true;
+    node.runStatus = 'running';
+    node.runError = '';
+    refreshRunNodes(node, out);
+    try {
+        const submitted = await midjourneyRequest('/api/midjourney/submit', {
+            method:'POST', headers:{'Content-Type':'application/json'}, cascadeTargetId:cascadeTargetIdFromOptions(opts),
+            body:JSON.stringify({provider_id:providerId, mode, prompt, size:node.size, version:node.version, speed:node.speed, reference_images:refs.slice(0, 4)})
+        });
+        node.lastTaskId = submitted.task_id;
+        node.lastAction = mode;
+        node.lastTaskStatus = submitted.status || 'queued';
+        scheduleSave();
+        const result = await waitMidjourneyTask(providerId, submitted.task_id, opts);
+        await completeMidjourneyRun(node, out, run, result, Boolean(opts.cascade));
+    } catch(error) {
+        node.running = false;
+        node.runStatus = 'failed';
+        node.runError = error.message || String(error);
+        node.lastTaskStatus = 'FAILED';
+        addGenerationLog({run, outputs:[], runMs:nowMs() - run.startedAt, error:node.runError});
+        refreshRunNodes(node, out);
+        scheduleSave();
+        if(opts.cascade) throw error;
+        showErrorModal(node.runError, 'Midjourney');
+    }
+}
+async function runMidjourneyAction(nodeId, action, index=0, extra={}){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node?.lastTaskId || node.running) return;
+    const providerId = resolveMidjourneyProviderId(node.apiProvider || '');
+    if(!providerId){ showErrorModal('请先在 API 设置中添加 APIMart 平台。', 'Midjourney'); return; }
+    const out = outputForNode(node, 460);
+    const run = runSnapshot(node, '', []);
+    const actionLabels = {upscale:`U${index}`, variation:`V${index}`, low_variation:'弱变体', high_variation:'强变体', remix_subtle:`轻微重塑 ${index}`, remix_strong:`强烈重塑 ${index}`, zoom:`扩图 ${extra.zoomRatio || 2}x`, pan:`平移 ${extra.direction || ''}`, inpaint:'局部重绘', reroll:'Reroll'};
+    run.taskLabel = `Midjourney ${actionLabels[action] || action}`;
+    run.startedAt = nowMs();
+    node.running = true;
+    node.runStatus = 'running';
+    refreshRunNodes(node, out);
+    try {
+        const submitted = await midjourneyRequest('/api/midjourney/actions', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({provider_id:providerId, task_id:node.lastTaskId, action, index, speed:node.speed, prompt:node.lastPrompt || '', direction:extra.direction || '', zoom_ratio:extra.zoomRatio || null})
+        });
+        node.lastTaskId = submitted.task_id;
+        node.lastAction = action;
+        node.lastTaskStatus = submitted.status || 'queued';
+        scheduleSave();
+        if(action === 'inpaint'){
+            node.mjModalTaskId = submitted.task_id;
+            node.mjModalPrompt = node.mjModalPrompt || node.lastPrompt || '';
+            node.running = false;
+            node.runStatus = '';
+            refreshRunNodes(node, out);
+            scheduleSave();
+            return;
+        }
+        const result = await waitMidjourneyTask(providerId, submitted.task_id);
+        await completeMidjourneyRun(node, out, run, result, true);
+    } catch(error) {
+        node.running = false;
+        node.runStatus = 'failed';
+        node.runError = error.message || String(error);
+        node.lastTaskStatus = 'FAILED';
+        addGenerationLog({run, outputs:[], runMs:nowMs() - run.startedAt, error:node.runError});
+        refreshRunNodes(node, out);
+        scheduleSave();
+        showErrorModal(node.runError, 'Midjourney');
+    }
+}
+async function runMidjourneyModal(nodeId, maskRef){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node?.mjModalTaskId || !maskRef?.url || node.running) return;
+    const providerId = resolveMidjourneyProviderId(node.apiProvider || '');
+    if(!providerId){ showErrorModal('请先在 API 设置中添加 APIMart 平台。', 'Midjourney'); return; }
+    const out = outputForNode(node, 460);
+    const prompt = String(node.mjModalPrompt || node.lastPrompt || '').trim();
+    const run = runSnapshot(node, prompt, [maskRef]);
+    run.taskLabel = 'Midjourney 局部重绘';
+    run.startedAt = nowMs();
+    node.running = true;
+    node.runStatus = 'running';
+    refreshRunNodes(node, out);
+    try {
+        const submitted = await midjourneyRequest('/api/midjourney/modal', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({provider_id:providerId, task_id:node.mjModalTaskId, prompt, speed:node.speed, mask_image:maskRef})
+        });
+        node.lastTaskId = submitted.task_id;
+        node.lastAction = 'inpaint';
+        node.lastTaskStatus = submitted.status || 'submitted';
+        node.mjModalTaskId = '';
+        scheduleSave();
+        const result = await waitMidjourneyTask(providerId, submitted.task_id);
+        await completeMidjourneyRun(node, out, run, result, true);
+    } catch(error) {
+        node.running = false;
+        node.runStatus = 'failed';
+        node.runError = error.message || String(error);
+        addGenerationLog({run, outputs:[], runMs:nowMs() - run.startedAt, error:node.runError});
+        refreshRunNodes(node, out);
+        scheduleSave();
+        showErrorModal(node.runError, 'Midjourney');
+    }
+}
 async function runGeneratorLegacy(genId, opts={}){
     const gen = nodes.find(n => n.id === genId);
     if(!gen || (gen.running && !opts.cascade)) return;
@@ -10525,6 +11568,8 @@ async function runGeneratorLegacy(genId, opts={}){
             provider_id:resolveImageProviderId(gen.apiProvider || 'comfly'),
             model:resolveImageModel(gen.model),
             size:requestSize,
+            aspect_ratio:API_RATIO_VALUES[gen.ratio] || (gen.ratio === 'custom' ? String(gen.customRatio || '').trim() : ''),
+            resolution:['1k','2k','4k'].includes(gen.resolution) ? gen.resolution : '',
             reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
         };
         const quality = normalizedImageQuality(gen.quality);
@@ -10624,6 +11669,254 @@ async function runVideoNode(nodeId, opts={}){
         refreshRunNodes(node, out);
         if(opts.cascade) throw err;
         alert(err.message || tr('canvas.videoFailed'));
+    } finally {
+        node.running = false;
+        refreshRunNodes(node, out);
+    }
+}
+async function miniMaxDynamicParams(node, prompt, refs){
+    const seg = miniMaxSelectedSegment(node);
+    const duration = Math.max(1, Math.min(60, Number(seg?.duration || node.duration || 8) || 8));
+    const params = {
+        "136":{},
+        "115":{aspect_ratio:miniMaxFullAspectLabel(seg?.aspectRatio || node.aspectRatio || '16:9'), megapixels:Number(seg?.megapixels || node.megapixels || 0.4)},
+        "132":{value:duration},
+        "138":{value:prompt},
+        "129":{noise_seed:Math.floor(Math.random() * 4294967295)}
+    };
+    for(let i = 0; i < CANVAS_MINIMAX_REF_IMAGE_MAX; i++) params["136"][`ref_images.ref_image_${i}`] = null;
+    for(let i = 0; i < CANVAS_MINIMAX_REF_VIDEO_MAX; i++) params["136"][`ref_videos.ref_video_${i}`] = null;
+    for(let i = 0; i < CANVAS_MINIMAX_REF_AUDIO_MAX; i++) params["136"][`ref_audios.ref_audio_${i}`] = null;
+    const images = imageRefsOnly(refs);
+    const videos = videoRefsOnly(refs);
+    const audios = audioRefsOnly(refs);
+    if(images.length > CANVAS_MINIMAX_REF_IMAGE_MAX) throw new Error(`MiniMax H3 最多支持 ${CANVAS_MINIMAX_REF_IMAGE_MAX} 张参考图`);
+    if(videos.length > CANVAS_MINIMAX_REF_VIDEO_MAX) throw new Error(`MiniMax H3 最多支持 ${CANVAS_MINIMAX_REF_VIDEO_MAX} 段参考视频`);
+    if(audios.length > CANVAS_MINIMAX_REF_AUDIO_MAX) throw new Error(`MiniMax H3 最多支持 ${CANVAS_MINIMAX_REF_AUDIO_MAX} 段参考音频`);
+    for(let i = 0; i < images.length; i++){
+        const name = await comfyNameForRef(images[i]);
+        params[String(9000 + i)] = {class_type:'LoadImage', inputs:{image:name}, _meta:{title:`MiniMax image ${i + 1}`}};
+        params["136"][`ref_images.ref_image_${i}`] = [String(9000 + i), 0];
+    }
+    for(let i = 0; i < videos.length; i++){
+        const name = await comfyNameForRef(videos[i]);
+        const loadNodeId = String(9040 + i);
+        const componentsNodeId = String(9050 + i);
+        params[loadNodeId] = {class_type:'LoadVideo', inputs:{file:name}, _meta:{title:`MiniMax video ${i + 1}`}};
+        params[componentsNodeId] = {class_type:'GetVideoComponents', inputs:{video:[loadNodeId, 0]}, _meta:{title:`MiniMax video frames ${i + 1}`}};
+        params["136"][`ref_videos.ref_video_${i}`] = [componentsNodeId, 0];
+    }
+    for(let i = 0; i < audios.length; i++){
+        const name = await comfyNameForRef(audios[i]);
+        params[String(9060 + i)] = {class_type:'LoadAudio', inputs:{audio:name}, _meta:{title:`MiniMax audio ${i + 1}`}};
+        params["136"][`ref_audios.ref_audio_${i}`] = [String(9060 + i), 0];
+    }
+    return params;
+}
+async function miniMaxRunningHubSettings(node){
+    const entry = miniMaxRunningHubEntry(node);
+    const workflowId = runningHubEntryId(entry, 'workflow');
+    if(!entry || !workflowId) throw new Error(`请先在 API 设置中添加「${CANVAS_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE}」`);
+    node.minimaxRunningHubWorkflowId = workflowId;
+    node.rhPayment = node.rhPayment || 'free';
+    const cached = await ensureRunningHubWorkflow(workflowId).catch(() => null);
+    const fields = rhUsableFields(
+        Array.isArray(entry?.fields) && entry.fields.length ? entry.fields : (cached?.fields || [])
+    );
+    if(!fields.length) throw new Error(`请先在 API 设置中打开「${runningHubEntryLabel(entry, 'workflow')}」，拉取并保存工作流参数`);
+    const rhNode = {
+        type:'rh',
+        rhMode:'workflow',
+        rhConfigKey:runningHubEntryKey('workflow', workflowId),
+        workflowId,
+        rhPayment:node.rhPayment || 'free',
+        rhParams:{},
+        rhWorkflowInfo:{workflowId, nodeInfoList:fields},
+        rhOptionalImageMode:entry.optionalImageMode || cached?.optionalImageMode || 'prune-workflow'
+    };
+    return {entry, workflowId, fields, rhNode};
+}
+function miniMaxApplyRunningHubParams(rhNode, fields, node, prompt){
+    const seg = miniMaxSelectedSegment(node);
+    const params = rhNode.rhParams || {};
+    miniMaxSetRunningHubParam(params, fields, [/prompt|positive|text|caption|description|关键词|提示词|正向/], ['138::value'], prompt);
+    miniMaxSetRunningHubParam(params, fields, [/duration|seconds|时长|秒/], ['132::value'], Math.max(1, Math.min(60, Number(seg?.duration || node.duration || 8) || 8)));
+    miniMaxSetRunningHubParam(params, fields, [/aspect[_\s-]?ratio|\bratio\b|画面比例|比例/], ['115::aspect_ratio'], miniMaxAspectValue(seg?.aspectRatio || node.aspectRatio || '16:9'));
+    miniMaxSetRunningHubParam(params, fields, [/megapixels?|百万像素/], ['115::megapixels'], Number(seg?.megapixels || node.megapixels || 0.4));
+    rhNode.rhParams = params;
+}
+async function miniMaxBuildRunningHubNodeInfoList(rhNode, fields, media){
+    const result = [];
+    const indexes = rhFieldIndexes(fields);
+    for(const field of fields){
+        const kind = rhFieldKind(field);
+        const role = rhFieldRole(field);
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        if(['image','video','audio'].includes(kind)){
+            const idx = indexes[key] || 0;
+            const hasInput = Boolean(media[kind]?.[idx]?.url);
+            if(!hasInput && field.required !== true) continue;
+            if(!hasInput && field.required === true) throw new Error(`RunningHub 工作流缺少必选素材：${rhRequiredLabel(field)}`);
+        }
+        let value = '';
+        const param = rhNode.rhParams?.[key];
+        if(field.sourceFromUpstream === false && !['image','video','audio'].includes(kind) && !param) continue;
+        if(['image','video','audio'].includes(kind)){
+            const idx = indexes[key] || 0;
+            value = media[kind]?.[idx]?.url || param?.value || rhDefaultValue(field);
+            value = await rhUploadValueIfNeeded(value, rhNode);
+        } else if(role === 'prompt') {
+            value = param?.value ?? (media.prompt || rhDefaultValue(field));
+        } else {
+            value = param?.value ?? rhDefaultValue(field);
+        }
+        if(['number','slider'].includes(kind) && String(value ?? '').trim() !== '' && !Number.isNaN(Number(value))) value = Number(value);
+        result.push({nodeId:field.nodeId, fieldName:field.fieldName, fieldValue:value});
+    }
+    return result;
+}
+async function miniMaxBuildRunningHubWorkflowExtras(rhNode, fields, media, nodeInfoList){
+    const config = await ensureRunningHubWorkflowConfigForNode(rhNode);
+    if(!config || (config.optionalImageMode || 'prune-workflow') !== 'prune-workflow') return {};
+    const indexes = rhFieldIndexes(fields);
+    const missingOptional = [];
+    for(const field of fields){
+        const kind = rhFieldKind(field);
+        if(!['image','video','audio'].includes(kind)) continue;
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        const idx = indexes[key] || 0;
+        const hasInput = Boolean(media[kind]?.[idx]?.url);
+        if(field.required === true && !hasInput) throw new Error(`RunningHub 工作流缺少必选素材：${rhRequiredLabel(field)}`);
+        if(field.required !== true && !hasInput) missingOptional.push(field);
+    }
+    if(!missingOptional.length) return {};
+    missingOptional.forEach(field => {
+        const key = rhParamKey(field.nodeId, field.fieldName);
+        const idx = nodeInfoList.findIndex(item => rhParamKey(item.nodeId, item.fieldName) === key);
+        if(idx >= 0) nodeInfoList.splice(idx, 1);
+    });
+    const workflow = rhPruneWorkflowForMissingFields(config.workflowJson || {}, missingOptional);
+    return workflow ? {workflow} : {};
+}
+async function runMiniMaxRunningHub(node, media, options={}){
+    const {entry, workflowId, fields, rhNode} = await miniMaxRunningHubSettings(node);
+    miniMaxApplyRunningHubParams(rhNode, fields, node, media.prompt);
+    const nodeInfoList = await miniMaxBuildRunningHubNodeInfoList(rhNode, fields, media);
+    const workflowExtras = await miniMaxBuildRunningHubWorkflowExtras(rhNode, fields, media, nodeInfoList);
+    const body = {workflowId, nodeInfoList, useWallet:rhUseWallet(rhNode), ...workflowExtras};
+    const cascadeTargetId = cascadeTargetIdFromOptions(options);
+    const submit = await cascadeFetch('/api/runninghub/workflow-submit', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body)
+    }, {cascadeTargetId}).then(async r => {
+        const data = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
+        if(!r.ok || data.success === false) throw miniMaxRunningHubPayloadError('提交', data, 'RunningHub 工作流提交失败', {
+            endpoint:'/api/runninghub/workflow-submit',
+            workflowId,
+            nodeInfoList:nodeInfoList.slice(0, 40),
+            hasWorkflow:Boolean(body.workflow)
+        });
+        return data.data || data;
+    });
+    const taskId = submit.taskId;
+    if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
+    for(let i = 0; i < 720; i++){
+        if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
+        await sleep(2500);
+        const data = await cascadeFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}&useWallet=${rhUseWallet(rhNode) ? '1' : '0'}`, {}, {cascadeTargetId}).then(async r => {
+            const json = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
+            if(!r.ok || json.success === false) throw miniMaxRunningHubPayloadError('查询', json, 'RunningHub 查询失败', {taskId, workflowId});
+            return json.data || json;
+        });
+        if(data.status === 'SUCCESS'){
+            const outputs = resultMediaUrls(data.image_items?.length ? data.image_items : (data.urls || []));
+            if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
+            return {outputs, request:{task_id:taskId, workflowId, workflowTitle:runningHubEntryLabel(entry, 'workflow'), backend:'runninghub', mode:'workflow', useWallet:rhUseWallet(rhNode)}};
+        }
+        if(data.status === 'FAILED') throw miniMaxRunningHubPayloadError('执行', data, data.failReason || 'RunningHub 执行失败', {taskId, workflowId});
+    }
+    throw new Error(tr('canvas.rhTimeout'));
+}
+async function runMiniMaxNode(nodeId, opts={}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || (node.running && !opts.cascade)) return;
+    const cascadeTargetId = cascadeTargetIdFromOptions(opts);
+    const sourceData = miniMaxRefsForNode(node);
+    const seg = miniMaxSelectedSegment(node);
+    const prompt = String(seg?.prompt || '').trim() || sourceData.prompt;
+    const refs = miniMaxRefsForSegment(node, seg);
+    const media = {
+        sources:sourceData.sources,
+        refs,
+        image:imageRefsOnly(refs),
+        video:videoRefsOnly(refs),
+        audio:audioRefsOnly(refs),
+        prompt
+    };
+    if(!media.prompt){
+        const msg = 'MiniMax 需要连接提示词';
+        if(opts.cascade) throw new Error(msg);
+        alert(msg);
+        return;
+    }
+    const engine = miniMaxEngine(node);
+    let out = outputForNode(node, 500);
+    const pendingId = uid('p');
+    const run = runSnapshot(node, media.prompt, media.refs);
+    run.taskLabel = engine === 'runninghub' ? 'MiniMax RunningHub' : 'MiniMax ComfyUI';
+    if(out) out._pending = [...(out._pending || []), makePendingForRun(pendingId, run, node, {refs:media.refs, cascadeTargetId})];
+    if(!opts.cascade) node.running = true;
+    refreshRunNodes(node, out);
+    try {
+        let outputs = [];
+        if(engine === 'runninghub'){
+            const rhResult = await runMiniMaxRunningHub(node, media, {cascadeTargetId});
+            outputs = rhResult.outputs || [];
+            run.request = rhResult.request || {};
+        } else {
+            const params = await miniMaxDynamicParams(node, media.prompt, media.refs);
+            const result = await runQueuedComfyGenerate({
+                prompt:media.prompt,
+                workflow_json:node.workflow || 'MiniMax_H3.json',
+                params,
+                type:'minimax-h3',
+                client_id:CLIENT_ID
+            }, {cascadeTargetId});
+            outputs = resultMediaUrls(result);
+            run.request = requestMetaFromResult(result);
+        }
+        const normalized = (outputs || []).map((item, i) => {
+            const url = outputUrlValue(item);
+            const explicitKind = typeof item === 'object' && item.kind ? item.kind : '';
+            const kind = explicitKind || 'video';
+            return item && typeof item === 'object' ? {...item, url, kind} : {url, kind, name:`minimax-${i + 1}.mp4`};
+        }).filter(item => item.url);
+        if(!normalized.length) throw new Error('MiniMax 未返回视频');
+        const meta = collectRunMeta(out, pendingId);
+        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        appendOutputImages(out, normalized, media.refs[0], [{...meta, kind:'video'}]);
+        if(seg) normalized.forEach(item => miniMaxSetSegmentResult(node, seg, item));
+        mergeGeneratedOutputs(node, normalized, Boolean(opts.cascade));
+        addGenerationLog({run, outputs:normalized, runMs:meta.runMs || 0});
+        node.runStatus = 'done';
+        node.runError = '';
+        refreshRunNodes(node, out);
+        scheduleSave();
+    } catch(err) {
+        const meta = collectRunMeta(out, pendingId);
+        const readable = miniMaxReadableError(err, engine);
+        addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:miniMaxLogError(err, engine)});
+        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        if(isCascadeAbortError(err)){
+            if(opts.cascade) throw err;
+            return;
+        }
+        node.runStatus = 'failed';
+        node.runError = readable;
+        refreshRunNodes(node, out);
+        if(opts.cascade) throw err;
+        showErrorModal(readable, 'MiniMax H3');
     } finally {
         node.running = false;
         refreshRunNodes(node, out);
@@ -11455,7 +12748,9 @@ async function callCanvasLLM(node, message, messages=[], options={}){
             model,
             ms_model: llmProv === 'modelscope' ? model : '',
             provider: llmProv,
-            system_prompt:node.systemPrompt || 'You are a helpful assistant.',
+            // The System switch controls whether any system message is sent.
+            // Keep the default only when the user explicitly enables it.
+            system_prompt:node.showSystem ? ((node.systemPrompt || '').trim() || 'You are a helpful assistant.') : '',
             messages,
             images,
             videos,
@@ -11578,12 +12873,14 @@ function bindCascadeButtons(wrap, nodeId){
 function runCascadeNodeByType(node, opts={}){
     const runOpts = {cascade:true, ...opts};
     if(node.type === 'generator') return runGenerator(node.id, runOpts);
+    if(node.type === 'midjourney') return runMidjourneyNode(node.id, runOpts);
     if(node.type === 'msgen') return runMsGenNode(node.id, runOpts);
     if(node.type === 'comfy') return runComfyNode(node.id, runOpts);
     if(node.type === 'ltxDirector') return runLTXDirectorNode(node.id, runOpts);
     if(node.type === 'llm') return runLLMNode(node.id, runOpts);
     if(node.type === 'video') return runVideoNode(node.id, runOpts);
     if(node.type === 'rh') return runRhNode(node.id, runOpts);
+    if(node.type === 'minimax') return runMiniMaxNode(node.id, runOpts);
     return Promise.resolve();
 }
 async function runCascadeNodeWithLoopContext(node, ctx, opts={}){
@@ -11602,7 +12899,7 @@ async function runCascadeNodeWithLoopContext(node, ctx, opts={}){
     }
 }
 function cascadeParallelLimit(order, totalRounds){
-    const hasComfy = order.some(id => nodes.find(n => n.id === id)?.type === 'comfy');
+    const hasComfy = order.some(id => ['comfy','minimax'].includes(nodes.find(n => n.id === id)?.type));
     if(hasComfy) return Math.max(1, Math.min(totalRounds, comfyBackendCount || 1));
     return Math.max(1, Math.min(totalRounds, 6));
 }
@@ -11617,7 +12914,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','msgen','comfy','ltxDirector','llm','video','rh'];
+    return ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -11856,12 +13153,14 @@ async function runOneCascadePass(order, options={}){
         refreshNodes([id]);
         try {
             if(node.type === 'generator') await runGenerator(id, {cascade:true, cascadeTargetId:targetId});
+            else if(node.type === 'midjourney') await runMidjourneyNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'msgen') await runMsGenNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'comfy') await runComfyNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'ltxDirector') await runLTXDirectorNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'llm') await runLLMNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'video') await runVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'rh') await runRhNode(id, {cascade:true, cascadeTargetId:targetId});
+            else if(node.type === 'minimax') await runMiniMaxNode(id, {cascade:true, cascadeTargetId:targetId});
             if(targetId) ensureCascadeActive(targetId);
             node.runStatus = 'done';
             refreshNodes([id]);
@@ -12078,48 +13377,6 @@ function logTaskLabel(log){
     }
     return log?.model || '-';
 }
-async function deleteCanvasLogEntry(logId, deleteMedia=false){
-    if(!canvas || !logId) return;
-    const confirmText = deleteMedia ? tr('canvas.deleteLogMediaConfirm') : tr('canvas.deleteLogConfirm');
-    if(!confirm(confirmText)) return;
-    try {
-        if(localCanvasDirty || saveTimer){
-            clearTimeout(saveTimer);
-            saveTimer = null;
-            await saveCanvas();
-        }
-        const res = await fetch(`/api/canvases/${encodeURIComponent(canvas.id)}/logs/delete`, {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                log_id:logId,
-                delete_unreferenced_media:deleteMedia,
-                reset_referencing_nodes:deleteMedia,
-                base_updated_at:Number(canvas.updated_at || lastCanvasUpdatedAt || 0)
-            })
-        });
-        const data = await res.json().catch(() => ({}));
-        if(!res.ok) throw new Error(data.detail || tr('canvas.logDeleteFailed'));
-        canvas.logs = data.canvas?.logs || (canvas.logs || []).filter(item => item.id !== logId);
-        if(data.canvas?.nodes){
-            canvas.nodes = data.canvas.nodes;
-            canvas.connections = data.canvas.connections || [];
-            nodes = canvas.nodes;
-            connections = canvas.connections;
-            render();
-        }
-        canvas.updated_at = Number(data.canvas?.updated_at || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
-        renderCanvasLog();
-        const notes = [tr('canvas.logDeleted')];
-        if(data.removed_files?.length) notes.push(tr('canvas.logMediaRemoved').replace('{n}', data.removed_files.length));
-        if(data.reset_node_ids?.length) notes.push(tr('canvas.logNodesReset').replace('{n}', data.reset_node_ids.length));
-        if(data.skipped_referenced?.length) notes.push(tr('canvas.logMediaReferenced').replace('{n}', data.skipped_referenced.length));
-        setStatus(notes.join(' · '));
-    } catch(err) {
-        setStatus(err?.message || tr('canvas.logDeleteFailed'));
-    }
-}
 function addGenerationLog({run, outputs=[], runMs=0, error=''}) {
     if(!canvas) return;
     canvas.logs = canvas.logs || [];
@@ -12168,7 +13425,7 @@ function renderCanvasLog(){
             idText ? `ID ${idText}` : '',
             backendText,
         ].filter(Boolean);
-        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}" data-canvas-log-id="${escapeAttr(log.id || '')}">
+        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}">
             <div class="log-main">
                 <div class="log-meta">
                     <span class="log-chip ${log.status === 'failed' ? 'status-failed' : 'status-ok'}">${escapeHtml(log.status === 'failed' ? tr('canvas.failed') : tr('canvas.success'))}</span>
@@ -12179,10 +13436,6 @@ function renderCanvasLog(){
                 <div class="log-subline">${subParts.map(part => `<span title="${escapeAttr(part)}">${escapeHtml(part)}</span>`).join('')}</div>
                 ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
                 <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
-                <div class="log-actions">
-                    <button type="button" data-log-delete="record"><i data-lucide="list-x"></i><span>${escapeHtml(tr('canvas.deleteLog'))}</span></button>
-                    <button type="button" class="danger" data-log-delete="media"><i data-lucide="trash-2"></i><span>${escapeHtml(tr('canvas.deleteLogAndMedia'))}</span></button>
-                </div>
             </div>
             <div class="log-thumbs">${thumbs}</div>
         </div>`;
@@ -12212,13 +13465,6 @@ function renderCanvasLog(){
     };
     bindCanvasLogCopy('[data-prompt]', 'prompt');
     bindCanvasLogCopy('[data-error]', 'error');
-    list.querySelectorAll('[data-log-delete]').forEach(button => {
-        button.onclick = e => {
-            e.stopPropagation();
-            const logId = button.closest('[data-canvas-log-id]')?.dataset.canvasLogId || '';
-            deleteCanvasLogEntry(logId, button.dataset.logDelete === 'media');
-        };
-    });
     refreshIcons();
 }
 async function importWorkflowAssetUrl(url, name='workflow'){
@@ -12266,11 +13512,11 @@ function makePendingForRun(id, run, node, options={}, task={}){
 }
 function mergeGeneratedOutputs(node, outputs, append=false){
     if(!node) return;
-    const keepGeneratedMedia = ['rh','ltxDirector','video'].includes(node.type);
+    const keepGeneratedMedia = ['rh','ltxDirector','video','minimax'].includes(node.type);
     const clean = (outputs || []).map(item => {
         const url = outputUrlValue(item);
         if(!url) return null;
-        const kind = node.type === 'video'
+        const kind = ['video','minimax'].includes(node.type)
             ? 'video'
             : ['rh','ltxDirector'].includes(node.type) && isVideoUrl(url)
                 ? 'video'
@@ -14644,7 +15890,7 @@ board.onwheel = e => {
     if(!canvas) return;
     e.preventDefault();
     const before = screenToWorld(e.clientX, e.clientY);
-    viewport.scale = safeViewportScale(viewport.scale * canvasWheelZoomFactor(e, board.clientHeight || window.innerHeight || 800));
+    viewport.scale = viewport.scale * (e.deltaY > 0 ? .92 : 1.08);
     const rect = board.getBoundingClientRect();
     viewport.x = e.clientX - rect.left - before.x * viewport.scale;
     viewport.y = e.clientY - rect.top - before.y * viewport.scale;
@@ -14791,6 +16037,7 @@ window.addEventListener('blur', () => {
         window.onmousemove = null;
         window.onmouseup = null;
     }
+    if(dragNode || resizeNode || llmPaneDrag || dragBoard || minimapDrag || knifeActive) endDrag();
 });
 function deleteSelectedNodes(){
     if(!canvas || selected.size === 0) return;

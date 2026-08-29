@@ -23,11 +23,11 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.07.22.1784282603"></script>
-    <script src="/static/js/theme.js?v=2026.07.22.1784282603"></script>
-    <script src="/static/js/i18n.js?v=2026.07.22.1784282603"></script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.08.04.1785292594"></script>
+    <script src="/static/js/theme.js?v=2026.08.04.1785292593"></script>
+    <script src="/static/js/i18n.js?v=2026.08.04.1785292592"></script>
     <style>
-        @import url('/static/vendor/css/fonts.css?v=2026.07.22.1784282603');
+        @import url('/static/vendor/css/fonts.css?v=2026.08.04.1785292593');
 
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -1672,16 +1672,16 @@
         </script>
 
         <main class="stage">
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=2026.07.22.1784774744" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.07.22.1784774744" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=2026.08.04.1785891163" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-enhance" data-src="/static/enhance.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
+            <iframe id="frame-angle" data-src="/static/angle.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.08.04.1787619792" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -1760,6 +1760,9 @@
                 </button>
                 <button class="studio-modal-btn" type="button" onclick="closeProjectUpdateModal()">
                     <span id="project-update-cancel-text">取消</span>
+                </button>
+                <button id="project-update-rollback-btn" class="studio-modal-btn" type="button" onclick="rollbackProjectUpdate()">
+                    <span>恢复版本</span>
                 </button>
                 <button id="project-update-confirm-btn" class="studio-modal-btn primary" type="button" onclick="confirmProjectUpdate()">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2711,10 +2714,19 @@
                 const list = await fetch('/api/update-backups').then(r => r.json());
                 const backups = list.backups || [];
                 if(!backups.length){ alert(isEn ? 'No backups available.' : '没有可用的备份'); return; }
-                const lines = backups.slice(0, 8).map((b, i) => {
+                const lines = backups.slice(0, 10).map((b, i) => {
                     const d = new Date((b.created_at || 0) * 1000);
                     const ts = d.toLocaleString();
-                    return `${i + 1}. ${b.name}  (${b.file_count} files, ${ts})`;
+                    const versions = b.from_version
+                        ? `  [${b.from_version}${b.target_version ? ` -> ${b.target_version}` : ''}]`
+                        : '';
+                    const notes = Array.isArray(b.update_notes?.items)
+                        ? b.update_notes.items.map(item => String(item?.text || '').trim()).filter(Boolean).slice(0, 3)
+                        : [];
+                    const changeText = notes.length
+                        ? `\n   更新内容：${notes.join('；')}`
+                        : (b.affected_file_count ? `\n   影响文件：${b.affected_file_count} 个` : '');
+                    return `${i + 1}. ${b.name}${versions}  (${b.file_count} files, ${ts})${changeText}`;
                 });
                 const promptMsg = (isEn
                     ? 'Select a backup to restore (enter the number):\n'
@@ -2732,8 +2744,8 @@
                 const data = await res.json().catch(() => ({}));
                 if(!res.ok) throw new Error(data.detail || (isEn ? 'Rollback failed' : '回滚失败'));
                 alert(isEn
-                    ? `Restored ${data.count || 0} files. Backend is restarting.`
-                    : `已还原 ${data.count || 0} 个文件。后端正在重启。`);
+                    ? `Restored ${data.count || 0} files. A safety restore point was created, and the backend is restarting.`
+                    : `已还原 ${data.count || 0} 个文件，当前版本已自动保存为新的恢复点。后端正在重启。`);
                 if(data.restart_scheduled) waitForBackendAndReload();
             } catch(e) {
                 alert((isEn ? 'Rollback failed: ' : '回滚失败：') + describeNetworkError(e, isEn));

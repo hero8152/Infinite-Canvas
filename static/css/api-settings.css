@@ -5955,6 +5955,152 @@ html.studio-theme-dark body .recommend-tag.recommend-free-tag svg {
     }
 }
 
+/* ===== DX-OS 项目迁移横幅 ===== */
+.dx-os-banner {
+    position:relative;
+    isolation:isolate;
+    display:grid;
+    grid-template-columns:auto minmax(0, 1fr) auto;
+    align-items:center;
+    gap:18px;
+    margin:0 0 22px;
+    padding:18px 20px;
+    overflow:hidden;
+    border:1px solid rgba(255,255,255,.13);
+    border-radius:20px;
+    background:
+        radial-gradient(circle at 82% 16%, rgba(116,139,255,.28), transparent 32%),
+        linear-gradient(118deg, #121822 0%, #182235 58%, #202b40 100%);
+    box-shadow:0 16px 38px rgba(15,23,42,.16);
+    color:#f8fafc;
+    text-decoration:none;
+    transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+
+.dx-os-banner::after {
+    content:"";
+    position:absolute;
+    z-index:-1;
+    inset:0;
+    background:linear-gradient(105deg, transparent 48%, rgba(255,255,255,.07));
+    pointer-events:none;
+}
+
+.dx-os-banner:hover {
+    transform:translateY(-2px);
+    border-color:rgba(255,255,255,.24);
+    box-shadow:0 20px 44px rgba(15,23,42,.24);
+}
+
+.dx-os-banner:focus-visible {
+    outline:3px solid rgba(129,140,248,.48);
+    outline-offset:3px;
+}
+
+.dx-os-banner-logo {
+    display:grid;
+    place-items:center;
+    width:68px;
+    height:68px;
+    padding:0;
+    border:0;
+    border-radius:0;
+    background:transparent;
+    box-shadow:none;
+}
+
+.dx-os-banner-logo img {
+    display:block;
+    width:100%;
+    height:100%;
+    filter:
+        drop-shadow(2px 0 0 rgba(255,255,255,.5))
+        drop-shadow(-2px 0 0 rgba(255,255,255,.5))
+        drop-shadow(0 2px 0 rgba(255,255,255,.5))
+        drop-shadow(0 -2px 0 rgba(255,255,255,.5));
+}
+
+.dx-os-banner-copy {
+    display:flex;
+    min-width:0;
+    flex-direction:column;
+    gap:5px;
+}
+
+.dx-os-banner-kicker {
+    color:#aebcff;
+    font-size:11px;
+    font-weight:800;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+}
+
+.dx-os-banner-title {
+    color:#fff;
+    font-size:20px;
+    font-weight:850;
+    line-height:1.28;
+}
+
+.dx-os-banner-features {
+    color:#b9c4d6;
+    font-size:12px;
+    font-weight:600;
+    line-height:1.55;
+}
+
+.dx-os-banner-action {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:7px;
+    min-height:40px;
+    padding:0 14px;
+    border:1px solid rgba(255,255,255,.18);
+    border-radius:11px;
+    background:rgba(255,255,255,.1);
+    color:#fff;
+    font-size:12px;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+@media (max-width:780px) {
+    .dx-os-banner {
+        grid-template-columns:auto minmax(0, 1fr);
+        gap:14px;
+        padding:16px;
+        border-radius:17px;
+    }
+
+    .dx-os-banner-logo {
+        width:58px;
+        height:58px;
+        border-radius:14px;
+    }
+
+    .dx-os-banner-title {
+        font-size:16px;
+    }
+
+    .dx-os-banner-action {
+        grid-column:1 / -1;
+        width:100%;
+    }
+}
+
+@media (max-width:480px) {
+    .dx-os-banner-features {
+        font-size:11px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dx-os-banner {
+        transition:none;
+    }
+}
+
 @media (max-width:780px) {
     .provider-onboarding-card .onboarding-rh-source-group,
     .provider-onboarding-card .onboarding-rh-row-field,

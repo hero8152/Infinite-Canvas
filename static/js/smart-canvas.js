@@ -17,7 +17,14 @@ const fileInput = document.getElementById('fileInput');
 const apiKindToggle = document.getElementById('apiKindToggle');
 const inputThumbsRow = document.getElementById('inputThumbsRow');
 const SMART_UPLOAD_MAX = 20;
-const SMART_REFERENCE_IMAGE_MAX = 10;
+const SMART_REFERENCE_IMAGE_MAX = 20;
+// Keep these limits aligned with ComfyUI's MiniMaxH3ReferenceToVideo schema.
+const SMART_MINIMAX_REF_IMAGE_MAX = 9;
+const SMART_MINIMAX_REF_VIDEO_MAX = 3;
+const SMART_MINIMAX_REF_AUDIO_MAX = 3;
+const SMART_MINIMAX_DEFAULT_ENGINE = 'comfyui';
+const SMART_MINIMAX_RUNNINGHUB_WORKFLOW_ID = '2084608321469898754';
+const SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE = 'Minimax-多参视频生成';
 function providerMaxReferenceImages(providerId){
     const p = apiProviderById(providerId);
     return Number(p?.max_reference_images) > 0 ? Number(p.max_reference_images) : SMART_REFERENCE_IMAGE_MAX;
@@ -377,6 +384,7 @@ let settings = {
     enhanceUpscaleRes:2048,
     editUpscale:false,
     editUpscaleRes:2048,
+    jimengUpscaleRes:'2k',
     promptH:124
 };
 const MS_GEN_MODELS = {
@@ -395,6 +403,17 @@ const SIZE_MAP = {
     wide: {'1k':'1280x720','2k':'2048x1152','4k':'3840x2160'},
     ultrawide: {'1k':'1280x544','2k':'2048x880','4k':'3840x1648'},
     ultratall: {'1k':'544x1280','2k':'880x2048','4k':'1648x3840'}
+};
+const API_RATIO_VALUES = {
+    square:'1:1',
+    portrait:'2:3',
+    landscape:'3:2',
+    portrait43:'3:4',
+    landscape43:'4:3',
+    story:'9:16',
+    wide:'16:9',
+    ultrawide:'21:9',
+    ultratall:'9:21'
 };
 const RES_LONG_SIDE = { '1k':1536, '2k':2048, '4k':3840 };
 const RES_PIXEL_LIMIT = { '1k':1572864, '2k':4194304, '4k':8294400 };
@@ -520,6 +539,11 @@ function smartVideoPlayerHtml(url, attrs=''){
     const safe = escapeHtml(displayMediaUrl({url:original}));
     return `<video src="${safe}" data-url="${escapeAttr(original)}" data-inline-video-active="1" controls autoplay playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"${attrs ? ` ${attrs}` : ''}></video>`;
 }
+function smartMinimaxVideoPlayerHtml(url){
+    const original = smartOriginalMediaUrl(url);
+    const src = displayMediaUrl({url:original});
+    return `<video src="${escapeHtml(src)}" data-url="${escapeAttr(original)}" data-minimax-player="1" controls preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>`;
+}
 function smartActivateVideoPreview(target){
     const root = target?.closest?.('.media-video-card,.video-thumb,.image-wrap,.thumb-item') || target?.parentElement || null;
     const img = target?.matches?.('img[data-preview-kind="video"]') ? target : root?.querySelector?.('img[data-preview-kind="video"]');
@@ -577,9 +601,11 @@ function bindSmartPreviewImageFallbacks(root=document){
     });
 }
 const SMART_SELECTED_HIGH_RES_DELAY = 320;
+const SMART_HIGH_RES_ZOOM_THRESHOLD = 0.86;
 let smartSelectedHighResTimer = 0;
 let smartSelectedHighResSeq = 0;
 let smartSelectedHighResNodeIds = new Set();
+let smartImageResolutionSyncTimer = 0;
 const smartSelectedHighResLoaded = new Set();
 const smartSelectedHighResLoading = new Map();
 function smartImageEditorIsOpen(){
@@ -614,20 +640,28 @@ function smartNodeElementsByIds(ids){
 }
 function smartNodeElementsForHighResSync(root){
     if(root && root !== world) return [root];
-    const ids = new Set([...smartSelectedHighResNodeIds, ...selectedNodeIds()]);
-    return smartNodeElementsByIds(ids);
+    return [world];
+}
+function smartViewportWantsHighRes(){
+    return Number(viewport?.scale || 1) >= SMART_HIGH_RES_ZOOM_THRESHOLD;
+}
+function smartImageNearViewport(img){
+    if(!img?.isConnected || !shell) return false;
+    const shellRect = shell.getBoundingClientRect();
+    const rect = img.getBoundingClientRect();
+    const margin = 220;
+    return rect.right >= shellRect.left - margin && rect.left <= shellRect.right + margin
+        && rect.bottom >= shellRect.top - margin && rect.top <= shellRect.bottom + margin;
 }
 function syncSmartSelectedImageResolution(root=null){
     const selectedImages = [];
+    const wantHighRes = smartViewportWantsHighRes();
     smartNodeElementsForHighResSync(root).forEach(scope => {
-        const nodeEl = scope?.classList?.contains('image-node') ? scope : scope?.closest?.('.image-node');
-        const nodeId = nodeEl?.dataset?.id || '';
-        const selectedNode = Boolean(nodeId && isNodeSelected(nodeId));
         scope.querySelectorAll?.('img[data-preview-src][data-original-src]').forEach(img => {
             if(img.dataset.previewKind === 'video') return;
             const preview = img.dataset.previewSrc || '';
             const original = img.dataset.originalSrc || '';
-            if(!selectedNode){
+            if(!wantHighRes || !smartImageNearViewport(img)){
                 delete img.dataset.selectedHighResTarget;
                 if(preview && img.getAttribute('src') !== preview) img.src = preview;
                 return;
@@ -654,11 +688,17 @@ function syncSmartSelectedImageResolution(root=null){
         if(seq !== smartSelectedHighResSeq || smartImageEditorIsOpen()) return;
         selectedImages.forEach(({img, target}) => {
             if(!img.isConnected || img.dataset.selectedHighResTarget !== target) return;
-            const nodeEl = img.closest('.image-node');
-            if(!nodeEl?.dataset?.id || !isNodeSelected(nodeEl.dataset.id)) return;
+            if(!smartViewportWantsHighRes() || !smartImageNearViewport(img)) return;
             if(smartSelectedHighResLoaded.has(target) && img.getAttribute('src') !== target) img.src = target;
         });
     }, SMART_SELECTED_HIGH_RES_DELAY);
+}
+function scheduleSmartImageResolutionSync(root=world, delay=120){
+    if(smartImageResolutionSyncTimer) clearTimeout(smartImageResolutionSyncTimer);
+    smartImageResolutionSyncTimer = setTimeout(() => {
+        smartImageResolutionSyncTimer = 0;
+        syncSmartSelectedImageResolution(root);
+    }, Math.max(0, Number(delay) || 0));
 }
 function cloneSmartSettings(source=settings){
     try {
@@ -726,6 +766,7 @@ function canvasForStorage(){
     (clean.nodes || []).forEach(node => {
         if(Array.isArray(node.images)) node.images = node.images.map(mediaItemForStorage);
         if(node.runSettings) node.runSettings = settingsForStorage(node.runSettings);
+        if(node.type === 'smart-minimax') node.timelinePlaying = false;
     });
     return clean;
 }
@@ -1012,7 +1053,7 @@ function isSmartGroupNode(node){
     return Boolean(node && node.type === 'smart-group');
 }
 function isSmartRunnableNode(node){
-    return Boolean(isSmartImageNode(node) || isSmartGroupNode(node));
+    return Boolean(isSmartImageNode(node) || isSmartGroupNode(node) || node?.type === 'smart-minimax');
 }
 function isHistoryGroupNode(node){
     return Boolean(isSmartImageNode(node) && (node.isHistoryGroup || node.historyFor));
@@ -1797,6 +1838,7 @@ function promptNodeSplitPreviewHeight(node){
 }
 function syncPromptNodeHeightForSplit(node, prevExtra=0){
     if(!node) return;
+    if(node.type === 'smart-minimax') return runMinimaxNode(node.id);
     const nextExtra = promptNodeSplitExtraHeight(node);
     const explicitH = Number(node.h);
     const currentH = Number.isFinite(explicitH) ? explicitH : 0;
@@ -1892,6 +1934,7 @@ function imageLayout(images, scale=1, node=null){
         return {cols:1, rows:1, ...smartGroupLayoutSize(node), thumb:96, single:true};
     }
     if(node?.type === 'smart-prompt') return {cols:1, rows:1, ...promptNodeLayoutSize(node), thumb:96, single:true};
+    if(node?.type === 'smart-minimax') return {cols:1, rows:1, ...smartMinimaxLayoutSize(node), thumb:96, single:true};
     if(node?.type === 'smart-loop'){
         const explicitW = Number(node.w);
         const explicitH = Number(node.h);
@@ -1966,6 +2009,12 @@ function fitSmartLoopNode(node){
     node.w = smartLoopWidth(node);
     node.h = smartLoopHeight(node);
 }
+function smartMinimaxLayoutSize(node){
+    const width = Math.max(860, Number(node?.w || 0) || 1040);
+    const height = Math.max(520, Number(node?.h || 0) || 640);
+    return {width, height};
+}
+
 function nodeRect(node){
     const layout = imageLayout(node.images || [], nodeScale(node), node);
     return {x:node.x || 0, y:node.y || 0, width:layout.width, height:layout.height};
@@ -2087,6 +2136,7 @@ function applyViewport(){
     shell.style.backgroundSize = '24px 24px';
     shell.style.backgroundPosition = '0 0';
     renderMinimap();
+    scheduleSmartImageResolutionSync(world, 120);
 }
 function screenToWorld(event){
     const rect = shell.getBoundingClientRect();
@@ -2094,13 +2144,6 @@ function screenToWorld(event){
         x:(event.clientX - rect.left - viewport.x) / viewport.scale,
         y:(event.clientY - rect.top - viewport.y) / viewport.scale
     };
-}
-function canvasWheelZoomFactor(event, pageSize){
-    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? pageSize : 1;
-    const isMac = /^Mac/.test(navigator.platform || '');
-    const sensitivity = 0.0008;
-    const macMultiplier = isMac ? 1.15 : 1;
-    return Math.exp(-event.deltaY * unit * sensitivity * macMultiplier);
 }
 function viewportCenter(){
     return {
@@ -2274,6 +2317,93 @@ function runningHubEntryLabel(entry, kind){
     if(kind === 'model') return entry?.title || entry?.name || id;
     return entry?.title || entry?.name || (kind === 'workflow' ? `Workflow ${id}` : `AI App ${id}`);
 }
+function smartMinimaxEngine(node){
+    return String(node?.minimaxEngine || '').trim().toLowerCase() === 'runninghub'
+        ? 'runninghub'
+        : SMART_MINIMAX_DEFAULT_ENGINE;
+}
+function smartMinimaxRunningHubEntry(node=null){
+    const entries = runningHubEntries('workflow');
+    const requestedId = String(node?.minimaxRunningHubWorkflowId || '').trim();
+    const titleKey = SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE.toLowerCase().replace(/\s+/g, '');
+    let entry = requestedId ? entries.find(item => runningHubEntryId(item, 'workflow') === requestedId) : null;
+    if(!entry) entry = entries.find(item => runningHubEntryId(item, 'workflow') === SMART_MINIMAX_RUNNINGHUB_WORKFLOW_ID);
+    if(!entry){
+        entry = entries.find(item => {
+            const title = String(runningHubEntryLabel(item, 'workflow') || '').toLowerCase().replace(/\s+/g, '');
+            return title === titleKey || (/minimax/.test(title) && /多参视频/.test(title));
+        });
+    }
+    if(entry && node) node.minimaxRunningHubWorkflowId = runningHubEntryId(entry, 'workflow');
+    return entry || null;
+}
+function smartMinimaxRunningHubFieldText(field){
+    return [
+        field?.nodeId,
+        field?.fieldName,
+        field?.label,
+        field?.group,
+        field?.note
+    ].map(value => String(value || '')).join(' ').toLowerCase();
+}
+function smartMinimaxRunningHubFieldMatches(field, patterns=[], fallbackKeys=[]){
+    const key = rhParamKey(field?.nodeId, field?.fieldName);
+    const text = smartMinimaxRunningHubFieldText(field);
+    return fallbackKeys.includes(key) || patterns.some(pattern => pattern.test(text));
+}
+function smartMinimaxRunningHubFullAspectField(field){
+    const key = rhParamKey(field?.nodeId, field?.fieldName);
+    const text = smartMinimaxRunningHubFieldText(field);
+    const defaultValue = rhDefaultValue(field);
+    return key === '115::aspect_ratio'
+        || /resolution\s*selector|size/.test(text)
+        || /\d+\s*:\s*\d+\s*\([^)]+\)/.test(defaultValue);
+}
+function smartMinimaxFullAspectLabel(ratio){
+    return ({
+        '16:9':'16:9 (Widescreen)',
+        '9:16':'9:16 (Portrait)',
+        '1:1':'1:1 (Square)',
+        '4:3':'4:3 (Standard)',
+        '3:4':'3:4 (Portrait)',
+        '21:9':'21:9 (Ultrawide)'
+    })[ratio] || ratio;
+}
+function smartMinimaxRunningHubValue(field, desired){
+    const wanted = String(desired ?? '').trim();
+    if(smartMinimaxRunningHubFullAspectField(field)) return wanted;
+    const options = rhExtractFieldOptions(field) || [];
+    if(options.length){
+        const exact = options.find(option => String(option).trim() === wanted);
+        if(exact !== undefined) return exact;
+        const normalized = wanted.toLowerCase().replace(/\s+/g, '');
+        const similar = options.find(option => String(option).toLowerCase().replace(/\s+/g, '') === normalized);
+        if(similar !== undefined) return similar;
+        const numericWanted = Number(wanted);
+        if(Number.isFinite(numericWanted)){
+            const numeric = options.find(option => Number(option) === numericWanted);
+            if(numeric !== undefined) return numeric;
+        }
+        return rhDefaultValue(field) || options[0] || wanted;
+    }
+    const kind = rhFieldKind(field);
+    if(['number','slider'].includes(kind) && wanted !== '' && Number.isFinite(Number(wanted))) return Number(wanted);
+    return desired;
+}
+function smartMinimaxRunningHubFieldsForConfig(fields){
+    return (fields || []).map(field => {
+        const kind = rhFieldKind(field);
+        return ['image','video','audio'].includes(kind) ? {...field, required:false} : {...field};
+    });
+}
+function smartMinimaxSetRunningHubParam(sourceSettings, fields, patterns, fallbackKeys, desired){
+    const field = (fields || []).find(item => smartMinimaxRunningHubFieldMatches(item, patterns, fallbackKeys));
+    if(!field || desired === undefined || desired === null) return null;
+    sourceSettings.rhParams[rhParamKey(field.nodeId, field.fieldName)] = {
+        value:smartMinimaxRunningHubValue(field, desired)
+    };
+    return field;
+}
 function runningHubEntryKey(kind, id){
     return `${kind}:${String(id || '').trim()}`;
 }
@@ -2326,8 +2456,10 @@ function rhUsableFields(fields){
 }
 function rhActiveFields(sourceSettings=settings){
     const ref = selectedRunningHubRef(sourceSettings);
-    let fields = rhEntryFields(ref?.entry);
-    if(ref?.kind === 'workflow'){
+    let fields = Array.isArray(sourceSettings?.rhFields) && sourceSettings.rhFields.length
+        ? sourceSettings.rhFields
+        : rhEntryFields(ref?.entry);
+    if(ref?.kind === 'workflow' && !(Array.isArray(sourceSettings?.rhFields) && sourceSettings.rhFields.length)){
         const cached = runningHubWorkflowCache[ref.id];
         if(Array.isArray(cached?.fields) && cached.fields.length) fields = cached.fields;
     }
@@ -2404,16 +2536,26 @@ function providerImageModels(providerId){
     if(providerId === 'volcengine') return volcengineProvider().image_models || [];
     return (apiProviders || []).find(p => p.id === providerId)?.image_models || [];
 }
+const JIMENG_UPSCALE_RESOLUTIONS = ['2k', '4k', '8k'];
+function isJimengProviderId(providerId){
+    const id = String(providerId || '').trim().toLowerCase();
+    const provider = (apiProviders || []).find(item => String(item.id || '').trim().toLowerCase() === id);
+    return id === 'jimeng' || String(provider?.protocol || '').trim().toLowerCase() === 'jimeng';
+}
+function jimengImageProviderId(){
+    const provider = imageProviders().find(item => isJimengProviderId(item.id));
+    return provider?.id || (isJimengProviderId(settings.provider_id) ? settings.provider_id : '');
+}
 // 即梦图生图（挂了参考图）不支持 3.0/3.1，此时从模型下拉里隐藏它们。
 const JIMENG_IMAGE2IMAGE_UNSUPPORTED = ['3.0', '3.1'];
 function jimengImageEditMode(){
-    if(settings.provider_id !== 'jimeng') return false;
+    if(!isJimengProviderId(settings.provider_id)) return false;
     const node = activeComposerNode() || selectedNode();
     const refs = node ? visibleReferenceImagesFor(node) : [];
     return refs.length > 0;
 }
 function filterJimengImageModels(models){
-    if(settings.provider_id !== 'jimeng' || !jimengImageEditMode()) return models;
+    if(!isJimengProviderId(settings.provider_id) || !jimengImageEditMode()) return models;
     return (models || []).filter(m => !JIMENG_IMAGE2IMAGE_UNSUPPORTED.includes(String(m)));
 }
 let _jimengLastEditMode = null;
@@ -2421,7 +2563,7 @@ let _jimengModelRefreshing = false;
 // 参考图增删导致即梦文生图/图生图切换时，重新渲染参数面板以更新模型下拉。
 function syncJimengModelPillForRefs(){
     if(_jimengModelRefreshing) return;
-    if(settings.provider_id !== 'jimeng' || settings.engine !== 'api' || settings.apiKind === 'video'){
+    if(!isJimengProviderId(settings.provider_id) || settings.engine !== 'api' || settings.apiKind === 'video'){
         _jimengLastEditMode = null;
         return;
     }
@@ -2436,21 +2578,22 @@ const JIMENG_SEEDANCE_VIDEO_MODELS = ['seedance2.0_vip', 'seedance2.0fast_vip', 
 const JIMENG_VIDEO_MODELS_BY_COMMAND = {
     text2video: JIMENG_SEEDANCE_VIDEO_MODELS,
     multimodal2video: JIMENG_SEEDANCE_VIDEO_MODELS,
-    image2video: ['seedance1.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
+    image2video: ['seedance1.0fast', 'seedance1.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
     frames2video: ['seedance1.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
 };
 function jimengVideoCommand(){
     const node = activeComposerNode() || selectedNode();
     const refs = node ? visibleReferenceImagesFor(node) : [];
-    const imageRefs = imageRefsOnly(refs);
-    const hasVideoRef = videoRefsOnly(refs).length > 0 || Boolean(manualSmartVideoLink(settings));
+    const effectiveRefs = applyUploadedUrlsToSmartRefs(refs, settings);
+    const imageRefs = imageRefsOnly(effectiveRefs);
+    const hasVideoRef = videoRefsOnly(effectiveRefs).length > 0;
     if(settings.videoMultimodal || hasVideoRef) return 'multimodal2video';
     if(imageRefs.length >= 2) return settings.videoUseFrameRoles ? 'frames2video' : 'multiframe2video';
     if(imageRefs.length >= 1) return 'image2video';
     return 'text2video';
 }
 function filterJimengVideoModels(models){
-    if(settings.videoProvider !== 'jimeng') return models;
+    if(!isJimengProviderId(settings.videoProvider)) return models;
     const allowed = JIMENG_VIDEO_MODELS_BY_COMMAND[jimengVideoCommand()];
     if(!allowed) return models; // multiframe2video 等：官方规格未知，不过滤
     return (models || []).filter(m => allowed.includes(String(m)));
@@ -2458,7 +2601,7 @@ function filterJimengVideoModels(models){
 let _jimengLastVideoCommand = null;
 function syncJimengVideoModelPillForRefs(){
     if(_jimengModelRefreshing) return;
-    if(settings.videoProvider !== 'jimeng' || settings.engine !== 'api' || settings.apiKind !== 'video'){
+    if(!isJimengProviderId(settings.videoProvider) || settings.engine !== 'api' || settings.apiKind !== 'video'){
         _jimengLastVideoCommand = null;
         return;
     }
@@ -2517,11 +2660,7 @@ function videoProviderById(providerId){
 function providerVideoModels(providerId){
     if(providerId === 'volcengine') return volcengineVideoModels();
     const provider = videoApiProviders().find(p => p.id === providerId);
-    // API 设置页与画布页各自维护一份前端状态；即梦 CLI 的模型集合是本地固定能力，
-    // 因此节点侧要把已拉取列表与当前 CLI 支持列表合并，避免旧缓存漏掉新模型。
-    const models = providerId === 'jimeng'
-        ? [...(provider?.video_models || []), ...JIMENG_SEEDANCE_VIDEO_MODELS]
-        : (provider?.video_models || DEFAULT_VIDEO_MODELS);
+    const models = provider?.video_models || DEFAULT_VIDEO_MODELS;
     return [...new Set(models)];
 }
 function volcengineVideoModels(){
@@ -2586,7 +2725,7 @@ function renderVideoAspectControl(){
     </div>`;
 }
 function renderVideoResolutionControl(){
-    const options = [['', tr('smart.videoResAuto')], ['720p','720P'], ['1080p','1080P'], ['4k','4K']];
+    const options = [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P']];
     const value = settings.videoResolution || '';
     const labelMap = Object.fromEntries(options);
     return `<div class="smart-control resolution-control">
@@ -2798,7 +2937,17 @@ function renderApiParams(){
         ${renderSizePickerControl('', true)}
         ${renderQualityControl()}
         ${renderCountVisualControl()}
+        ${isJimengProviderId(settings.provider_id) ? renderJimengUpscaleControl() : ''}
     `;
+}
+function renderJimengUpscaleControl(){
+    const current = JIMENG_UPSCALE_RESOLUTIONS.includes(settings.jimengUpscaleRes) ? settings.jimengUpscaleRes : '2k';
+    return `<div class="smart-control upscale-control jimeng-upscale-control">
+        <button class="smart-pill" type="button" title="${escapeAttr(tr('smart.jimengUpscale'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('smart.jimengUpscale'))} · ${escapeHtml(current.toUpperCase())}</span><i data-lucide="chevron-down" class="pill-caret"></i></button>
+        <div class="smart-popover compact-popover"><div class="smart-popover-title">${escapeHtml(tr('smart.upscaleTarget'))}</div>
+            <div class="model-list">${JIMENG_UPSCALE_RESOLUTIONS.map(value => `<button type="button" class="direct-option ${value === current ? 'active' : ''}" data-smart-param="jimengUpscaleRes" data-smart-value="${escapeHtml(value)}"><span>${escapeHtml(value.toUpperCase())}</span></button>`).join('')}</div>
+        </div>
+    </div>`;
 }
 function renderApiVideoParams(){
     const providers = videoApiProviders();
@@ -2818,7 +2967,7 @@ function renderApiVideoParams(){
         ${renderVideoToggleControl('videoWatermark', tr('smart.videoWatermark'))}
         ${renderVideoToggleControl('videoMultimodal', tr('smart.videoMultimodal'))}
         ${renderVideoToggleControl('videoUseFrameRoles', tr('smart.videoUseFrameRoles'))}
-        ${settings.videoProvider === 'jimeng' ? '' : renderVideoTrustedAssetControl()}
+        ${isJimengProviderId(settings.videoProvider) ? '' : renderVideoTrustedAssetControl()}
     `;
 }
 function renderVolcengineParams(){
@@ -3523,14 +3672,46 @@ function rhFieldIndexes(fields){
     });
     return map;
 }
-async function ensureRunningHubWorkflow(workflowId){
+async function ensureRunningHubWorkflow(workflowId, options={}){
     workflowId = String(workflowId || '').trim();
     if(!workflowId) return null;
     if(runningHubWorkflowCache[workflowId]) return runningHubWorkflowCache[workflowId];
     const res = await fetch(`/api/runninghub/workflows/${encodeURIComponent(workflowId)}`);
     if(!res.ok){
-        delete runningHubWorkflowCache[workflowId];
-        return null;
+        if(options.fetchRemote !== true) {
+            delete runningHubWorkflowCache[workflowId];
+            return null;
+        }
+        const entry = runningHubEntries('workflow').find(item => runningHubEntryId(item, 'workflow') === workflowId);
+        const remoteRes = await fetch('/api/runninghub/workflows/fetch', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                workflowId,
+                title:runningHubEntryLabel(entry, 'workflow') || workflowId,
+                description:entry?.note || ''
+            })
+        }).catch(() => null);
+        if(!remoteRes?.ok){
+            delete runningHubWorkflowCache[workflowId];
+            return null;
+        }
+        const remoteData = await remoteRes.json().catch(() => null);
+        const fetched = remoteData?.data;
+        if(!fetched || !Array.isArray(fetched.fields)){
+            delete runningHubWorkflowCache[workflowId];
+            return null;
+        }
+        runningHubWorkflowCache[workflowId] = {
+            workflowId,
+            title:fetched.title || runningHubEntryLabel(entry, 'workflow') || workflowId,
+            description:fetched.description || entry?.note || '',
+            fields:fetched.fields || [],
+            workflowJson:fetched.workflowJson || {},
+            optionalImageMode:entry?.optionalImageMode || 'prune-workflow',
+            raw:fetched.raw || {}
+        };
+        return runningHubWorkflowCache[workflowId];
     }
     const data = await res.json();
     runningHubWorkflowCache[workflowId] = data.workflow || null;
@@ -3539,6 +3720,15 @@ async function ensureRunningHubWorkflow(workflowId){
 async function currentRunningHubWorkflowConfig(sourceSettings=settings){
     const ref = selectedRunningHubRef(sourceSettings);
     if(ref?.kind !== 'workflow') return null;
+    if(Array.isArray(sourceSettings?.rhFields) && sourceSettings.rhFields.length){
+        return {
+            ...(ref.entry || {}),
+            workflowId:ref.id,
+            fields:sourceSettings.rhFields,
+            optionalImageMode:sourceSettings.rhOptionalImageMode || ref.entry?.optionalImageMode || 'prune-workflow',
+            workflowJson:rhWorkflowJsonFromSources(sourceSettings.rhWorkflowJson, ref.entry?.workflowJson, ref.entry?.raw?.workflowJson, ref.entry?.raw?.prompt)
+        };
+    }
     const cached = await ensureRunningHubWorkflow(ref.id).catch(() => null);
     return {
         ...(ref.entry || {}),
@@ -3749,27 +3939,58 @@ function rhPruneWorkflowForMissingFields(workflowJson, missingFields){
     });
     return workflow;
 }
+function rhApplyNodeInfoListToWorkflow(workflowJson, nodeInfoList){
+    if(!workflowJson || typeof workflowJson !== 'object' || !Object.keys(workflowJson).length) return null;
+    const workflow = JSON.parse(JSON.stringify(workflowJson));
+    (nodeInfoList || []).forEach(item => {
+        const node = workflow[String(item?.nodeId || '')];
+        if(!node?.inputs || typeof node.inputs !== 'object') return;
+        const fieldName = String(item?.fieldName || '');
+        if(!fieldName || !Object.prototype.hasOwnProperty.call(node.inputs, fieldName)) return;
+        node.inputs[fieldName] = item.fieldValue;
+    });
+    return workflow;
+}
+function rhLooksLikeComplexDefault(field){
+    const text = rhDefaultValue(field).trim();
+    if(!/^[{[]/.test(text)) return false;
+    try {
+        const parsed = JSON.parse(text);
+        return parsed && typeof parsed === 'object';
+    } catch(e) {
+        return false;
+    }
+}
 async function rhBuildWorkflowRequestExtras(media, nodeInfoList, sourceSettings=settings){
     const config = await currentRunningHubWorkflowConfig(sourceSettings);
-    if(!config || (config.optionalImageMode || 'prune-workflow') !== 'prune-workflow') return {};
+    if(!config) return {};
     const fields = rhActiveFields(sourceSettings);
+    if((config.optionalImageMode || 'prune-workflow') !== 'prune-workflow'){
+        const workflow = rhApplyNodeInfoListToWorkflow(config.workflowJson || {}, nodeInfoList);
+        return workflow ? {workflow} : {};
+    }
     const indexes = rhFieldIndexes(fields);
     const missingOptional = [];
     for(const field of fields){
-        if(rhFieldKind(field) !== 'image') continue;
+        const kind = rhFieldKind(field);
+        if(!['image','video','audio'].includes(kind)) continue;
         const key = rhParamKey(field.nodeId, field.fieldName);
         const idx = indexes[key] || 0;
-        const hasInput = Boolean(media.image?.[idx]?.url);
-        if(field.required === true && !hasInput) throw new Error(`RunningHub 工作流缺少必选图片：${rhRequiredLabel(field)}`);
+        const hasInput = Boolean(media[kind]?.[idx]?.url);
+        const kindLabel = kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频';
+        if(field.required === true && !hasInput) throw new Error(`RunningHub 工作流缺少必选${kindLabel}：${rhRequiredLabel(field)}`);
         if(field.required !== true && !hasInput) missingOptional.push(field);
     }
-    if(!missingOptional.length) return {};
+    if(!missingOptional.length){
+        const workflow = rhApplyNodeInfoListToWorkflow(config.workflowJson || {}, nodeInfoList);
+        return workflow ? {workflow} : {};
+    }
     missingOptional.forEach(field => {
         const key = rhParamKey(field.nodeId, field.fieldName);
         const idx = nodeInfoList.findIndex(item => rhParamKey(item.nodeId, item.fieldName) === key);
         if(idx >= 0) nodeInfoList.splice(idx, 1);
     });
-    const workflow = rhPruneWorkflowForMissingFields(config.workflowJson || {}, missingOptional);
+    const workflow = rhApplyNodeInfoListToWorkflow(rhPruneWorkflowForMissingFields(config.workflowJson || {}, missingOptional), nodeInfoList);
     return workflow ? {workflow} : {};
 }
 async function rhUploadValueIfNeeded(value, sourceSettings=settings){
@@ -3790,13 +4011,15 @@ async function rhBuildNodeInfoList(media, sourceSettings=settings, randomValues=
     const result = [];
     const indexes = rhFieldIndexes(fields);
     const mode = rhCurrentKind(sourceSettings);
+    const explicitParams = sourceSettings?.rhParams || {};
     for(const field of fields){
         const kind = rhFieldKind(field);
         const key = rhParamKey(field.nodeId, field.fieldName);
         if(mode === 'workflow' && field.sourceFromUpstream === false && !['image','video','audio'].includes(kind)) continue;
-        if(mode === 'workflow' && kind === 'image'){
+        if(mode === 'workflow' && !Object.prototype.hasOwnProperty.call(explicitParams, key) && rhLooksLikeComplexDefault(field) && !['image','video','audio'].includes(kind) && rhFieldRole(field) !== 'prompt') continue;
+        if(mode === 'workflow' && ['image','video','audio'].includes(kind)){
             const idx = indexes[key] || 0;
-            if(field.required !== true && !media.image?.[idx]?.url) continue;
+            if(field.required !== true && !media[kind]?.[idx]?.url) continue;
         }
         let value = rhParamValue(field, media, sourceSettings, fields, randomValues);
         if(rhFieldRole(field) === 'prompt' && !String(value || '').trim()) value = rhDefaultValue(field);
@@ -3886,7 +4109,7 @@ function smartComfyRandomValue(field){
 }
 function setDynamicSetting(key, value){
     const numericKeys = new Set(['count','width','height','videoDuration','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
-    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType']);
+    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','jimengUpscaleRes','rhConfigKey','rhPayment','rhInstanceType']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
     if(key === 'provider_id') settings.model = '';
     if(key === 'videoProvider') settings.videoModel = '';
@@ -5366,8 +5589,9 @@ function assetMediaKind(item){
     return 'image';
 }
 function assetNodeImageFromItem(item, fallbackName='asset'){
+    const url = item?.url || item?.local_url || item?.source_url || item?.sourceUrl || item?.preview || item?.thumbnail || item?.thumb || '';
     const image = {
-        url:item?.url || '',
+        url,
         name:item?.name || fallbackName,
         kind:item?.kind || assetMediaKind(item)
     };
@@ -5635,8 +5859,19 @@ function bindAssetItemEvents(){
             hideAssetHoverPreview();
             e.dataTransfer.effectAllowed = 'copy';
             const item = (activeAssetCategory()?.items || []).find(x => x.id === el.dataset.assetId);
-            e.dataTransfer.setData('application/x-smart-asset', JSON.stringify(assetNodeImageFromItem(item || {url:el.dataset.url, name:el.dataset.name, kind:el.dataset.kind})));
-            e.dataTransfer.setData('text/plain', el.dataset.url || '');
+            const asset = assetNodeImageFromItem(item || {url:el.dataset.url, name:el.dataset.name, kind:el.dataset.kind});
+            e.dataTransfer.setData('application/x-smart-asset', JSON.stringify(asset));
+            e.dataTransfer.setData('text/plain', asset.url || el.dataset.url || '');
+        });
+        el.addEventListener('dblclick', e => {
+            const node = selectedNode();
+            if(node?.type !== 'smart-minimax') return;
+            e.preventDefault();
+            e.stopPropagation();
+            hideAssetHoverPreview();
+            const item = (activeAssetCategory()?.items || []).find(x => x.id === el.dataset.assetId);
+            const asset = assetNodeImageFromItem(item || {url:el.dataset.url, name:el.dataset.name, kind:el.dataset.kind});
+            addAssetToSelectedMinimaxRefs(asset);
         });
     });
     assetGrid.querySelectorAll('[data-rename-asset]').forEach(btn => {
@@ -5811,6 +6046,7 @@ async function loadCanvas(){
         migrateSmartGroupImageMembers();
         canvas.connections = Array.isArray(canvas.connections) ? canvas.connections : [];
         nodes.forEach(n => {
+            if(n.type === 'smart-minimax') n.timelinePlaying = false;
             const pendingTasks = smartPendingTasks(n);
             if(pendingTasks.length){
                 n.pending = Math.max(pendingTasks.length, Number(n.pending || 0) || pendingTasks.length);
@@ -5961,6 +6197,45 @@ function createLoopNode(x, y, options={}){
     scheduleSave();
     return node;
 }
+function createMinimaxNode(x, y, options={}){
+    if(!options.skipUndo) pushUndo();
+    const duration = 8;
+    const node = {
+        id:uid('minimax'),
+        type:'smart-minimax',
+        x,
+        y,
+        w:1040,
+        h:640,
+        title:'MiniMax H3',
+        workflow:'MiniMax_H3.json',
+        minimaxEngine:SMART_MINIMAX_DEFAULT_ENGINE,
+        minimaxRunningHubWorkflowId:'',
+        duration,
+        aspectRatio:'16:9 (Widescreen)',
+        megapixels:0.4,
+        promptDraftText:'',
+        refs:{image:[], video:[], audio:[]},
+        materials:[],
+        segments:[{id:uid('seg'), start:0, duration, prompt:'', refs:{image:[], video:[], audio:[]}, refItems:[], trimIn:0, trimOut:duration, result:null, results:[]}],
+        selectedSegmentId:'',
+        playhead:0,
+        timelineZoom:1,
+        minimaxPreviewH:190,
+        minimaxVideoTrackH:70,
+        minimaxRefLaneH:42,
+        minimaxMuted:false,
+        timelinePlaying:false,
+        running:false,
+        created_at:Date.now()
+    };
+    smartMinimaxEnsureSegment(node);
+    nodes.push(node);
+    if(options.select !== false) selectedId = node.id;
+    render();
+    scheduleSave();
+    return node;
+}
 function createSmartGroupNode(x, y, options={}){
     if(!options.skipUndo) pushUndo();
     const node = {id:uid('group'), type:'smart-group', x, y, w:SMART_GROUP_DEFAULT_WIDTH, h:SMART_GROUP_DEFAULT_HEIGHT, title:'智能分组', items:[], created_at:Date.now()};
@@ -5979,6 +6254,8 @@ function cloneSmartNode(node, dx=0, dy=0){
             ? 'loop'
             : node.type === 'smart-group'
             ? 'group'
+            : node.type === 'smart-minimax'
+            ? 'minimax'
             : 'smart'
     );
     copy.x = (Number(node.x) || 0) + dx;
@@ -6522,7 +6799,7 @@ function singleMediaHtml(img, w, h){
     return smartPreviewImgHtml(img, 768, `class="node-img" draggable="false" style="width:${w}px;height:${h}px"`);
 }
 function smartNodeHasLiveMedia(node){
-    return Boolean(!node?.pending && (node?.images || []).some(img => img?.url));
+    return Boolean(node?.type === 'smart-minimax' || (!node?.pending && (node?.images || []).some(img => img?.url)));
 }
 function mediaSignaturePartFromElement(itemEl){
     if(itemEl?.dataset?.mediaSignature) return itemEl.dataset.mediaSignature;
@@ -6565,6 +6842,11 @@ function restoreMediaPlaybackState(media, state){
     else media.addEventListener('loadedmetadata', applyTime, {once:true});
 }
 function transplantSmartMediaElements(oldNodeEl, newNodeEl){
+    const oldStage = oldNodeEl?.querySelector?.('[data-minimax-player-stage]');
+    const newStage = newNodeEl?.querySelector?.('[data-minimax-player-stage]');
+    if(oldStage && newStage && oldStage.dataset.minimaxPlayerSegment === newStage.dataset.minimaxPlayerSegment && oldStage.dataset.minimaxPlayerUrl === newStage.dataset.minimaxPlayerUrl){
+        newStage.replaceWith(oldStage);
+    }
     const oldItems = [...(oldNodeEl?.querySelectorAll?.('.thumb-item,.image-wrap') || [])];
     const newItems = [...(newNodeEl?.querySelectorAll?.('.thumb-item,.image-wrap') || [])];
     oldItems.forEach((oldItem, index) => {
@@ -6615,6 +6897,7 @@ function restoreMediaPlaybackStates(states){
 }
 function smartRunTaskLabel(run){
     const s = run?.settings || {};
+    if(s.engine === 'runninghub') return s.rhTaskLabel || s.rhWorkflowTitle || s.rhAppTitle || s.rhWorkflowId || s.rhAppId || 'RunningHub';
     if(run?.kind === 'video') return s.videoModel || 'Video';
     if(s.engine === 'comfy'){
         if(s.comfyMode === 'custom') return s.comfyWorkflow || 'ComfyUI';
@@ -6763,6 +7046,7 @@ function downloadSmartGroupImages(group){
 function smartRunPlatformLabel(run){
     const s = run?.settings || {};
     if(s.engine === 'comfy') return 'ComfyUI';
+    if(s.engine === 'runninghub') return 'RunningHub';
     if(s.engine === 'modelscope') return 'Modelscope';
     if(run?.kind === 'video') return videoProviderById(s.videoProvider || '')?.name || s.videoProvider || 'Video';
     return apiProviderById(s.provider_id || '')?.name || s.provider_id || 'API';
@@ -6770,6 +7054,16 @@ function smartRunPlatformLabel(run){
 function smartRunRequestMeta(run){
     const s = run?.settings || {};
     if(s.engine === 'comfy') return {workflow_json:s.comfyWorkflow || '', mode:s.comfyMode || 'text'};
+    if(s.engine === 'runninghub') return {
+        workflow_id:s.rhWorkflowId || '',
+        webapp_id:s.rhAppId || '',
+        task_id:s.rhTaskId || '',
+        mode:s.rhMode || 'workflow',
+        duration:s.duration || '',
+        aspect_ratio:s.aspectRatio || '',
+        megapixels:s.megapixels || '',
+        refs:s.refCount || 0
+    };
     if(s.engine === 'modelscope') return {backend:'Modelscope', model:s.msgenModel || '', custom_model:s.msCustomModel || ''};
     if(run?.kind === 'video') return {provider_id:s.videoProvider || '', model:s.videoModel || '', duration:s.videoDuration || '', aspect_ratio:s.videoAspect || '', resolution:s.videoResolution || ''};
     return {provider_id:s.provider_id || '', model:s.model || '', size:run?.size || '', quality:s.quality || '', n:s.count || 1};
@@ -6899,46 +7193,6 @@ function openSmartLogLightbox(url, kind='image'){
 function smartLogPreviewNode(url, kind='image'){
     openSmartLogLightbox(url, kind);
 }
-async function deleteCanvasLogEntry(logId, deleteMedia=false){
-    if(!canvas || !canvasId || !logId) return;
-    const confirmText = deleteMedia ? tr('canvas.deleteLogMediaConfirm') : tr('canvas.deleteLogConfirm');
-    if(!confirm(confirmText)) return;
-    try {
-        if(saveTimer){
-            clearTimeout(saveTimer);
-            saveTimer = null;
-            await saveCanvas();
-        }
-        const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}/logs/delete`, {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                log_id:logId,
-                delete_unreferenced_media:deleteMedia,
-                reset_referencing_nodes:deleteMedia,
-                base_updated_at:Number(canvas.updated_at || 0)
-            })
-        });
-        const data = await res.json().catch(() => ({}));
-        if(!res.ok) throw new Error(data.detail || tr('canvas.logDeleteFailed'));
-        canvas.logs = data.canvas?.logs || (canvas.logs || []).filter(item => item.id !== logId);
-        if(data.canvas?.nodes){
-            canvas.nodes = data.canvas.nodes;
-            canvas.connections = data.canvas.connections || [];
-            nodes = canvas.nodes;
-            render();
-        }
-        canvas.updated_at = Number(data.canvas?.updated_at || canvas.updated_at || Date.now());
-        renderSmartCanvasLog();
-        const notes = [tr('canvas.logDeleted')];
-        if(data.removed_files?.length) notes.push(tr('canvas.logMediaRemoved').replace('{n}', data.removed_files.length));
-        if(data.reset_node_ids?.length) notes.push(tr('canvas.logNodesReset').replace('{n}', data.reset_node_ids.length));
-        if(data.skipped_referenced?.length) notes.push(tr('canvas.logMediaReferenced').replace('{n}', data.skipped_referenced.length));
-        toast(notes.join(' · '));
-    } catch(err) {
-        toast(err?.message || tr('canvas.logDeleteFailed'));
-    }
-}
 function renderSmartCanvasLog(){
     const logs = canvas?.logs || [];
     smartLogList.innerHTML = logs.length ? logs.map(log => {
@@ -6962,7 +7216,7 @@ function renderSmartCanvasLog(){
             taskId ? `ID ${taskId}` : '',
             backend
         ].filter(Boolean);
-        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}" data-canvas-log-id="${escapeAttr(log.id || '')}">
+        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}">
             <div class="log-main">
                 <div class="log-meta">
                     <span class="log-chip ${log.status === 'failed' ? 'status-failed' : 'status-ok'}">${escapeHtml(log.status === 'failed' ? tr('canvas.failed') : tr('canvas.success'))}</span>
@@ -6973,10 +7227,6 @@ function renderSmartCanvasLog(){
                 <div class="log-subline">${subParts.map(part => `<span title="${escapeAttr(part)}">${escapeHtml(part)}</span>`).join('')}</div>
                 ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
                 <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
-                <div class="log-actions">
-                    <button type="button" data-log-delete="record"><i data-lucide="list-x"></i><span>${escapeHtml(tr('canvas.deleteLog'))}</span></button>
-                    <button type="button" class="danger" data-log-delete="media"><i data-lucide="trash-2"></i><span>${escapeHtml(tr('canvas.deleteLogAndMedia'))}</span></button>
-                </div>
             </div>
             <div class="log-thumbs">${thumbs}</div>
         </div>`;
@@ -7006,13 +7256,6 @@ function renderSmartCanvasLog(){
     };
     bindLogCopy('[data-prompt]', 'prompt');
     bindLogCopy('[data-error]', 'error');
-    smartLogList.querySelectorAll('[data-log-delete]').forEach(button => {
-        button.onclick = e => {
-            e.stopPropagation();
-            const logId = button.closest('[data-canvas-log-id]')?.dataset.canvasLogId || '';
-            deleteCanvasLogEntry(logId, button.dataset.logDelete === 'media');
-        };
-    });
     refreshIcons();
 }
 function openSmartCanvasLog(){
@@ -7112,6 +7355,475 @@ function smartLoopTokenLabel(token){
 function smartLoopTokenChipHtml(token){
     return `<span class="loop-smart-token-chip" contenteditable="false" data-token="${escapeHtml(token)}"><span>${escapeHtml(smartLoopTokenLabel(token))}</span><button type="button" aria-label="${escapeHtml(tr('common.delete'))}" title="${escapeHtml(tr('common.delete'))}">×</button></span>`;
 }
+function smartMinimaxEnsureSegment(node){
+    if(!node || node.type !== 'smart-minimax') return null;
+    node.minimaxEngine = smartMinimaxEngine(node);
+    node.refs = node.refs && typeof node.refs === 'object' ? node.refs : {image:[], video:[], audio:[]};
+    ['image','video','audio'].forEach(kind => { if(!Array.isArray(node.refs[kind])) node.refs[kind] = []; });
+    node.materials = Array.isArray(node.materials) ? node.materials : [];
+    node.segments = Array.isArray(node.segments) ? node.segments : [];
+    if(!node.segments.length){
+        node.segments.push({id:uid('seg'), start:0, duration:Number(node.duration || 8) || 8, prompt:'', refs:{image:[], video:[], audio:[]}, trimIn:0, trimOut:Number(node.duration || 8) || 8, result:null, results:[]});
+    }
+    node.segments.forEach((seg, index) => {
+        if(!seg.id) seg.id = uid('seg');
+        seg.start = Math.max(0, Number(seg.start) || 0);
+        seg.duration = Math.max(0.5, Number(seg.duration || node.duration || 8) || 8);
+        seg.prompt = String(seg.prompt || '');
+        seg.aspectRatio = seg.aspectRatio || node.aspectRatio || '16:9 (Widescreen)';
+        seg.megapixels = Math.max(0.1, Math.min(2, Number(seg.megapixels || node.megapixels || 0.4) || 0.4));
+        seg.refs = seg.refs && typeof seg.refs === 'object' ? seg.refs : {image:[], video:[], audio:[]};
+        ['image','video','audio'].forEach(kind => { if(!Array.isArray(seg.refs[kind])) seg.refs[kind] = []; });
+        const migratedRefs = ['image','video','audio']
+            .flatMap(kind => (seg.refs[kind] || []).map(ref => ({...ref, kind})))
+            .filter(ref => ref?.url);
+        seg.refItems = uniqueReferenceImages([...(Array.isArray(seg.refItems) ? seg.refItems : []), ...migratedRefs])
+            .filter(ref => ref?.url && ['image','video','audio'].includes(mediaKindForItem(ref)))
+            .map(ref => ({...ref, kind:mediaKindForItem(ref)}))
+            .slice(0, SMART_MINIMAX_REF_IMAGE_MAX + SMART_MINIMAX_REF_VIDEO_MAX + SMART_MINIMAX_REF_AUDIO_MAX);
+        seg.results = Array.isArray(seg.results) ? seg.results : [];
+        seg.result = seg.result && seg.result.url ? seg.result : (seg.results.find(item => item?.url) || null);
+        seg.trimIn = Math.max(0, Math.min(Number(seg.trimIn) || 0, Math.max(0, seg.duration - 0.1)));
+        seg.trimOut = Math.max(seg.trimIn + 0.1, Number(seg.trimOut || seg.duration) || seg.duration);
+        seg.trimOut = Math.min(seg.duration, seg.trimOut);
+        if(index > 0){
+            const prev = node.segments[index - 1];
+            seg.start = Math.max(seg.start, Number(prev.start || 0) + Number(prev.duration || 0));
+        }
+    });
+    if(!node.selectedSegmentId || !node.segments.some(seg => seg.id === node.selectedSegmentId)) node.selectedSegmentId = node.segments[0].id;
+    node.duration = Math.max(0.5, Number(node.duration || Math.max(...node.segments.map(seg => seg.start + seg.duration))) || 8);
+    return node.segments.find(seg => seg.id === node.selectedSegmentId) || node.segments[0];
+}
+function smartMinimaxSelectedSegment(node){
+    return smartMinimaxEnsureSegment(node);
+}
+function smartMinimaxMaxForKind(kind){
+    if(kind === 'image') return SMART_MINIMAX_REF_IMAGE_MAX;
+    if(kind === 'video') return SMART_MINIMAX_REF_VIDEO_MAX;
+    return SMART_MINIMAX_REF_AUDIO_MAX;
+}
+function smartMinimaxLabelForKind(kind){
+    if(kind === 'image') return 'Image';
+    if(kind === 'video') return 'Video';
+    return 'Audio';
+}
+function smartMinimaxIconForKind(kind){
+    if(kind === 'image') return 'image';
+    if(kind === 'video') return 'film';
+    return 'file-audio';
+}
+function smartMinimaxRefsForKind(node, kind){
+    const selected = smartMinimaxSelectedSegment(node);
+    const clipRefs = (selected?.refItems || []).filter(ref => ref?.url);
+    const local = clipRefs.filter(ref => mediaKindForItem(ref) === kind);
+    const nodeRefs = node?.refs?.[kind] || [];
+    const upstream = inputImagesFor(node).filter(ref => ref?.url && mediaKindForItem(ref) === kind);
+    // Explicit clip refs own the request. Global/upstream refs are only a migration fallback
+    // for older MiniMax nodes that did not store references per timeline segment.
+    const refs = clipRefs.length ? local : (nodeRefs.length ? nodeRefs : upstream);
+    return uniqueReferenceImages(refs).filter(ref => ref?.url && mediaKindForItem(ref) === kind).slice(0, smartMinimaxMaxForKind(kind));
+}
+function smartMinimaxAllRefs(node){
+    return ['image','video','audio'].flatMap(kind => smartMinimaxRefsForKind(node, kind));
+}
+function smartMinimaxAddSegmentRefs(node, seg, refs){
+    if(!node || node.type !== 'smart-minimax' || !seg) return false;
+    smartMinimaxEnsureSegment(node);
+    seg.refs = seg.refs && typeof seg.refs === 'object' ? seg.refs : {image:[], video:[], audio:[]};
+    ['image','video','audio'].forEach(kind => { if(!Array.isArray(seg.refs[kind])) seg.refs[kind] = []; });
+    seg.refItems = Array.isArray(seg.refItems) ? seg.refItems : [];
+    let changed = false;
+    (refs || []).forEach(ref => {
+        const kind = mediaKindForItem(ref);
+        if(!['image','video','audio'].includes(kind)) return;
+        const currentKindCount = seg.refItems.filter(item => mediaKindForItem(item) === kind).length;
+        if(currentKindCount >= smartMinimaxMaxForKind(kind)) return;
+        if(seg.refItems.some(item => item?.url === ref.url)) return;
+        const item = {...ref, kind};
+        seg.refItems.push(item);
+        const list = seg.refs[kind] || [];
+        if(list.length < smartMinimaxMaxForKind(kind) && !list.some(existing => existing?.url === ref.url)) list.push(item);
+        seg.refs[kind] = list;
+        changed = true;
+    });
+    return changed;
+}
+function smartMinimaxAddRefs(node, refs){
+    return smartMinimaxAddSegmentRefs(node, smartMinimaxSelectedSegment(node), refs);
+}
+function smartMinimaxAddLibraryRefs(node, refs){
+    if(!node || node.type !== 'smart-minimax') return false;
+    node.refs = node.refs && typeof node.refs === 'object' ? node.refs : {image:[], video:[], audio:[]};
+    ['image','video','audio'].forEach(kind => { if(!Array.isArray(node.refs[kind])) node.refs[kind] = []; });
+    let changed = false;
+    (refs || []).forEach(ref => {
+        const kind = mediaKindForItem(ref);
+        if(!['image','video','audio'].includes(kind)) return;
+        const max = smartMinimaxMaxForKind(kind);
+        const list = node.refs[kind] || [];
+        if(list.length >= max) return;
+        if(list.some(item => item?.url === ref.url)) return;
+        list.push({...ref, kind});
+        node.refs[kind] = list;
+        changed = true;
+    });
+    return changed;
+}
+function smartMinimaxDetachSourceRefs(node, sourceId){
+    if(!node || node.type !== 'smart-minimax' || !sourceId) return false;
+    let changed = false;
+    const keep = ref => {
+        const remove = ref?.nodeId === sourceId;
+        if(remove) changed = true;
+        return !remove;
+    };
+    smartMinimaxEnsureSegment(node);
+    (node.segments || []).forEach(seg => {
+        seg.refItems = (seg.refItems || []).filter(keep);
+        ['image','video','audio'].forEach(kind => {
+            if(Array.isArray(seg.refs?.[kind])) seg.refs[kind] = seg.refs[kind].filter(keep);
+        });
+    });
+    ['image','video','audio'].forEach(kind => {
+        if(Array.isArray(node.refs?.[kind])) node.refs[kind] = node.refs[kind].filter(keep);
+    });
+    if(Array.isArray(node.assetRefs)) node.assetRefs = node.assetRefs.filter(keep);
+    return changed;
+}
+function addAssetToSelectedMinimaxRefs(item){
+    const node = selectedNode();
+    if(!node || node.type !== 'smart-minimax' || !item?.url) return false;
+    const seg = smartMinimaxSelectedSegment(node);
+    if(!seg) return false;
+    pushUndo();
+    const added = smartMinimaxAddSegmentRefs(node, seg, [item]);
+    selectedId = node.id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    render();
+    scheduleSave();
+    toast(added ? '已加入当前 MiniMax 片段参考' : '这个素材已经在当前片段参考里');
+    return true;
+}
+function smartMinimaxTimelineTotal(node){
+    smartMinimaxEnsureSegment(node);
+    return Math.max(Number(node?.duration || 0), ...(node?.segments || []).map(seg => Number(seg.start || 0) + Number(seg.duration || 0)), 1);
+}
+function smartMinimaxCompactSegments(node){
+    if(!node?.segments?.length) return;
+    node.segments.sort((a, b) => Number(a.start || 0) - Number(b.start || 0));
+    let cursor = 0;
+    node.segments.forEach(seg => {
+        seg.start = cursor;
+        cursor += Math.max(0.5, Number(seg.duration || 1));
+    });
+    node.duration = Math.max(1, cursor);
+    node.playhead = Math.min(Number(node.playhead || 0), node.duration);
+}
+function smartMinimaxLightMediaHtml(item, label = 'Reference'){
+    const kind = mediaKindForItem(item);
+    if(kind === 'image' && item?.url) return smartPreviewImgHtml(item, 512, 'draggable="false"');
+    if(kind === 'video' && item?.url) return `<div class="minimax-light-media has-thumb is-video">${smartVideoPreviewHtml(item, 512, 'draggable="false" alt=""')}<span>${escapeHtml(item.name || label)}</span></div>`;
+    const icon = kind === 'audio' ? 'file-audio' : kind === 'video' ? 'film' : 'sparkles';
+    const title = item?.name || label;
+    return `<div class="minimax-light-media ${kind ? `is-${kind}` : ''}"><i data-lucide="${icon}"></i><span>${escapeHtml(title)}</span></div>`;
+}
+function smartMinimaxPlayerHtml(seg){
+    const result = seg?.result?.url ? seg.result : null;
+    if(!result) return `<div class="minimax-player-empty"><i data-lucide="clapperboard"></i><span>Current segment</span></div>`;
+    if(isVideoMediaItem(result)) return smartMinimaxVideoPlayerHtml(result.url);
+    if(isAudioMediaItem(result)) return `<div class="minimax-player-audio"><i data-lucide="file-audio"></i><span>${escapeHtml(result.name || 'Audio asset')}</span></div><audio src="${escapeHtml(displayMediaUrl(result))}" data-minimax-player="1" controls preload="metadata"></audio>`;
+    return `<div class="minimax-player-image">${smartPreviewImgHtml(result, 1024, 'draggable="false"')}</div>`;
+}
+function smartMinimaxPlayerStageHtml(seg){
+    return `<div class="minimax-player-content" data-minimax-player-content="1">${smartMinimaxPlayerHtml(seg)}</div>`;
+}
+function smartMinimaxActiveSegmentAt(node, time){
+    return (node?.segments || []).find(seg => time >= Number(seg.start || 0) && time <= Number(seg.start || 0) + Number(seg.duration || 0)) || smartMinimaxSelectedSegment(node);
+}
+function smartMinimaxSegmentFromDropTarget(node, target, event){
+    const explicitId = target?.dataset?.minimaxDropSegment || '';
+    if(explicitId) return node.segments.find(item => item.id === explicitId) || smartMinimaxSelectedSegment(node);
+    const track = target?.closest?.('[data-minimax-scrub-track]') || target;
+    const ruler = track?.querySelector?.('.minimax-ruler') || track;
+    const content = ruler?.querySelector?.('.minimax-track-content') || ruler;
+    const rect = ruler?.getBoundingClientRect?.();
+    if(rect && event){
+        const x = (event.clientX - rect.left) + Number(ruler.scrollLeft || 0);
+        const width = Number(content?.scrollWidth || ruler.scrollWidth || rect.width || 1);
+        const ratio = Math.max(0, Math.min(1, x / Math.max(1, width)));
+        const time = ratio * smartMinimaxTimelineTotal(node);
+        return smartMinimaxActiveSegmentAt(node, time);
+    }
+    return smartMinimaxSelectedSegment(node);
+}
+function smartMinimaxSyncPlayerDom(el, seg, time, shouldPlay=false){
+    const stage = el.querySelector('[data-minimax-player-stage]');
+    if(!stage || !seg) return null;
+    const nextId = seg.id || '';
+    const nextUrl = seg.result?.url || '';
+    if(stage.dataset.minimaxPlayerSegment !== nextId || stage.dataset.minimaxPlayerUrl !== nextUrl){
+        stage.dataset.minimaxPlayerSegment = nextId;
+        stage.dataset.minimaxPlayerUrl = nextUrl;
+        let content = stage.querySelector('[data-minimax-player-content]');
+        if(!content){
+            const resizeHandle = stage.querySelector('[data-minimax-pane-resize="preview"]');
+            content = document.createElement('div');
+            content.className = 'minimax-player-content';
+            content.dataset.minimaxPlayerContent = '1';
+            [...stage.childNodes].forEach(child => {
+                if(child !== resizeHandle) content.appendChild(child);
+            });
+            stage.insertBefore(content, resizeHandle || null);
+        }
+        content.innerHTML = smartMinimaxPlayerHtml(seg);
+        if(window.lucide) lucide.createIcons({attrs:{'stroke-width':2}});
+    }
+    const media = stage.querySelector('[data-minimax-player]');
+    if(media){
+        const owner = nodes.find(item => item.id === el.dataset.id && item.type === 'smart-minimax');
+        media.muted = Boolean(owner?.minimaxMuted);
+        if(Number.isFinite(Number(owner?.minimaxVolume))) media.volume = Math.max(0, Math.min(1, Number(owner.minimaxVolume)));
+        const rel = Math.max(0, Number(time || 0) - Number(seg.start || 0));
+        const trimIn = Math.max(0, Number(seg.trimIn || 0));
+        const trimOut = Math.max(trimIn + 0.1, Number(seg.trimOut || seg.duration || rel));
+        const target = Math.max(trimIn, Math.min(trimOut, rel));
+        const seekThreshold = shouldPlay && !media.paused ? 0.35 : 0.05;
+        if(Number.isFinite(target) && Math.abs((media.currentTime || 0) - target) > seekThreshold){
+            try { media.currentTime = target; } catch {}
+        }
+        if(shouldPlay && media.paused) media.play?.().catch(() => {});
+        if(!shouldPlay && !media.paused) media.pause?.();
+    }
+    return media;
+}
+function smartMinimaxApplyTimelineTime(el, node, time, options={}){
+    const safeTime = smartMinimaxSetPlayheadDom(el, node, time);
+    const hit = smartMinimaxActiveSegmentAt(node, safeTime);
+    const changed = Boolean(hit?.id && hit.id !== node.selectedSegmentId);
+    if(changed){
+        node.selectedSegmentId = hit.id;
+        smartMinimaxSetActiveSegmentDom(el, node, hit);
+        smartMinimaxSyncFormDom(el, hit);
+        smartMinimaxSyncActionDom(el, hit);
+    }
+    if(hit && (options.syncPlayer || changed)) smartMinimaxSyncPlayerDom(el, hit, safeTime, Boolean(options.play));
+    return {time:safeTime, seg:hit, changed};
+}
+function smartMinimaxSetPlayheadDom(el, node, time){
+    const total = smartMinimaxTimelineTotal(node);
+    const safeTime = Math.max(0, Math.min(total, Number(time) || 0));
+    node.playhead = safeTime;
+    const pct = total > 0 ? (safeTime / total) * 100 : 0;
+    el.querySelectorAll('[data-minimax-playhead]').forEach(head => { head.style.left = `${pct}%`; });
+    const label = el.querySelector('[data-minimax-time-label]');
+    if(label){
+        const fmt = value => {
+            const n = Number(value) || 0;
+            return `${n.toFixed(n % 1 ? 1 : 0)}s`;
+        };
+        label.textContent = `${fmt(safeTime)} / ${fmt(total)}`;
+    }
+    return safeTime;
+}
+function smartMinimaxSyncFormDom(el, seg){
+    if(!seg) return;
+    const prompt = el.querySelector('[data-minimax-prompt]');
+    if(prompt && document.activeElement !== prompt) prompt.value = String(seg.prompt || '');
+    el.querySelectorAll('[data-minimax-seg-number]').forEach(input => {
+        if(document.activeElement === input) return;
+        const key = input.dataset.minimaxSegNumber;
+        if(key === 'duration') input.value = Math.max(0.5, Number(seg.duration || 0.5));
+        if(key === 'megapixels') input.value = Math.max(0.1, Number(seg.megapixels || 0.4));
+    });
+    el.querySelectorAll('[data-minimax-select]').forEach(select => {
+        if(document.activeElement === select) return;
+        const key = select.dataset.minimaxSelect;
+        if(key && seg[key]) select.value = seg[key];
+    });
+}
+function smartMinimaxSyncActionDom(el, seg){
+    const hasResult = Boolean(seg?.result?.url);
+    el.querySelectorAll('[data-minimax-export-selected], [data-minimax-result-delete]').forEach(btn => {
+        btn.disabled = !hasResult;
+    });
+    el.querySelectorAll('[data-minimax-play-timeline]').forEach(btn => { btn.disabled = false; });
+}
+function smartMinimaxSetActiveSegmentDom(el, node, seg){
+    if(!seg) return;
+    el.querySelectorAll('[data-minimax-segment], .minimax-ref-clip').forEach(item => {
+        item.classList.toggle('active', item.dataset.minimaxSegment === seg.id);
+    });
+    el.querySelectorAll('[data-minimax-ref-track]').forEach(track => {
+        track.dataset.minimaxActiveSegment = seg.id;
+    });
+}
+function smartMinimaxSetSegmentResult(node, seg, item){
+    if(!node || !seg || !item?.url) return false;
+    const kind = mediaKindForItem(item) || item.kind || 'video';
+    const result = {...item, kind, name:item.name || downloadNameForMediaItem(item, 'minimax')};
+    seg.result = result;
+    seg.results = Array.isArray(seg.results) ? seg.results : [];
+    if(!seg.results.some(existing => existing?.url === result.url)) seg.results.unshift(result);
+    node.materials = Array.isArray(node.materials) ? node.materials : [];
+    if(!node.materials.some(existing => existing?.url === result.url)) node.materials.unshift({...result, segmentId:seg.id, created_at:Date.now()});
+    return true;
+}
+function smartMinimaxMaterialFromDrag(node, dataTransfer){
+    const raw = readSmartDropData(dataTransfer, 'application/x-minimax-material');
+    if(raw){
+        try {
+            const data = JSON.parse(raw);
+            const source = nodes.find(n => n.id === data.nodeId && n.type === 'smart-minimax');
+            const item = source?.materials?.[Number(data.index)];
+            if(item?.url) return item;
+        } catch {}
+    }
+    const assetRaw = readSmartDropData(dataTransfer, 'application/x-smart-asset');
+    if(assetRaw){
+        try {
+            const asset = JSON.parse(assetRaw);
+            if(asset?.url) return assetNodeImageFromItem(asset);
+        } catch {}
+    }
+    const url = smartDropTextCandidates(dataTransfer).find(isRemoteSmartImageDropValue) || '';
+    return url ? {url, kind:mediaKindForUrls([url], 'video'), name:fileNameFromUrl(url) || 'material.mp4'} : null;
+}
+function smartMinimaxAssetFromDrag(node, dataTransfer){
+    const raw = readSmartDropData(dataTransfer, 'application/x-minimax-asset');
+    if(!raw) return null;
+    try {
+        const data = JSON.parse(raw);
+        const source = nodes.find(n => n.id === data.nodeId && n.type === 'smart-minimax');
+        const item = source?.assetRefs?.[Number(data.index)];
+        if(item?.url) return item;
+    } catch {}
+    return null;
+}
+function smartMinimaxRefFromDrag(dataTransfer){
+    const raw = readSmartDropData(dataTransfer, 'application/x-minimax-ref');
+    if(!raw) return null;
+    try {
+        const data = JSON.parse(raw);
+        const source = nodes.find(n => n.id === data.nodeId && n.type === 'smart-minimax');
+        const seg = source?.segments?.find(item => item.id === data.segmentId);
+        const index = Number(data.index);
+        const item = seg?.refItems?.[index];
+        const kind = mediaKindForItem(item);
+        if(item?.url) return {...item, kind, __minimaxDrag:{nodeId:data.nodeId, segmentId:data.segmentId, kind, index, copy:Boolean(data.copy)}};
+    } catch {}
+    return null;
+}
+async function smartMinimaxDropItemsFromEvent(e){
+    const ref = smartMinimaxRefFromDrag(e.dataTransfer);
+    if(ref?.url) return [ref];
+    const asset = smartMinimaxAssetFromDrag(null, e.dataTransfer);
+    if(asset?.url) return [asset];
+    const direct = smartMinimaxMaterialFromDrag(null, e.dataTransfer);
+    if(direct?.url) return [direct];
+    const files = smartImageFilesFromDataTransfer(e.dataTransfer);
+    if(files.length){
+        const uploaded = await uploadFilesFromDataTransfer(e.dataTransfer);
+        return uploaded.map(file => ({...file, kind:file.kind || mediaKindForItem(file)})).filter(item => item?.url);
+    }
+    const payload = await resolveSmartImageDropPayload(e.dataTransfer);
+    if(payload.type === 'url') return [{url:payload.url, kind:mediaKindForUrls([payload.url], 'video'), name:fileNameFromUrl(payload.url) || 'material.mp4'}];
+    if(payload.type === 'localPaths') {
+        return (payload.localPaths || []).map(url => ({
+            url,
+            kind:mediaKindForUrls([url], 'image'),
+            name:fileNameFromUrl(url) || smartImageNameFromUrl(url) || 'reference'
+        })).filter(item => item.url);
+    }
+    const textUrl = smartDropTextCandidates(e.dataTransfer).find(value => {
+        const text = String(value || '').trim();
+        return text.startsWith('/') || /^\.{1,2}\//.test(text);
+    }) || '';
+    if(textUrl) return [{url:textUrl, kind:mediaKindForUrls([textUrl], 'image'), name:fileNameFromUrl(textUrl) || smartImageNameFromUrl(textUrl) || 'reference'}];
+    return [];
+}
+function smartMinimaxDropZoneFromEvent(el, event){
+    if(!el || !event) return null;
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    const pointHit = Number.isFinite(x) && Number.isFinite(y) ? (document.elementFromPoint(x, y) || event.target || null) : (event.target || null);
+    const direct = pointHit?.closest?.('[data-minimax-asset-library], [data-minimax-ref-track], [data-minimax-drop-segment], [data-minimax-player-stage], .minimax-ref-label, .minimax-ref-gutter') || null;
+    if(direct && el.contains(direct)) return direct;
+    const zones = [...el.querySelectorAll('[data-minimax-asset-library], [data-minimax-ref-track], [data-minimax-drop-segment], [data-minimax-player-stage], .minimax-ref-label, .minimax-ref-gutter')];
+    for(const zone of zones){
+        const rect = zone.getBoundingClientRect?.();
+        if(!rect) continue;
+        if(Number.isFinite(x) && Number.isFinite(y) && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return zone;
+    }
+    const fallback = pointHit?.closest?.('.minimax-smart-node') || null;
+    return fallback && el.contains(fallback) ? fallback : null;
+}
+function smartMinimaxDropAccepted(dataTransfer){
+    const types = smartDropDataTypes(dataTransfer);
+    return hasSmartImageDropData(dataTransfer)
+        || hasSmartAssetDrag(dataTransfer)
+        || types.includes('application/x-minimax-material')
+        || types.includes('application/x-minimax-asset')
+        || types.includes('application/x-minimax-ref');
+}
+async function handleMinimaxTimelineDrop(el, node, event, zone){
+    if(!el || !node || node.type !== 'smart-minimax' || !zone) return false;
+    const items = await smartMinimaxDropItemsFromEvent(event);
+    const item = items.find(entry => ['video','image','audio'].includes(mediaKindForItem(entry))) || items[0];
+    if(!item?.url) return false;
+    const dropTarget = event.target?.closest?.('[data-minimax-drop-segment]') || zone;
+    const intoRefTrack = Boolean(zone.closest?.('[data-minimax-ref-track],.minimax-ref-clip,.minimax-ref-label,.minimax-ref-gutter') || zone.matches?.('[data-minimax-ref-track],.minimax-ref-label,.minimax-ref-gutter') || zone.classList?.contains('minimax-ref-clip'));
+    const seg = smartMinimaxSegmentFromDropTarget(node, dropTarget, event) || (intoRefTrack ? smartMinimaxSelectedSegment(node) : null);
+    if(!seg) return false;
+    pushUndo();
+    node.selectedSegmentId = seg.id;
+    const types = smartDropDataTypes(event.dataTransfer);
+    const intoAssetLibrary = Boolean(zone.closest?.('[data-minimax-asset-library]') || zone.matches?.('[data-minimax-asset-library]'));
+    const intoVideoTrack = Boolean(zone.closest?.('.minimax-video-track,.minimax-tl-clip') || zone.classList?.contains('minimax-video-track') || zone.classList?.contains('minimax-tl-clip'));
+    if(intoAssetLibrary){
+        smartMinimaxAddLibraryRefs(node, [item]);
+    } else if(types.includes('application/x-minimax-material') && !intoRefTrack && intoVideoTrack) {
+        smartMinimaxSetSegmentResult(node, seg, item);
+    } else {
+        const added = smartMinimaxAddSegmentRefs(node, seg, [item]);
+        const drag = item.__minimaxDrag;
+        const copyRef = event.altKey || Boolean(drag?.copy);
+        if(added && drag && !copyRef && drag.segmentId !== seg.id){
+            const source = nodes.find(n => n.id === drag.nodeId && n.type === 'smart-minimax');
+            const sourceSeg = source?.segments?.find(entry => entry.id === drag.segmentId);
+            const existing = sourceSeg?.refItems?.[Number(drag.index)];
+            if(existing?.url === item.url) {
+                sourceSeg.refItems.splice(Number(drag.index), 1);
+                ['image','video','audio'].forEach(kind => {
+                    if(Array.isArray(sourceSeg.refs?.[kind])) sourceSeg.refs[kind] = sourceSeg.refs[kind].filter(ref => ref?.url !== item.url);
+                });
+            }
+        }
+    }
+    render();
+    scheduleSave();
+    return true;
+}
+function globalMinimaxDropContext(event){
+    const x = Number(event?.clientX);
+    const y = Number(event?.clientY);
+    const pointHit = Number.isFinite(x) && Number.isFinite(y) ? (document.elementFromPoint(x, y) || event?.target || null) : (event?.target || null);
+    let el = pointHit?.closest?.('.minimax-smart-node') || event?.target?.closest?.('.minimax-smart-node') || null;
+    if(!el && Number.isFinite(x) && Number.isFinite(y)){
+        el = [...document.querySelectorAll('.minimax-smart-node')].find(item => {
+            const rect = item.getBoundingClientRect?.();
+            return rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+        }) || null;
+    }
+    if(!el?.dataset?.id) return null;
+    const node = nodes.find(item => item.id === el.dataset.id && item.type === 'smart-minimax');
+    if(!node) return null;
+    const zone = smartMinimaxDropZoneFromEvent(el, event);
+    if(!zone) return null;
+    return {el, node, zone};
+}
+
 function smartLoopVariableHtml(text){
     return String(text || '').split(/(《计数》|\[计数\])/g).map(part => {
         if(part === '《计数》' || part === '[计数]') return smartLoopTokenChipHtml('《计数》');
@@ -7258,7 +7970,171 @@ function smartGroupBodyHtml(node){
         ${members.length ? '' : `<div class="smart-group-empty"><i data-lucide="plus"></i><span>拖入图片自动收进分组</span></div>`}
     </div>`;
 }
+function smartMinimaxBodyHtml(node){
+    const selected = smartMinimaxSelectedSegment(node);
+    const total = Math.max(Number(node.duration || 0), ...node.segments.map(seg => Number(seg.start || 0) + Number(seg.duration || 0)));
+    const fmt = value => {
+        const n = Number(value) || 0;
+        return n.toFixed(n % 1 ? 1 : 0);
+    };
+    const timeLabel = value => `${fmt(value)}s`;
+    const playhead = Math.max(0, Math.min(total || 1, Number(node.playhead || selected?.start || 0) || 0));
+    const playheadPct = total > 0 ? (playhead / total) * 100 : 0;
+    const ticks = Array.from({length:9}).map((_, index) => {
+        const pct = index * 12.5;
+        return `<span class="minimax-tick" style="left:${pct}%"><b>${timeLabel((total || 0) * pct / 100)}</b></span>`;
+    }).join('');
+    const timeline = node.segments.map((seg, index) => {
+        const start = Number(seg.start || 0);
+        const duration = Math.max(0.5, Number(seg.duration || 1));
+        const left = total > 0 ? (start / total) * 100 : 0;
+        const width = total > 0 ? Math.max(5, (duration / total) * 100) : 100;
+        const active = seg.id === node.selectedSegmentId;
+        const trimIn = Math.max(0, Number(seg.trimIn) || 0);
+        const trimOut = Math.min(duration, Math.max(trimIn + 0.1, Number(seg.trimOut || duration) || duration));
+        const result = seg.result?.url ? seg.result : null;
+        const media = result ? smartMinimaxLightMediaHtml(result, `Clip ${index + 1}`) : `<div class="minimax-clip-empty"><i data-lucide="sparkles"></i></div>`;
+        const refCount = (seg.refItems || []).filter(ref => ref?.url).length;
+        return `<div class="minimax-segment minimax-tl-clip ${active ? 'active' : ''} ${result ? 'has-result' : ''}" data-minimax-segment="${escapeAttr(seg.id)}" data-minimax-drop-segment="${escapeAttr(seg.id)}" style="left:${left}%;width:${Math.min(width, 100 - left)}%" title="Clip ${index + 1} · ${fmt(start)}s-${fmt(start + duration)}s">
+            <div class="minimax-clip-media">${media}</div>
+            <div class="minimax-clip-meta"><b>Clip ${index + 1}</b><span>${timeLabel(start)} - ${timeLabel(start + duration)}</span></div>
+            ${result ? `<span class="minimax-segment-result"><i data-lucide="video"></i></span>` : ''}
+            ${refCount ? `<span class="minimax-clip-ref-count"><i data-lucide="paperclip"></i>${refCount}</span>` : ''}
+            ${node.segments.length > 1 ? `<button type="button" class="minimax-clip-delete" data-minimax-segment-delete="${escapeAttr(seg.id)}" title="Delete"><i data-lucide="trash-2"></i></button>` : ''}
+            <span class="minimax-trim minimax-trim-left" data-minimax-trim="left" data-minimax-trim-segment="${escapeAttr(seg.id)}" style="left:${(trimIn / duration) * 100}%"></span>
+            <span class="minimax-trim minimax-trim-right" data-minimax-trim="right" data-minimax-trim-segment="${escapeAttr(seg.id)}" style="left:${(trimOut / duration) * 100}%"></span>
+        </div>`;
+    }).join('');
+    const refsForSegment = seg => (seg.refItems || []).map((ref, refIndex) => ({...ref, __index:refIndex, kind:mediaKindForItem(ref)}))
+        .filter(item => item?.url)
+        .slice(0, SMART_MINIMAX_REF_IMAGE_MAX + SMART_MINIMAX_REF_VIDEO_MAX + SMART_MINIMAX_REF_AUDIO_MAX);
+    const segmentRefLists = new Map(node.segments.map(seg => [seg.id, refsForSegment(seg)]));
+    const refLaneCount = Math.max(1, ...node.segments.map(seg => segmentRefLists.get(seg.id)?.length || 0));
+    const refTrack = Array.from({length:refLaneCount}).map((_, laneIndex) => {
+        const laneClips = node.segments.map((seg, index) => {
+            const start = Number(seg.start || 0);
+            const duration = Math.max(0.5, Number(seg.duration || 1));
+            const left = total > 0 ? (start / total) * 100 : 0;
+            const width = total > 0 ? Math.max(5, (duration / total) * 100) : 100;
+            const active = seg.id === node.selectedSegmentId;
+            const ref = segmentRefLists.get(seg.id)?.[laneIndex] || null;
+            const media = ref ? smartMinimaxLightMediaHtml(ref, `Ref ${laneIndex + 1}`) : `<div class="minimax-clip-empty"><i data-lucide="paperclip"></i></div>`;
+            const dragAttrs = ref ? ` draggable="true" data-minimax-ref-drag="${escapeAttr(`${seg.id}:${ref.__index}`)}"` : '';
+            return `<div class="minimax-ref-clip ${active ? 'active' : ''} ${ref ? 'has-ref' : 'is-empty'}" data-minimax-segment="${escapeAttr(seg.id)}" data-minimax-drop-segment="${escapeAttr(seg.id)}"${dragAttrs} style="left:${left}%;width:${Math.min(width, 100 - left)}%">
+                <div class="minimax-ref-media">${media}</div>
+                ${ref ? `<button type="button" data-minimax-ref-thumb-delete="${escapeAttr(`${seg.id}:${ref.__index}`)}" title="Remove reference"><i data-lucide="x"></i></button>` : ''}
+                <span class="minimax-ref-counts">${ref ? escapeHtml(ref.name || `Ref ${laneIndex + 1}`) : `Ref ${laneIndex + 1}`}</span>
+            </div>`;
+        }).join('');
+        return `<div class="minimax-ref-lane">${laneClips}</div>`;
+    }).join('');
+    const selectedResult = selected?.result?.url ? selected.result : null;
+    const previewH = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 190)));
+    const videoTrackH = Math.max(44, Math.min(160, Number(node.minimaxVideoTrackH || 70)));
+    const refLaneH = Math.max(28, Math.min(160, Number(node.minimaxRefLaneH || 42)));
+    const libraryW = Math.max(178, Math.min(420, Number(node.minimaxLibraryW || 178)));
+    const refTrackH = Math.max(72, refLaneCount * refLaneH);
+    const timelineZoom = Math.max(1, Math.min(8, Number(node.timelineZoom || 1)));
+    const timelineWidth = `${Math.round(timelineZoom * 100)}%`;
+    const refAssets = uniqueReferenceImages([
+        ...node.segments.flatMap(seg => (seg.refItems || []).map(ref => ({...ref, kind:mediaKindForItem(ref), segmentId:seg.id}))),
+        ...['image','video','audio'].flatMap(kind => (node.refs?.[kind] || []).map(ref => ({...ref, kind}))),
+        ...inputImagesFor(node).filter(ref => ref?.url && ['image','video','audio'].includes(mediaKindForItem(ref))).map(ref => ({...ref, kind:mediaKindForItem(ref)}))
+    ]).filter(item => item?.url).slice(0, 36);
+    node.assetRefs = refAssets;
+    const materials = (node.materials || []).filter(item => item?.url).slice(0, 24);
+    const assetHtml = refAssets.length ? refAssets.map((item, index) => `<div class="minimax-material-card minimax-asset-item" draggable="true" data-minimax-asset="${index}" title="${escapeAttr(item.name || smartMinimaxLabelForKind(mediaKindForItem(item)))}">
+        ${smartMinimaxLightMediaHtml(item, smartMinimaxLabelForKind(mediaKindForItem(item)))}
+        <span>${escapeHtml(smartMinimaxLabelForKind(mediaKindForItem(item)))}</span>
+    </div>`).join('') : `<div class="minimax-library-empty"><i data-lucide="database"></i><span>Assets</span></div>`;
+    const materialHtml = materials.length ? materials.map((item, index) => `<div class="minimax-material-card minimax-output-item" draggable="true" data-minimax-material="${index}" title="${escapeAttr(item.name || '??')}">
+        ${smartMinimaxLightMediaHtml(item, 'Output')}
+        <button type="button" data-minimax-download-material="${index}" title="Download"><i data-lucide="download"></i></button>
+        <button type="button" data-minimax-use-material="${index}" title="Use as current result"><i data-lucide="replace"></i></button>
+    </div>`).join('') : `<div class="minimax-library-empty"><i data-lucide="inbox"></i><span>Output</span></div>`;
+    const segDuration = Math.max(0.5, Number(selected?.duration || node.duration || 8) || 8);
+    const aspectRatio = selected?.aspectRatio || node.aspectRatio || '16:9 (Widescreen)';
+    const megapixels = Number(selected?.megapixels || node.megapixels || 0.4);
+    const selectedIndex = Math.max(0, node.segments.findIndex(item => item.id === selected?.id));
+    const selectedRefs = refsForSegment(selected || {refItems:[]});
+    const selectedRefSummary = ['image','video','audio']
+        .map(kind => ({kind, count:selectedRefs.filter(item => item.kind === kind).length}))
+        .filter(item => item.count > 0);
+    const minimaxEngine = smartMinimaxEngine(node);
+    return `<div class="minimax-card minimax-workbench">
+        <div class="minimax-wb-toolbar">
+            <div class="minimax-brand">
+                <i data-lucide="clapperboard"></i>
+                <span>MiniMax H3</span>
+                <b data-minimax-time-label="1">${timeLabel(playhead)} / ${timeLabel(total)}</b>
+            </div>
+            <div class="minimax-transport"></div>
+            <div class="minimax-top-actions">
+                <button type="button" data-minimax-export-selected="1" ${selectedResult ? '' : 'disabled'} title="Export selected clip"><i data-lucide="download"></i></button>
+                <button type="button" data-minimax-export-full="1" title="Export timeline"><i data-lucide="file-down"></i></button>
+            </div>
+        </div>
+        <div class="minimax-wb-body" style="--minimax-library-w:${libraryW}px">
+            <div class="minimax-library minimax-asset-bin" data-minimax-asset-library="1">
+                <span class="minimax-pane-resize minimax-library-resize" data-minimax-pane-resize="library"></span>
+                <div class="minimax-library-head"><i data-lucide="database"></i><span>Assets</span></div>
+                <div class="minimax-library-list">${assetHtml}</div>
+                <div class="minimax-library-head minimax-output-head"><i data-lucide="folder-output"></i><span>Output</span></div>
+                <div class="minimax-library-list minimax-output-list">${materialHtml}</div>
+            </div>
+            <div class="minimax-wb-main" style="--minimax-preview-h:${previewH}px;--minimax-video-h:${videoTrackH}px;--minimax-ref-h:${refTrackH}px;--minimax-ref-lane-h:${refLaneH}px">
+                <div class="minimax-player-stage" data-minimax-player-stage="1" data-minimax-player-segment="${escapeAttr(selected?.id || '')}" data-minimax-player-url="${escapeAttr(selectedResult?.url || '')}">
+                    ${smartMinimaxPlayerStageHtml(selected)}
+                    <span class="minimax-pane-resize minimax-preview-resize" data-minimax-pane-resize="preview"></span>
+                </div>
+                <div class="minimax-edit-timeline" data-minimax-scrub-track="1">
+                    <span class="minimax-pane-resize minimax-video-resize" data-minimax-pane-resize="video"></span>
+                    <span class="minimax-pane-resize minimax-ref-resize" data-minimax-pane-resize="refs"></span>
+                    <div class="minimax-timeline-controls">
+                        <button type="button" data-minimax-play-timeline="1" title="Play / pause"><i data-lucide="play"></i></button>
+                        <button type="button" data-minimax-toggle-mute="1" title="${node.minimaxMuted ? 'Unmute' : 'Mute'}"><i data-lucide="${node.minimaxMuted ? 'volume-x' : 'volume-2'}"></i></button>
+                    </div>
+                    <div class="minimax-ruler"><div class="minimax-track-content" style="width:${timelineWidth}">${ticks}<span class="minimax-playhead" data-minimax-playhead="1" style="left:${playheadPct}%"></span></div></div>
+                    <div class="minimax-add-gutter minimax-ruler-gutter"></div>
+                    <div class="minimax-track-label minimax-video-label">Video</div>
+                    <div class="minimax-track minimax-video-track"><div class="minimax-track-content" style="width:${timelineWidth}">${timeline}</div></div>
+                    <button type="button" class="minimax-video-add" data-minimax-add-segment="1" title="Add blank segment"><i data-lucide="plus"></i></button>
+                    <div class="minimax-track-label minimax-ref-label">Refs</div>
+                    <div class="minimax-ref-track" data-minimax-ref-track="1" data-minimax-active-segment="${escapeAttr(selected?.id || '')}" style="--ref-lanes:${refLaneCount}"><div class="minimax-ref-content" style="width:${timelineWidth}">${refTrack}</div></div>
+                    <div class="minimax-add-gutter minimax-ref-gutter"></div>
+                </div>
+                <div class="minimax-current-panel">
+                    <div class="minimax-current-head">
+                        <div class="minimax-current-title"><span class="minimax-current-dot"></span><b>Clip ${selectedIndex + 1}</b><span>${timeLabel(Number(selected?.start || 0))} - ${timeLabel(Number(selected?.start || 0) + segDuration)}</span></div>
+                        <div class="minimax-current-refs">
+                            ${selectedRefSummary.length ? selectedRefSummary.map(item => `<span><i data-lucide="${smartMinimaxIconForKind(item.kind)}"></i>${item.count}</span>`).join('') : '<span>No refs</span>'}
+                        </div>
+                    </div>
+                    <label class="minimax-prompt-field">
+                        <span><i data-lucide="text-cursor-input"></i>Prompt</span>
+                        <textarea data-minimax-prompt="1" placeholder="Prompt for selected clip">${escapeHtml(selected?.prompt || '')}</textarea>
+                    </label>
+                    <div class="minimax-clip-parameters">
+                        <div class="minimax-section-label"><i data-lucide="sliders-horizontal"></i><span>Clip settings</span></div>
+                        <div class="minimax-settings minimax-segment-fields">
+                            <label class="minimax-wide-setting minimax-engine-setting"><span>Engine</span><select class="minimax-engine-select" data-minimax-engine title="选择生成来源">
+                                <option value="comfyui" ${minimaxEngine === 'comfyui' ? 'selected' : ''}>ComfyUI</option>
+                                <option value="runninghub" ${minimaxEngine === 'runninghub' ? 'selected' : ''}>RunningHub</option>
+                            </select></label>
+                            <label><span>Duration</span><input type="number" min="0.5" max="60" step="0.1" data-minimax-seg-number="duration" value="${escapeAttr(segDuration)}"><b>s</b></label>
+                            <label><span>Megapixels</span><input type="number" min="0.1" max="2" step="0.1" data-minimax-seg-number="megapixels" value="${escapeAttr(megapixels)}"><b>MP</b></label>
+                            <label class="minimax-wide-setting"><span>Aspect ratio</span><select data-minimax-select="aspectRatio">${['16:9 (Widescreen)','9:16 (Portrait)','1:1 (Square)','4:3 (Standard)','3:4 (Portrait)','21:9 (Ultrawide)'].map(value => `<option value="${escapeAttr(value)}" ${value === aspectRatio ? 'selected' : ''}>${escapeHtml(value.split(' ')[0])}</option>`).join('')}</select></label>
+                            <button class="minimax-run ${node.running ? 'is-stop' : ''}" type="button" data-minimax-run="${escapeAttr(node.id)}" ${node.running ? 'disabled' : ''} title="Generate selected clip"><i data-lucide="${node.running ? 'loader-2' : 'sparkles'}"></i><span>${node.running ? 'Running' : 'Generate clip'}</span></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
 function nodeBodyHtml(node, layout){
+    if(node.type === 'smart-minimax') return smartMinimaxBodyHtml(node);
     if(node.type === 'smart-group') return smartGroupBodyHtml(node);
     if(node.type === 'smart-prompt') return promptNodeBodyHtml(node);
     if(node.type === 'smart-loop') return smartLoopBodyHtml(node);
@@ -7348,6 +8224,7 @@ function smartNodeToolbarHtml(node){
         {key:'mask', icon:'brush', label:'遮罩', enabled:canEditImage},
         {key:'brush', icon:'paintbrush', label:'画笔', enabled:canEditImage},
         {key:'grid', icon:'grid-3x3', label:gridLabel, enabled:canEditImage},
+        ...(jimengImageProviderId() ? [{key:'upscale', icon:'maximize-2', label:tr('smart.jimengUpscaleAction'), enabled:canEditImage}] : []),
         {key:'download', icon:'download', label:'下载', enabled:true}
     ];
     return `<div class="smart-node-floating-menu" data-smart-node-menu="1">${actions.map(action => `
@@ -7417,11 +8294,58 @@ function runSmartNodeToolbarAction(nodeId, action){
         openImagePreview(nodeId, index);
         return;
     }
+    if(action === 'upscale'){
+        runJimengUpscale(node, index);
+        return;
+    }
     const modeMap = {crop:'crop', outpaint:'outpaint', mask:'mask', brush:'brush', grid:'grid'};
     openImageEditor(nodeId, index);
     setImageEditMode(modeMap[action] || 'preview', true);
     if(action === 'grid' && canGridJoinCurrentNode()){
         setGridOperationMode('join');
+    }
+}
+async function runJimengUpscale(node, index){
+    node = liveSmartNode(node) || node;
+    const item = imageForDisplay(node?.images?.[index]);
+    if(!item?.url || mediaKindForItem(item) !== 'image'){ toast(tr('smart.jimengUpscaleNeedImage')); return; }
+    const providerId = jimengImageProviderId();
+    if(!providerId){ toast(tr('smart.jimengUpscaleNeedImage')); return; }
+    const resolution = JIMENG_UPSCALE_RESOLUTIONS.includes(settings.jimengUpscaleRes) ? settings.jimengUpscaleRes : '2k';
+    pushUndo();
+    const rect = nodeRect(node);
+    const target = createImageNodeAt({x:rect.x + rect.width + 220, y:rect.y + rect.height / 2}, [], {select:true, skipUndo:true});
+    target.title = 'Upscale';
+    target.runStartedAt = nowMs();
+    target.pending = 1;
+    target.running = true;
+    render();
+    try {
+        const task = await fetch('/api/canvas-image-tasks', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({prompt:`upscale ${resolution}`, provider_id:providerId, model:'', operation:'upscale', resolution_type:resolution, n:1, reference_images:[{url:item.url, name:item.name || 'upscale-input.png'}]})
+        }).then(async response => {
+            if(!response.ok) throw new Error(await response.text());
+            return response.json();
+        });
+        if(!task.task_id) throw new Error(tr('smart.errRunFailed'));
+        const live = liveSmartNode(target) || target;
+        live.pendingTasks = [{taskId:task.task_id, kind:'image', providerId, model:''}];
+        live.pending = 1;
+        live.running = false;
+        render();
+        scheduleSave();
+        await saveCanvas();
+        await resumeSmartPendingNode(live);
+    } catch(error) {
+        toast((error.message || tr('smart.errRunFailed')).slice(0, 160));
+        const live = liveSmartNode(target) || target;
+        live.running = false;
+        live.pending = 0;
+        delete live.pendingTasks;
+        if(!(live.images || []).length && !live.jimengPending) nodes = nodes.filter(item => item.id !== live.id);
+        render();
+        scheduleSave();
     }
 }
 // 智能分组顶部小菜单：整理排列 / 预览（整组左右切换）/ 宫格拼接 / 批量下载 / 解散分组。
@@ -7546,11 +8470,12 @@ function render(){
         .sort((a, b) => (isSmartGroupNode(a) ? 0 : 1) - (isSmartGroupNode(b) ? 0 : 1))
         .map(node => {
         const imgs = node.images || [];
-        const title = node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : node.type === 'smart-minimax' ? 'MiniMax H3' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
         const isLoop = node.type === 'smart-loop';
+        const isMinimax = node.type === 'smart-minimax';
         const isSmartGroup = node.type === 'smart-group';
         const isCompactMember = isSmartGroupCompactMember(node);
         const isImageNode = node.type === 'smart-image' || !node.type;
@@ -7561,17 +8486,18 @@ function render(){
         const isGroup = isImageNode && imgs.length > 1;
         const isPending = ((node.pending || isQueued || isJimengPending) && imgs.length === 0);
         const body = nodeBodyHtml(node, layout);
-        const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
-        const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-        const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        const deleteBtn = (isGroup || isMinimax) ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
+        const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isMinimax ? 'Timeline editing' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
+        const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isMinimax ? 'minimax-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
-            ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
+            ${!isEmpty && !isGroup && !isMinimax ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
             ${runTimePillHtml(node)}
             <div class="node-body">${body}</div>
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
-            ${imgs.length || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
+            ${imgs.length || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isMinimax || isSmartGroup ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
             <div class="node-port port-in" data-port="in" title="input"></div>
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
@@ -7625,16 +8551,17 @@ function render(){
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
         const isLoop = node.type === 'smart-loop';
+        const isMinimax = node.type === 'smart-minimax';
         const isImageNode = node.type === 'smart-image' || !node.type;
         const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending);
         const isEmpty = isImageNode && imgs.length === 0 && !node.pending && !isQueued;
         const isGroup = isImageNode && imgs.length > 1;
         const isPending = (node.pending || isQueued) && imgs.length === 0;
         const body = nodeBodyHtml(node, layout);
-        const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
+        const deleteBtn = (isGroup || isMinimax) ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         return `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
-            ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
+            ${!isEmpty && !isGroup && !isMinimax ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}
             ${runTimePillHtml(node)}
             <div class="node-body">${body}</div>
@@ -8018,6 +8945,580 @@ function bindLoopNodeControls(el, node){
         };
     });
 }
+function bindMinimaxNodeControls(el, node){
+    const focusMinimaxNode = () => {
+        if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
+        hideRunTimerForNode(node);
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
+        syncSelectionUi();
+        updateComposer();
+    };
+    el.querySelectorAll('.minimax-library-list').forEach(scroller => {
+        scroller.addEventListener('wheel', e => e.stopPropagation(), {passive:true});
+    });
+    el.addEventListener('dragover', e => {
+        const zone = smartMinimaxDropZoneFromEvent(el, e);
+        if(!zone || !smartMinimaxDropAccepted(e.dataTransfer)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = smartDropDataTypes(e.dataTransfer).includes('application/x-minimax-ref') && !e.altKey ? 'move' : 'copy';
+    }, true);
+    el.addEventListener('drop', e => {
+        const zone = smartMinimaxDropZoneFromEvent(el, e);
+        if(!zone || !smartMinimaxDropAccepted(e.dataTransfer)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        focusMinimaxNode();
+        handleMinimaxTimelineDrop(el, node, e, zone);
+    }, true);
+    let minimaxDeleteRenderQueued = false;
+    const renderAfterMinimaxDelete = () => {
+        if(minimaxDeleteRenderQueued) return;
+        minimaxDeleteRenderQueued = true;
+        setTimeout(() => {
+            render();
+            scheduleSave();
+        }, 16);
+    };
+    const stopFastMinimaxButton = e => {
+        if(e.button !== undefined && e.button !== 0) return false;
+        e.preventDefault();
+        e.stopPropagation();
+        if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+        focusMinimaxNode();
+        return true;
+    };
+    const bindFastMinimaxButton = (btn, action) => {
+        btn.addEventListener('pointerdown', stopFastMinimaxButton, true);
+        btn.addEventListener('mousedown', stopFastMinimaxButton, true);
+        btn.addEventListener('click', e => {
+            if(!stopFastMinimaxButton(e)) return;
+            action(e);
+        }, true);
+    };
+    el.querySelectorAll('button,input,select,textarea,video,audio').forEach(control => {
+        control.addEventListener('mousedown', e => {
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        control.addEventListener('click', e => {
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        control.addEventListener('dblclick', e => e.stopPropagation());
+    });
+    el.querySelectorAll('[data-minimax-engine]').forEach(select => {
+        select.onchange = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const nextEngine = select.value === 'runninghub' ? 'runninghub' : SMART_MINIMAX_DEFAULT_ENGINE;
+            if(nextEngine === 'runninghub'){
+                const entry = smartMinimaxRunningHubEntry(node);
+                if(!entry){
+                    select.value = smartMinimaxEngine(node);
+                    toast(`请先在 API 设置中添加「${SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE}」`);
+                    return;
+                }
+                node.minimaxRunningHubWorkflowId = runningHubEntryId(entry, 'workflow');
+            }
+            node.minimaxEngine = nextEngine;
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-segment]').forEach(btn => {
+        btn.addEventListener('mousedown', e => {
+            if(e.target.closest('[data-minimax-trim]')) return;
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            node.selectedSegmentId = btn.dataset.minimaxSegment || node.selectedSegmentId;
+            const seg = smartMinimaxSelectedSegment(node);
+            const time = smartMinimaxSetPlayheadDom(el, node, Number(seg?.start || 0) + Number(seg?.trimIn || 0));
+            smartMinimaxSetActiveSegmentDom(el, node, seg);
+            smartMinimaxSyncFormDom(el, seg);
+            smartMinimaxSyncActionDom(el, seg);
+            smartMinimaxSyncPlayerDom(el, seg, time, false);
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-trim]').forEach(handle => {
+        handle.addEventListener('mousedown', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = node.segments.find(item => item.id === handle.dataset.minimaxTrimSegment) || smartMinimaxSelectedSegment(node);
+            const track = handle.closest('[data-minimax-drop-segment]');
+            if(!seg || !track) return;
+            pushUndo();
+            node.selectedSegmentId = seg.id;
+            const mode = handle.dataset.minimaxTrim;
+            const trimLeft = track.querySelector('[data-minimax-trim="left"]');
+            const trimRight = track.querySelector('[data-minimax-trim="right"]');
+            smartMinimaxSetActiveSegmentDom(el, node, seg);
+            const onMove = event => {
+                const rect = track.getBoundingClientRect();
+                const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
+                const value = ratio * Math.max(0.5, Number(seg.duration || 1));
+                if(mode === 'left') seg.trimIn = Math.max(0, Math.min(value, Number(seg.trimOut || seg.duration) - 0.1));
+                else seg.trimOut = Math.max(Number(seg.trimIn || 0) + 0.1, Math.min(Number(seg.duration || 0.5), value));
+                if(trimLeft) trimLeft.style.left = `${(Number(seg.trimIn || 0) / Math.max(0.5, Number(seg.duration || 1))) * 100}%`;
+                if(trimRight) trimRight.style.left = `${(Number(seg.trimOut || seg.duration) / Math.max(0.5, Number(seg.duration || 1))) * 100}%`;
+                const time = smartMinimaxSetPlayheadDom(el, node, Number(seg.start || 0) + Number(mode === 'left' ? seg.trimIn : seg.trimOut));
+                smartMinimaxSyncPlayerDom(el, seg, time, false);
+            };
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove, true);
+                window.removeEventListener('mouseup', onUp, true);
+                scheduleSave();
+            };
+            window.addEventListener('mousemove', onMove, true);
+            window.addEventListener('mouseup', onUp, true);
+        });
+    });
+    el.querySelectorAll('[data-minimax-add-segment]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            pushUndo();
+            const current = smartMinimaxSelectedSegment(node);
+            const start = current ? Number(current.start || 0) + Number(current.duration || 0) : Math.max(0, Number(node.duration || 8));
+            const duration = Math.max(0.5, Number(current?.duration || node.duration || 8) || 8);
+            const seg = {id:uid('seg'), start, duration, prompt:'', refs:{image:[], video:[], audio:[]}, aspectRatio:current?.aspectRatio || node.aspectRatio || '16:9 (Widescreen)', megapixels:Number(current?.megapixels || node.megapixels || 0.4), trimIn:0, trimOut:duration, result:null, results:[]};
+            node.segments.push(seg);
+            node.selectedSegmentId = seg.id;
+            node.duration = Math.max(Number(node.duration || 0), seg.start + seg.duration);
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-delete-segment]').forEach(btn => {
+        bindFastMinimaxButton(btn, () => {
+            if((node.segments || []).length <= 1) return;
+            pushUndo();
+            const removeId = node.selectedSegmentId;
+            node.segments = node.segments.filter(seg => seg.id !== removeId);
+            node.selectedSegmentId = node.segments[0]?.id || '';
+            smartMinimaxEnsureSegment(node);
+            smartMinimaxCompactSegments(node);
+            el.querySelectorAll('[data-minimax-segment]').forEach(item => {
+                if(item.dataset.minimaxSegment === removeId) item.remove();
+            });
+            renderAfterMinimaxDelete();
+        });
+    });
+    el.querySelectorAll('[data-minimax-segment-delete]').forEach(btn => {
+        bindFastMinimaxButton(btn, () => {
+            if((node.segments || []).length <= 1) return;
+            const removeId = btn.dataset.minimaxSegmentDelete || '';
+            if(!removeId) return;
+            pushUndo();
+            node.segments = node.segments.filter(seg => seg.id !== removeId);
+            node.selectedSegmentId = node.segments.find(seg => seg.id === node.selectedSegmentId)?.id || node.segments[0]?.id || '';
+            smartMinimaxEnsureSegment(node);
+            smartMinimaxCompactSegments(node);
+            el.querySelectorAll('[data-minimax-segment]').forEach(item => {
+                if(item.dataset.minimaxSegment === removeId) item.remove();
+            });
+            renderAfterMinimaxDelete();
+        });
+    });
+    el.querySelectorAll('[data-minimax-number]').forEach(input => {
+        const key = input.dataset.minimaxNumber;
+        input.oninput = input.onchange = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const value = Number(input.value);
+            if(key === 'duration') node.duration = Math.max(0.5, Math.min(60, value || 8));
+            if(key === 'megapixels') node.megapixels = Math.max(0.1, Math.min(2, value || 0.4));
+            renderDynamicParams();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-select]').forEach(select => {
+        select.onchange = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(seg) seg[select.dataset.minimaxSelect] = select.value;
+            node[select.dataset.minimaxSelect] = select.value;
+            renderDynamicParams();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-seg-number]').forEach(input => {
+        const key = input.dataset.minimaxSegNumber;
+        input.oninput = input.onchange = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(!seg) return;
+            const value = Number(input.value);
+            if(key === 'start') seg.start = Math.max(0, value || 0);
+            if(key === 'duration'){
+                seg.duration = Math.max(0.5, value || 0.5);
+                seg.trimOut = Math.min(Math.max(Number(seg.trimOut || seg.duration), Number(seg.trimIn || 0) + 0.1), seg.duration);
+            }
+            if(key === 'trimIn') seg.trimIn = Math.max(0, Math.min(value || 0, Math.max(0, Number(seg.trimOut || seg.duration) - 0.1)));
+            if(key === 'trimOut') seg.trimOut = Math.max(Number(seg.trimIn || 0) + 0.1, Math.min(Number(seg.duration || 0.5), value || Number(seg.duration || 0.5)));
+            if(key === 'megapixels'){
+                seg.megapixels = Math.max(0.1, Math.min(2, value || 0.4));
+                node.megapixels = seg.megapixels;
+            }
+            node.duration = Math.max(Number(node.duration || 0), seg.start + seg.duration);
+            renderDynamicParams();
+            scheduleSave();
+            if(e.type === 'change') render();
+        };
+    });
+    const prompt = el.querySelector('[data-minimax-prompt]');
+    if(prompt){
+        bindScrollableText(prompt);
+        prompt.oninput = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(seg) seg.prompt = prompt.value;
+            scheduleSave();
+        };
+    }
+    el.querySelectorAll('[data-minimax-run]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            runMinimaxNode(btn.dataset.minimaxRun || node.id);
+        };
+    });
+    el.querySelectorAll('[data-minimax-play-timeline]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const media = el.querySelector('[data-minimax-player]');
+            if(!node.timelinePlaying && media){
+                media.muted = Boolean(node.minimaxMuted);
+                media.play?.().catch(() => {});
+            }
+            focusMinimaxNode();
+            if(node.timelinePlaying){
+                node.timelinePlaying = false;
+                btn.innerHTML = '<i data-lucide="play"></i>';
+                smartMinimaxSyncPlayerDom(el, smartMinimaxSelectedSegment(node), Number(node.playhead || 0), false);
+                if(window.lucide) lucide.createIcons();
+                return;
+            }
+            node.timelinePlaying = true;
+            btn.innerHTML = '<i data-lucide="pause"></i>';
+            if(window.lucide) lucide.createIcons();
+            const total = smartMinimaxTimelineTotal(node);
+            const startTime = Math.min(Number(node.playhead || 0) || 0, Math.max(0, total - 0.01)) >= total - 0.01 ? 0 : (Number(node.playhead || 0) || 0);
+            const startedAt = performance.now();
+            smartMinimaxApplyTimelineTime(el, node, startTime, {syncPlayer:true, play:true});
+            const tick = now => {
+                if(!node.timelinePlaying || !el.isConnected) return;
+                const elapsed = (now - startedAt) / 1000;
+                let time = startTime + elapsed;
+                if(time >= total){
+                    time = total;
+                    node.timelinePlaying = false;
+                    btn.innerHTML = '<i data-lucide="play"></i>';
+                    if(window.lucide) lucide.createIcons();
+                }
+                smartMinimaxApplyTimelineTime(el, node, time, {syncPlayer:true, play:node.timelinePlaying});
+                if(node.timelinePlaying) requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+        };
+    });
+    el.querySelectorAll('[data-minimax-scrub-track]').forEach(track => {
+        track.addEventListener('wheel', e => {
+            if(!e.ctrlKey) return;
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const current = Math.max(1, Math.min(8, Number(node.timelineZoom || 1)));
+            const next = Math.max(1, Math.min(8, current * (e.deltaY < 0 ? 1.12 : 0.89)));
+            if(Math.abs(next - current) < 0.01) return;
+            node.timelineZoom = next;
+            render();
+            scheduleSave();
+        }, {passive:false});
+        track.addEventListener('mousedown', e => {
+            if(e.target.closest('[data-minimax-segment],button,input,select,textarea,[data-minimax-trim]')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seek = event => {
+                const ruler = track.querySelector('.minimax-ruler') || track;
+                const content = ruler.querySelector('.minimax-track-content') || ruler;
+                const rect = ruler.getBoundingClientRect();
+                const x = (event.clientX - rect.left) + Number(ruler.scrollLeft || 0);
+                const ratio = Math.max(0, Math.min(1, x / Math.max(1, Number(content.scrollWidth || rect.width))));
+                const total = smartMinimaxTimelineTotal(node);
+                const time = ratio * total;
+                smartMinimaxApplyTimelineTime(el, node, time, {syncPlayer:true, play:false});
+            };
+            const onMove = event => {
+                event.preventDefault();
+                seek(event);
+            };
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove, true);
+                window.removeEventListener('mouseup', onUp, true);
+                scheduleSave();
+            };
+            seek(e);
+            window.addEventListener('mousemove', onMove, true);
+            window.addEventListener('mouseup', onUp, true);
+        });
+    });
+    el.querySelectorAll('[data-minimax-pane-resize]').forEach(handle => {
+        handle.addEventListener('mousedown', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const mode = handle.dataset.minimaxPaneResize;
+            const startY = e.clientY;
+            const startX = e.clientX;
+            const startPreview = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 190)));
+            const startVideo = Math.max(44, Math.min(160, Number(node.minimaxVideoTrackH || 70)));
+            const startRef = Math.max(28, Math.min(160, Number(node.minimaxRefLaneH || 42)));
+            const startLibraryW = Math.max(178, Math.min(420, Number(node.minimaxLibraryW || 178)));
+            const main = el.querySelector('.minimax-wb-main');
+            const body = el.querySelector('.minimax-wb-body');
+            const onMove = event => {
+                const dy = (event.clientY - startY) / Math.max(0.1, viewport.scale || 1);
+                const dx = (event.clientX - startX) / Math.max(0.1, viewport.scale || 1);
+                if(mode === 'library'){
+                    node.minimaxLibraryW = Math.max(178, Math.min(420, Math.round(startLibraryW + dx)));
+                    body?.style.setProperty('--minimax-library-w', `${node.minimaxLibraryW}px`);
+                } else if(mode === 'preview'){
+                    node.minimaxPreviewH = Math.max(130, Math.min(760, Math.round(startPreview + dy)));
+                    main?.style.setProperty('--minimax-preview-h', `${node.minimaxPreviewH}px`);
+                } else if(mode === 'video'){
+                    node.minimaxVideoTrackH = Math.max(44, Math.min(160, Math.round(startVideo + dy)));
+                    main?.style.setProperty('--minimax-video-h', `${node.minimaxVideoTrackH}px`);
+                } else if(mode === 'refs'){
+                    node.minimaxRefLaneH = Math.max(28, Math.min(160, Math.round(startRef + dy)));
+                    const lanes = Math.max(1, Number(el.querySelector('.minimax-ref-track')?.style.getPropertyValue('--ref-lanes')) || 1);
+                    const nextRefH = Math.max(72, lanes * node.minimaxRefLaneH);
+                    main?.style.setProperty('--minimax-ref-lane-h', `${node.minimaxRefLaneH}px`);
+                    main?.style.setProperty('--minimax-ref-h', `${nextRefH}px`);
+                }
+            };
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove, true);
+                window.removeEventListener('mouseup', onUp, true);
+                scheduleSave();
+            };
+            window.addEventListener('mousemove', onMove, true);
+            window.addEventListener('mouseup', onUp, true);
+        });
+    });
+    el.querySelectorAll('[data-minimax-result-delete]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(!seg?.result) return;
+            pushUndo();
+            seg.result = null;
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-ref-thumb-delete]').forEach(btn => {
+        bindFastMinimaxButton(btn, () => {
+            const [segId, rawIndex] = String(btn.dataset.minimaxRefThumbDelete || '').split(':');
+            const index = Number(rawIndex);
+            const seg = node.segments.find(item => item.id === segId);
+            if(!seg || !Array.isArray(seg.refItems) || !Number.isFinite(index)) return;
+            const removed = seg.refItems[index];
+            pushUndo();
+            node.selectedSegmentId = seg.id;
+            seg.refItems.splice(index, 1);
+            if(removed?.url) {
+                ['image','video','audio'].forEach(kind => {
+                    if(Array.isArray(seg.refs?.[kind])) seg.refs[kind] = seg.refs[kind].filter(ref => ref?.url !== removed.url);
+                });
+            }
+            const clip = btn.closest('.minimax-ref-clip');
+            if(clip) {
+                clip.classList.remove('has-ref');
+                clip.classList.add('is-empty');
+                clip.style.opacity = '.32';
+            }
+            renderAfterMinimaxDelete();
+        });
+    });
+    el.querySelectorAll('[data-minimax-export-selected]').forEach(btn => {
+        btn.onclick = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(!seg?.result?.url) return;
+            const duration = Number(seg.duration || 0) || 0;
+            const start = Number(seg.trimIn || 0) || 0;
+            const end = Number(seg.trimOut || duration) || duration;
+            if(start <= 0 && (!end || end >= duration)) downloadPreviewFile(seg.result);
+            else await exportMinimaxTimeline(node, {selectedOnly:true});
+        };
+    });
+    el.querySelectorAll('[data-minimax-export-full]').forEach(btn => {
+        btn.onclick = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            await exportMinimaxTimeline(node);
+        };
+    });
+    el.querySelectorAll('[data-minimax-use-material]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const item = node.materials?.[Number(btn.dataset.minimaxUseMaterial)];
+            const seg = smartMinimaxSelectedSegment(node);
+            if(!item?.url || !seg) return;
+            pushUndo();
+            smartMinimaxSetSegmentResult(node, seg, item);
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-download-material]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const item = node.materials?.[Number(btn.dataset.minimaxDownloadMaterial)];
+            if(item?.url) downloadPreviewFile(item);
+        };
+    });
+    el.querySelectorAll('[data-minimax-material]').forEach(card => {
+        card.addEventListener('mousedown', e => {
+            if(e.target.closest('[data-minimax-download-material], [data-minimax-use-material]')) return;
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        card.addEventListener('dragstart', e => {
+            focusMinimaxNode();
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('application/x-minimax-material', JSON.stringify({nodeId:node.id, index:Number(card.dataset.minimaxMaterial)}));
+            const item = node.materials?.[Number(card.dataset.minimaxMaterial)];
+            if(item?.url) e.dataTransfer.setData('text/plain', item.url);
+        });
+    });
+    el.querySelectorAll('[data-minimax-asset]').forEach(card => {
+        card.addEventListener('mousedown', e => {
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        card.addEventListener('dragstart', e => {
+            focusMinimaxNode();
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('application/x-minimax-asset', JSON.stringify({nodeId:node.id, index:Number(card.dataset.minimaxAsset), copy:Boolean(e.altKey)}));
+            const item = node.assetRefs?.[Number(card.dataset.minimaxAsset)];
+            if(item?.url) e.dataTransfer.setData('text/plain', item.url);
+        });
+    });
+    el.querySelectorAll('[data-minimax-toggle-mute]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            node.minimaxMuted = !Boolean(node.minimaxMuted);
+            const media = el.querySelector('[data-minimax-player]');
+            if(media) media.muted = node.minimaxMuted;
+            btn.title = node.minimaxMuted ? 'Unmute' : 'Mute';
+            btn.innerHTML = `<i data-lucide="${node.minimaxMuted ? 'volume-x' : 'volume-2'}"></i>`;
+            if(window.lucide) lucide.createIcons();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-ref-drag]').forEach(card => {
+        card.addEventListener('mousedown', e => {
+            if(e.target.closest('[data-minimax-ref-thumb-delete]')) return;
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        card.addEventListener('dragstart', e => {
+            focusMinimaxNode();
+            const [segmentId, rawIndex] = String(card.dataset.minimaxRefDrag || '').split(':');
+            const index = Number(rawIndex);
+            const seg = node.segments.find(item => item.id === segmentId);
+            const item = seg?.refItems?.[index];
+            if(!item?.url) return;
+            e.dataTransfer.effectAllowed = 'copyMove';
+            e.dataTransfer.setData('application/x-minimax-ref', JSON.stringify({nodeId:node.id, segmentId, index, copy:Boolean(e.altKey)}));
+            e.dataTransfer.setData('text/plain', item.url);
+        });
+    });
+    el.querySelectorAll('[data-minimax-add-segment]').forEach(btn => {
+        btn.addEventListener('mousedown', e => {
+            e.stopPropagation();
+        });
+    });
+    el.querySelectorAll('[data-minimax-drop-segment], [data-minimax-drop-result], [data-minimax-scrub-track], [data-minimax-ref-track], [data-minimax-player-stage], [data-minimax-asset-library]').forEach(target => {
+        target.addEventListener('dragover', e => {
+            const types = smartDropDataTypes(e.dataTransfer);
+            if(hasSmartImageDropData(e.dataTransfer) || hasSmartAssetDrag(e.dataTransfer) || types.includes('application/x-minimax-material') || types.includes('application/x-minimax-asset') || types.includes('application/x-minimax-ref')){
+                e.preventDefault();
+                e.dataTransfer.dropEffect = types.includes('application/x-minimax-ref') && !e.altKey ? 'move' : 'copy';
+            }
+        });
+        target.addEventListener('drop', async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const dropTarget = e.target?.closest?.('[data-minimax-drop-segment]') || target;
+            const intoRefTrack = Boolean(target.closest?.('[data-minimax-ref-track],.minimax-ref-clip,.minimax-ref-label,.minimax-ref-gutter') || target.matches?.('[data-minimax-ref-track],.minimax-ref-label,.minimax-ref-gutter') || target.classList?.contains('minimax-ref-clip'));
+            const seg = smartMinimaxSegmentFromDropTarget(node, dropTarget, e) || (intoRefTrack ? smartMinimaxSelectedSegment(node) : null);
+            const items = await smartMinimaxDropItemsFromEvent(e);
+            const item = items.find(entry => ['video','image','audio'].includes(mediaKindForItem(entry))) || items[0];
+            if(!seg || !item?.url) return;
+            pushUndo();
+            node.selectedSegmentId = seg.id;
+            const types = smartDropDataTypes(e.dataTransfer);
+            const intoAssetLibrary = Boolean(target.closest?.('[data-minimax-asset-library]') || target.matches?.('[data-minimax-asset-library]'));
+            const intoVideoTrack = Boolean(target.closest?.('.minimax-video-track,.minimax-tl-clip') || target.classList?.contains('minimax-video-track') || target.classList?.contains('minimax-tl-clip'));
+            if(intoAssetLibrary){
+                smartMinimaxAddLibraryRefs(node, [item]);
+            } else if(types.includes('application/x-minimax-material') && !intoRefTrack && intoVideoTrack) {
+                smartMinimaxSetSegmentResult(node, seg, item);
+            } else {
+                const added = smartMinimaxAddSegmentRefs(node, seg, [item]);
+                const drag = item.__minimaxDrag;
+                const copyRef = e.altKey || Boolean(drag?.copy);
+                if(added && drag && !copyRef && drag.segmentId !== seg.id){
+                    const source = nodes.find(n => n.id === drag.nodeId && n.type === 'smart-minimax');
+                    const sourceSeg = source?.segments?.find(entry => entry.id === drag.segmentId);
+                    const existing = sourceSeg?.refItems?.[Number(drag.index)];
+                    if(existing?.url === item.url) {
+                        sourceSeg.refItems.splice(Number(drag.index), 1);
+                        ['image','video','audio'].forEach(kind => {
+                            if(Array.isArray(sourceSeg.refs?.[kind])) sourceSeg.refs[kind] = sourceSeg.refs[kind].filter(ref => ref?.url !== item.url);
+                        });
+                    }
+                }
+            }
+            render();
+            scheduleSave();
+        });
+    });
+}
+
 function bindScrollableText(el){
     if(!el || el.dataset.scrollBound === '1') return;
     el.dataset.scrollBound = '1';
@@ -8175,6 +9676,7 @@ function bindNodeEvents(){
         const nodeForControls = nodes.find(n => n.id === id);
         if(nodeForControls?.type === 'smart-prompt') bindPromptNodeControls(el, nodeForControls);
         if(nodeForControls?.type === 'smart-loop') bindLoopNodeControls(el, nodeForControls);
+        if(nodeForControls?.type === 'smart-minimax') bindMinimaxNodeControls(el, nodeForControls);
         if(nodeForControls?.type === 'smart-group') {
             el.ondblclick = e => {
                 e.preventDefault();
@@ -8627,6 +10129,8 @@ function disconnectConnections(spec){
         if(toNode && Array.isArray(toNode.inputNodeIds)){
             toNode.inputNodeIds = toNode.inputNodeIds.filter(id => id !== conn.from);
         }
+        const stillConnected = (canvas.connections || []).some(item => item.from === conn.from && item.to === conn.to && ['input','flow'].includes(item.kind || 'flow'));
+        if(toNode?.type === 'smart-minimax' && !stillConnected) smartMinimaxDetachSourceRefs(toNode, conn.from);
         if(toNode && ['input','flow'].includes(conn.kind || 'flow')) clearDetachedRunInputRefs(toNode);
         if((conn.kind || 'flow') === 'history'){
             const group = nodes.find(n => n.id === conn.to && isHistoryGroupNode(n) && n.historyFor === conn.from);
@@ -8665,18 +10169,20 @@ function finishConnectionErase(){
     const removed = canvas.connections.filter((_, i) => set.has(i));
     if(!removed.length) return false;
     pushUndo();
+    canvas.connections = canvas.connections.filter((_, i) => !set.has(i));
     removed.forEach(conn => {
         const toNode = nodes.find(n => n.id === conn.to);
         if(toNode && Array.isArray(toNode.inputNodeIds)){
             toNode.inputNodeIds = toNode.inputNodeIds.filter(id => id !== conn.from);
         }
+        const stillConnected = (canvas.connections || []).some(item => item.from === conn.from && item.to === conn.to && ['input','flow'].includes(item.kind || 'flow'));
+        if(toNode?.type === 'smart-minimax' && !stillConnected) smartMinimaxDetachSourceRefs(toNode, conn.from);
         if(toNode && ['input','flow'].includes(conn.kind || 'flow')) clearDetachedRunInputRefs(toNode);
         if((conn.kind || 'flow') === 'history'){
             const group = nodes.find(n => n.id === conn.to && isHistoryGroupNode(n) && n.historyFor === conn.from);
             demoteHistoryGroupNode(group);
         }
     });
-    canvas.connections = canvas.connections.filter((_, i) => !set.has(i));
     render();
     return true;
 }
@@ -11522,6 +13028,15 @@ function updateComposer(){
         lastComposerNodeId = '';
         return;
     }
+    if(node?.type === 'smart-minimax'){
+        savePromptDraftForCurrent();
+        composer.classList.remove('open');
+        if(cascadeRunBtn) cascadeRunBtn.style.display = 'none';
+        activeComposerSubject = null;
+        lastComposerNodeId = '';
+        setPromptInputLocked(false);
+        return;
+    }
     composer.classList.toggle('open', !!node);
     if(!isSmartRunnableNode(node)){
         if(cascadeRunBtn) cascadeRunBtn.style.display = 'none';
@@ -12080,6 +13595,14 @@ async function uploadFiles(files){
 function appendImagesToSmartNode(uploaded, targetId='', opts={}){
     const images = [...(uploaded || [])].filter(file => file?.url);
     if(!images.length) return null;
+    const minimaxTarget = nodes.find(n => n.id === targetId && n.type === 'smart-minimax');
+    if(minimaxTarget){
+        smartMinimaxAddRefs(minimaxTarget, images.map(file => ({...file, kind:file.kind || mediaKindForItem(file)})));
+        selectedId = minimaxTarget.id;
+        render();
+        scheduleSave();
+        return minimaxTarget;
+    }
     const targetGroup = nodes.find(n => n.id === targetId && isSmartGroupNode(n));
     let node = targetGroup ? null : (nodes.find(n => n.id === targetId) || selectedNode());
     if(node && !isSmartImageNode(node)) node = null;
@@ -14030,11 +15553,7 @@ async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
         if(!imageRefs.length) throw new Error(tr('smart.errEnhanceNeedRefs'));
         const inputName = await comfyNameForRef(imageRefs[0]);
         const data = await runQueuedSmartComfyGenerate({workflow_json:'Z-Image-Enhance.json', type:'enhance', params:{"15":{image:inputName},"204":{value:Number(runSettings.enhanceStrength ?? 0.5)}}, client_id:smartClientId});
-        let urls = resultMediaUrls(data);
-        if(runSettings.enhanceUpscale && urls[0]){
-            const upscale = await runSmartComfyUpscale(urls[0], runSettings.enhanceUpscaleRes || 2048);
-            urls = resultMediaUrls(upscale);
-        }
+        const urls = resultMediaUrls(data);
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
     if(mode === 'edit'){
@@ -14042,11 +15561,7 @@ async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
         const names = [];
         for(const ref of imageRefs.slice(0, 3)) names.push(await comfyNameForRef(ref));
         const data = await runQueuedSmartComfyGenerate({prompt, workflow_json:'Flux2-Klein.json', type:'klein', params:{"168":{text:prompt},"158":{noise_seed:Math.floor(Math.random()*1000000)},"278":{image:names[0] || ""},"270":{image:names[1] || ""},"292":{image:names[2] || ""},"313":{value:Boolean(names[1])},"314":{value:Boolean(names[2])}}, client_id:smartClientId});
-        let urls = resultMediaUrls(data);
-        if(runSettings.editUpscale && urls[0]){
-            const upscale = await runSmartComfyUpscale(urls[0], runSettings.editUpscaleRes || 2048);
-            urls = resultMediaUrls(upscale);
-        }
+        const urls = resultMediaUrls(data);
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
     const workflowName = runSettings.comfyWorkflow || comfyWorkflows[0]?.name || '';
@@ -14586,6 +16101,7 @@ function runSmartCascadeFromLoop(loopId){
 }
 async function runGeneration(){
     const node = selectedNode();
+    if(node?.type === 'smart-minimax') return runMinimaxNode(node.id);
     const request = buildPromptRequest(node, null, true, smartLoopContext);
     const prompt = request.prompt.trim();
     if(!node) return;
@@ -14812,12 +16328,50 @@ async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
     const _refMax = providerMaxReferenceImages(runSettings.provider_id);
-    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, _refMax)};
+    const payload = {
+        prompt,
+        provider_id:runSettings.provider_id,
+        model:runSettings.model,
+        size:sizeForRun(runSettings),
+        aspect_ratio:API_RATIO_VALUES[runSettings.ratio] || (runSettings.ratio === 'custom' ? String(runSettings.customRatio || '').trim() : ''),
+        resolution:['1k','2k','4k'].includes(runSettings.resolution) ? runSettings.resolution : '',
+        quality:runSettings.quality || 'auto',
+        n:1,
+        reference_images:imageRefsOnly(refs).slice(0, _refMax)
+    };
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
         if(!r.ok) throw new Error(await r.text());
         return r.json();
     })));
     return {taskIds:tasks.map(task => task.task_id).filter(Boolean), count, providerId:payload.provider_id, model:payload.model};
+}
+function smartCompactJson(value, max=4200){
+    let text = '';
+    try {
+        text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    } catch(e) {
+        text = String(value || '');
+    }
+    text = String(text || '').trim();
+    return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+function smartDetailedError(message, details={}){
+    const err = new Error(String(message || tr('smart.errRunFailed')));
+    err.smartDetails = details || {};
+    if(details?.taskId) err.taskId = details.taskId;
+    return err;
+}
+function runningHubPayloadError(stage, data, fallback, extra={}){
+    const detailObj = data?.detail && typeof data.detail === 'object' ? data.detail : null;
+    const rawDetail = detailObj?.message || data?.detail || data?.error || data?.message || data?.failReason || data?.msg || fallback || tr('smart.rhFailed');
+    const detail = typeof rawDetail === 'object' ? smartCompactJson(rawDetail, 1200) : String(rawDetail || '');
+    const raw = detailObj?.raw || data?.raw || data?.data?.raw || data;
+    const code = detailObj?.code ?? data?.code ?? data?.data?.code ?? raw?.code ?? '';
+    const taskId = detailObj?.taskId || detailObj?.task_id || data?.taskId || data?.task_id || data?.data?.taskId || extra.taskId || '';
+    const parts = [`RunningHub ${stage}失败`, detail].filter(Boolean);
+    if(taskId) parts.push(`taskId=${taskId}`);
+    if(code !== '') parts.push(`code=${code}`);
+    return smartDetailedError(parts.join('：'), {stage, taskId, code, raw, ...(detailObj || {}), ...extra});
 }
 async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     const ref = selectedRunningHubRef(runSettings);
@@ -14833,23 +16387,33 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     const body = mode === 'workflow'
         ? {workflowId:ref.id, nodeInfoList, useWallet:runSettings.rhPayment === 'wallet', ...workflowExtras}
         : {webappId:ref.id, nodeInfoList, instanceType:runSettings.rhInstanceType || '', useWallet:runSettings.rhPayment === 'wallet'};
+    if(mode === 'workflow') runSettings.rhWorkflowId = ref.id;
+    else runSettings.rhAppId = ref.id;
+    runSettings.rhMode = mode;
     const submit = await fetch(endpoint, {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(body)
     }).then(async r => {
-        const data = await r.json();
-        if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('smart.rhFailed'));
+        const data = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
+        if(!r.ok || data.success === false) throw runningHubPayloadError('提交', data, tr('smart.rhFailed'), {
+            endpoint,
+            workflowId:body.workflowId || '',
+            webappId:body.webappId || '',
+            nodeInfoList:nodeInfoList.slice(0, 40),
+            hasWorkflow:Boolean(body.workflow)
+        });
         return data.data || data;
     });
     const taskId = submit.taskId;
     if(!taskId) throw new Error(tr('smart.rhNoTaskId'));
+    runSettings.rhTaskId = taskId;
     const useWallet = runSettings.rhPayment === 'wallet';
     for(let i = 0; i < 720; i++){
         await sleep(2500);
         const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}&useWallet=${useWallet ? '1' : '0'}`).then(async r => {
-            const json = await r.json();
-            if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('smart.rhFailed'));
+            const json = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
+            if(!r.ok || json.success === false) throw runningHubPayloadError('查询', json, tr('smart.rhFailed'), {taskId});
             return json.data || json;
         });
         if(data.status === 'SUCCESS'){
@@ -14857,7 +16421,7 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
             if(!urls.length) throw new Error(tr('smart.rhOutputsEmpty'));
             return urls;
         }
-        if(data.status === 'FAILED') throw new Error(data.failReason || tr('smart.rhFailed'));
+        if(data.status === 'FAILED') throw runningHubPayloadError('执行', data, data.failReason || tr('smart.rhFailed'), {taskId});
     }
     throw new Error(tr('smart.rhTimeout'));
 }
@@ -14888,8 +16452,9 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             }
             return item;
         });
-        const manualVideo = manualSmartVideoLink(runSettings)?.url || '';
-        const refVideos = manualVideo ? manualSmartMediaLinks(runSettings).map(item => item.url).filter(Boolean) : videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean);
+        // 云端上传/手动链接只替换素材 URL，不能改变原引用的媒体类型。
+        // 否则图片的云端 URL 会被无条件塞进 videos，导致 APIMart 把 PNG 当参考视频解析。
+        const refVideos = videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean);
         const refAudios = audioRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean).slice(0, 3);
         if(mismatchedAsset) toast('部分认证素材属于其它平台，已回退为普通素材。切换到对应平台的视频接口才能用 asset:// 认证地址。');
         const payload = {
@@ -14963,19 +16528,6 @@ async function urlToBase64(url){
     });
 }
 function sleep(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
-async function runSmartComfyUpscale(imageUrl, resolution){
-    if(!imageUrl) throw new Error(tr('smart.errRunFailed'));
-    const inputName = await comfyNameForRef({url:imageUrl, name:'smart-upscale-input.png'});
-    return runQueuedSmartComfyGenerate({
-        workflow_json:'upscale.json',
-        params:{
-            "15":{image:inputName},
-            "172":{seed:Math.floor(Math.random() * 4294967295), resolution:Number(resolution || 2048)}
-        },
-        type:'enhance',
-        client_id:smartClientId
-    });
-}
 async function runComfyGeneration(node, prompt, refs, pendingNode, meta){
     const allRefs = refs || [];
     refs = imageRefsOnly(allRefs);
@@ -15045,12 +16597,7 @@ async function runComfyEnhance(node, refs, pendingNode, meta){
     if(!refs.length) throw new Error(tr('smart.errEnhanceNeedRefs'));
     const inputName = await comfyNameForRef(refs[0]);
     const data = await runQueuedSmartComfyGenerate({workflow_json:'Z-Image-Enhance.json', type:'enhance', params:{"15":{image:inputName},"204":{value:Number(settings.enhanceStrength ?? 0.5)}}, client_id:smartClientId});
-    //修复超分勾选
-    let out = data.outputs || data.images || [];
-    if(settings.enhanceUpscale && out[0]){
-        const upscale = await runSmartComfyUpscale(out[0], settings.enhanceUpscaleRes || 2048);
-        out = upscale.outputs || upscale.images || [];
-    }
+    const out = data.outputs || data.images || [];
     if(!out.length) throw new Error(tr('smart.errComfyNoImages'));
     if(pendingNode){
         finalizePendingNode(pendingNode, out, meta);
@@ -15066,12 +16613,7 @@ async function runComfyEdit(node, prompt, refs, pendingNode, meta){
     const names = [];
     for(const ref of refs.slice(0, 3)) names.push(await comfyNameForRef(ref));
     const data = await runQueuedSmartComfyGenerate({prompt, workflow_json:'Flux2-Klein.json', type:'klein', params:{"168":{text:prompt},"158":{noise_seed:Math.floor(Math.random()*1000000)},"278":{image:names[0] || ""},"270":{image:names[1] || ""},"292":{image:names[2] || ""},"313":{value:Boolean(names[1])},"314":{value:Boolean(names[2])}}, client_id:smartClientId});
-    //修复超分勾选
-    let out = data.outputs || data.images || [];
-    if(settings.editUpscale && out[0]){
-        const upscale = await runSmartComfyUpscale(out[0], settings.editUpscaleRes || 2048);
-        out = upscale.outputs || upscale.images || [];
-    }
+    const out = data.outputs || data.images || [];
     if(!out.length) throw new Error(tr('smart.errComfyNoImages'));
     if(pendingNode){
         finalizePendingNode(pendingNode, out, meta);
@@ -15084,9 +16626,10 @@ async function runComfyEdit(node, prompt, refs, pendingNode, meta){
     scheduleSave();
 }
 async function comfyNameForRef(ref){
-    if(ref.comfy_name) return ref.comfy_name;
+    const localRef = String(ref?.url || '').startsWith('/assets/');
+    if(ref.comfy_name && !localRef) return ref.comfy_name;
     const response = await fetch(ref.url);
-    if(!response.ok) return ref.name || ref.url;
+    if(!response.ok) throw new Error(`无法读取参考素材「${ref.name || ref.url}」（HTTP ${response.status}）`);
     const blob = await response.blob();
     const form = new FormData();
     form.append('files', blob, ref.name || 'smart-ref.png');
@@ -15094,13 +16637,277 @@ async function comfyNameForRef(ref){
         if(!r.ok) throw new Error(await r.text());
         return r.json();
     });
-    const name = data.files?.[0]?.comfy_name || ref.name || ref.url;
+    const name = String(data.files?.[0]?.comfy_name || '').trim();
+    if(!name) throw new Error(`参考素材「${ref.name || ref.url}」上传到 ComfyUI 失败`);
     const node = ref.nodeId ? nodes.find(n => n.id === ref.nodeId) : null;
     const image = node?.images?.find(img => img.url === ref.url) || (nodes || []).flatMap(n => n.images || []).find(img => img?.url === ref.url);
     if(image) image.comfy_name = name;
     ref.comfy_name = name;
     return name;
 }
+function smartMinimaxPrompt(node){
+    const seg = smartMinimaxSelectedSegment(node);
+    return String(seg?.prompt || '').trim() || String(node.promptDraftText || '').trim() || inputPromptTextFor(node) || 'Generate a cinematic video clip.';
+}
+async function smartMinimaxDynamicParams(node){
+    const seg = smartMinimaxSelectedSegment(node);
+    const duration = Math.max(0.5, Number(seg?.duration || node.duration || 8) || 8);
+    const params = {
+        "136":{},
+        "115":{aspect_ratio:seg?.aspectRatio || node.aspectRatio || '16:9 (Widescreen)', megapixels:Number(seg?.megapixels || node.megapixels || 0.4)},
+        "132":{value:duration},
+        "138":{value:smartMinimaxPrompt(node)},
+        "129":{noise_seed:Math.floor(Math.random() * 4294967295)}
+    };
+    for(let i = 0; i < SMART_MINIMAX_REF_IMAGE_MAX; i++) params["136"][`ref_images.ref_image_${i}`] = null;
+    for(let i = 0; i < SMART_MINIMAX_REF_VIDEO_MAX; i++) params["136"][`ref_videos.ref_video_${i}`] = null;
+    for(let i = 0; i < SMART_MINIMAX_REF_AUDIO_MAX; i++) params["136"][`ref_audios.ref_audio_${i}`] = null;
+    const images = smartMinimaxRefsForKind(node, 'image');
+    if(images.length > SMART_MINIMAX_REF_IMAGE_MAX) throw new Error(`MiniMax H3 最多支持 ${SMART_MINIMAX_REF_IMAGE_MAX} 张参考图`);
+    for(let i = 0; i < images.length; i++){
+        const name = await comfyNameForRef(images[i]);
+        params[String(9000 + i)] = {class_type:'LoadImage', inputs:{image:name}, _meta:{title:`MiniMax image ${i + 1}`}};
+        params["136"][`ref_images.ref_image_${i}`] = [String(9000 + i), 0];
+    }
+    const videos = smartMinimaxRefsForKind(node, 'video');
+    if(videos.length > SMART_MINIMAX_REF_VIDEO_MAX) throw new Error(`MiniMax H3 最多支持 ${SMART_MINIMAX_REF_VIDEO_MAX} 段参考视频`);
+    for(let i = 0; i < videos.length; i++){
+        const name = await comfyNameForRef(videos[i]);
+        const loadNodeId = String(9040 + i);
+        const componentsNodeId = String(9050 + i);
+        params[loadNodeId] = {class_type:'LoadVideo', inputs:{file:name}, _meta:{title:`MiniMax video ${i + 1}`}};
+        params[componentsNodeId] = {class_type:'GetVideoComponents', inputs:{video:[loadNodeId, 0]}, _meta:{title:`MiniMax video frames ${i + 1}`}};
+        params["136"][`ref_videos.ref_video_${i}`] = [componentsNodeId, 0];
+    }
+    const audios = smartMinimaxRefsForKind(node, 'audio');
+    if(audios.length > SMART_MINIMAX_REF_AUDIO_MAX) throw new Error(`MiniMax H3 最多支持 ${SMART_MINIMAX_REF_AUDIO_MAX} 段参考音频`);
+    for(let i = 0; i < audios.length; i++){
+        const name = await comfyNameForRef(audios[i]);
+        params[String(9060 + i)] = {class_type:'LoadAudio', inputs:{audio:name}, _meta:{title:`MiniMax audio ${i + 1}`}};
+        params["136"][`ref_audios.ref_audio_${i}`] = [String(9060 + i), 0];
+    }
+    return params;
+}
+function smartMinimaxReadableError(error, engine='comfyui'){
+    const text = String(error?.message || error || tr('smart.errRunFailed')).trim();
+    const jsonStart = text.indexOf('{');
+    if(jsonStart < 0) return text;
+    try {
+        const payload = JSON.parse(text.slice(jsonStart));
+        const parts = [];
+        const mainError = payload?.error;
+        if(mainError?.message) parts.push(String(mainError.message));
+        if(mainError?.details && !parts.includes(String(mainError.details))) parts.push(String(mainError.details));
+        Object.entries(payload?.node_errors || {}).slice(0, 3).forEach(([nodeId, nodeError]) => {
+            const details = (nodeError?.errors || []).slice(0, 2).map(item => item?.details || item?.message).filter(Boolean);
+            if(details.length) parts.push(`节点 ${nodeId}${nodeError?.class_type ? `（${nodeError.class_type}）` : ''}：${details.join('；')}`);
+        });
+        const prefix = engine === 'runninghub' ? 'RunningHub 工作流执行失败' : 'ComfyUI 拒绝了工作流';
+        return parts.length ? `${prefix}：${parts.join('；')}` : text;
+    } catch {
+        return text;
+    }
+}
+async function smartMinimaxRunningHubSettings(node){
+    const entry = smartMinimaxRunningHubEntry(node);
+    const workflowId = runningHubEntryId(entry, 'workflow');
+    if(!entry || !workflowId) throw new Error(`请先在 API 设置中添加「${SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE}」`);
+    const cached = await ensureRunningHubWorkflow(workflowId, {fetchRemote:true}).catch(() => null);
+    const fields = smartMinimaxRunningHubFieldsForConfig(
+        Array.isArray(cached?.fields) && cached.fields.length ? cached.fields : rhEntryFields(entry)
+    );
+    if(!fields.length) throw new Error(`请先在 API 设置中打开「${runningHubEntryLabel(entry, 'workflow')}」，拉取并保存工作流参数`);
+    const workflowJson = rhWorkflowJsonFromSources(cached?.workflowJson, entry?.workflowJson, entry?.raw?.workflowJson, entry?.raw?.prompt);
+    return {
+        engine:'runninghub',
+        rhConfigKey:runningHubEntryKey('workflow', workflowId),
+        rhPayment:'free',
+        rhInstanceType:'',
+        rhParams:{},
+        rhRandomActive:{},
+        rhFields:fields,
+        rhWorkflowJson:workflowJson,
+        rhOptionalImageMode:'prune-workflow'
+    };
+}
+function smartMinimaxAspectForRunningHub(value, field=null){
+    const text = String(value || '').trim();
+    const match = text.match(/\d+\s*:\s*\d+/);
+    const ratio = match ? match[0].replace(/\s+/g, '') : '16:9';
+    if(smartMinimaxRunningHubFullAspectField(field)) return smartMinimaxFullAspectLabel(ratio);
+    const defaultValue = rhDefaultValue(field);
+    if(defaultValue && new RegExp(`^${ratio.replace(':', '\\s*:\\s*')}(?:\\s|$)`).test(defaultValue.replace(/\s+/g, ' '))) return defaultValue;
+    const options = rhExtractFieldOptions(field) || [];
+    const option = options.find(item => String(item).replace(/\s+/g, '').startsWith(ratio));
+    return option || ratio;
+}
+function smartMinimaxRunRefs(node){
+    return smartMinimaxAllRefs(node).map(ref => ({...ref, kind:mediaKindForItem(ref)}));
+}
+function smartMinimaxRunSnapshot(node, extraSettings={}){
+    const seg = smartMinimaxSelectedSegment(node);
+    const refs = smartMinimaxRunRefs(node);
+    const engine = smartMinimaxEngine(node);
+    const duration = Math.max(0.5, Number(seg?.duration || node?.duration || 8) || 8);
+    const aspectRatio = seg?.aspectRatio || node?.aspectRatio || '16:9 (Widescreen)';
+    const megapixels = Number(seg?.megapixels || node?.megapixels || 0.4);
+    return {
+        nodeId:node?.id || '',
+        nodeType:'smart-minimax',
+        kind:'video',
+        prompt:smartMinimaxPrompt(node),
+        refs:refs.map(ref => ({url:ref.url || '', name:ref.name || 'media', kind:ref.kind || mediaKindForItem(ref)})).filter(ref => ref.url),
+        settings:{
+            engine:engine === 'runninghub' ? 'runninghub' : 'comfy',
+            comfyWorkflow:node?.workflow || 'MiniMax_H3.json',
+            comfyMode:'custom',
+            rhWorkflowId:node?.minimaxRunningHubWorkflowId || SMART_MINIMAX_RUNNINGHUB_WORKFLOW_ID,
+            rhWorkflowTitle:SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE,
+            rhTaskLabel:SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE,
+            rhMode:'workflow',
+            duration,
+            aspectRatio,
+            megapixels:Number.isFinite(megapixels) ? megapixels : 0.4,
+            refCount:refs.length,
+            ...extraSettings
+        }
+    };
+}
+function smartMinimaxLogError(error, engine='comfyui'){
+    const base = smartMinimaxReadableError(error, engine);
+    const details = error?.smartDetails || {};
+    const lines = [base];
+    if(details.taskId && !base.includes(details.taskId)) lines.push(`taskId: ${details.taskId}`);
+    if(details.code !== undefined && details.code !== null && details.code !== '') lines.push(`code: ${details.code}`);
+    if(details.stage) lines.push(`stage: ${details.stage}`);
+    if(details.workflowId) lines.push(`workflowId: ${details.workflowId}`);
+    if(details.webappId) lines.push(`webappId: ${details.webappId}`);
+    if(details.nodeInfoList) lines.push(`nodeInfoList: ${smartCompactJson(details.nodeInfoList, 1800)}`);
+    if(details.raw) lines.push(`raw: ${smartCompactJson(details.raw, 4200)}`);
+    return lines.filter(Boolean).join('\n');
+}
+async function runMinimaxRunningHub(node){
+    const seg = smartMinimaxSelectedSegment(node);
+    const runSettings = await smartMinimaxRunningHubSettings(node);
+    const fields = runSettings.rhFields || [];
+    const duration = Math.max(0.5, Number(seg?.duration || node.duration || 8) || 8);
+    const aspectField = fields.find(item => smartMinimaxRunningHubFieldMatches(item, [/aspect[_\s-]?ratio|\bratio\b|画面比例|比例/], ['115::aspect_ratio']));
+    const aspect = smartMinimaxAspectForRunningHub(seg?.aspectRatio || node.aspectRatio || '16:9', aspectField);
+    const prompt = smartMinimaxPrompt(node);
+    smartMinimaxSetRunningHubParam(runSettings, fields, [/prompt|positive|text|caption|description|关键词|提示词|正向/], ['138::value'], prompt);
+    smartMinimaxSetRunningHubParam(runSettings, fields, [/duration|seconds|时长|秒/], ['132::value'], duration);
+    smartMinimaxSetRunningHubParam(runSettings, fields, [/aspect[_\s-]?ratio|\bratio\b|画面比例|比例/], ['115::aspect_ratio'], aspect);
+    smartMinimaxSetRunningHubParam(runSettings, fields, [/megapixels?|百万像素/], ['115::megapixels'], Number(seg?.megapixels || node.megapixels || 0.4));
+    const refs = smartMinimaxRunRefs(node);
+    const urls = await runRunningHubGeneration(prompt, refs, runSettings);
+    if(!urls.length) throw new Error(tr('smart.errNoOutVideos'));
+    return {urls, kind:mediaKindForUrls(urls, 'video'), runSettings};
+}
+async function runMinimaxNode(nodeId){
+    const node = nodes.find(n => n.id === nodeId && n.type === 'smart-minimax');
+    if(!node || node.running) return;
+    savePromptDraftForCurrent();
+    node.runStartedAt = nowMs();
+    delete node.runFinishedAt;
+    delete node.runElapsedMs;
+    node.runTimerHidden = false;
+    node.running = true;
+    const startedAt = node.runStartedAt;
+    let runLog = smartMinimaxRunSnapshot(node);
+    render();
+    try {
+        let urls = [];
+        let resultKind = 'video';
+        if(smartMinimaxEngine(node) === 'runninghub'){
+            const rhResult = await runMinimaxRunningHub(node);
+            urls = rhResult.urls || [];
+            resultKind = rhResult.kind || 'video';
+            if(rhResult.runSettings) runLog = smartMinimaxRunSnapshot(node, {
+                rhWorkflowId:rhResult.runSettings.rhWorkflowId || runLog.settings.rhWorkflowId,
+                rhAppId:rhResult.runSettings.rhAppId || '',
+                rhTaskId:rhResult.runSettings.rhTaskId || '',
+                rhMode:rhResult.runSettings.rhMode || 'workflow'
+            });
+        } else {
+            const params = await smartMinimaxDynamicParams(node);
+            const result = await runQueuedSmartComfyGenerate({
+                prompt:smartMinimaxPrompt(node),
+                workflow_json:node.workflow || 'MiniMax_H3.json',
+                params,
+                type:'minimax-h3',
+                client_id:smartClientId
+            });
+            urls = resultMediaUrls(result);
+            resultKind = mediaKindForUrls(urls, result.videos?.length ? 'video' : 'video');
+        }
+        if(!urls.length) throw new Error(tr('smart.errComfyNoImages'));
+        const kind = resultKind;
+        const out = urls.map((item, i) => {
+            const url = typeof item === 'string' ? item : item?.url || '';
+            const itemKind = typeof item === 'object' && item.kind ? item.kind : kind;
+            const ext = itemKind === 'audio' ? 'mp3' : itemKind === 'image' ? 'png' : 'mp4';
+            return { ...(typeof item === 'object' ? item : {}), url, name:(typeof item === 'object' && item.name) || `minimax-${i + 1}.${ext}`, kind:itemKind };
+        }).filter(item => item.url);
+        const seg = smartMinimaxSelectedSegment(node);
+        out.forEach(item => smartMinimaxSetSegmentResult(node, seg, item));
+        addSmartGenerationLog({run:runLog, outputs:out, runMs:Math.max(0, nowMs() - Number(startedAt || nowMs()))});
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        toast(`MiniMax segment ${Math.max(1, node.segments.findIndex(item => item.id === seg?.id) + 1)} done`);
+        scheduleSave();
+    } catch(e) {
+        const readable = smartMinimaxReadableError(e, smartMinimaxEngine(node));
+        const details = e?.smartDetails || {};
+        runLog = smartMinimaxRunSnapshot(node, {
+            rhTaskId:details.taskId || runLog.settings.rhTaskId || '',
+            rhWorkflowId:details.workflowId || runLog.settings.rhWorkflowId || '',
+            rhAppId:details.webappId || runLog.settings.rhAppId || '',
+            rhMode:details.webappId ? 'app' : (runLog.settings.rhMode || 'workflow')
+        });
+        addSmartGenerationLog({run:runLog, outputs:[], runMs:Math.max(0, nowMs() - Number(startedAt || nowMs())), error:smartMinimaxLogError(e, smartMinimaxEngine(node))});
+        toast(readable.slice(0, 320));
+    } finally {
+        node.runFinishedAt = nowMs();
+        node.runElapsedMs = Math.max(0, node.runFinishedAt - Number(node.runStartedAt || startedAt));
+        node.runTimerHidden = false;
+        node.running = false;
+        scheduleSave();
+        render();
+    }
+}
+async function exportMinimaxTimeline(node, options={}){
+    smartMinimaxEnsureSegment(node);
+    const sourceSegments = options.selectedOnly ? [smartMinimaxSelectedSegment(node)].filter(Boolean) : (node.segments || []);
+    const clips = sourceSegments.filter(seg => seg?.result?.url).map((seg, index) => ({
+        url:seg.result.url,
+        name:seg.result.name || `minimax-${index + 1}.mp4`,
+        start:Number(seg.trimIn || 0) || 0,
+        end:Number(seg.trimOut || seg.duration || 0) || Number(seg.duration || 0),
+        duration:Number(seg.duration || 0) || 0
+    })).filter(item => item.url);
+    if(!clips.length){
+        toast('No generated clips to export.');
+        return;
+    }
+    if(clips.length === 1 && clips[0].start <= 0 && (!clips[0].end || clips[0].end >= clips[0].duration)){
+        const only = (node.segments || []).find(seg => seg?.result?.url)?.result;
+        if(only?.url) downloadPreviewFile(only);
+        return;
+    }
+    try {
+        toast('Exporting timeline...');
+        const result = await fetch('/api/smart-canvas/minimax-export', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({clips, filename:`minimax-timeline-${Date.now()}.mp4`})
+        }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, 'Export failed')); return r.json(); });
+        if(result?.url) downloadPreviewFile({url:result.url, name:result.name || 'minimax-timeline.mp4', kind:'video'});
+    } catch(e) {
+        toast((e.message || 'Export failed').slice(0, 180));
+    }
+}
+
 function smartPendingTasks(node){
     if(!node || !Array.isArray(node.pendingTasks)) return [];
     return node.pendingTasks.filter(task => task && task.taskId);
@@ -15784,7 +17591,7 @@ function openCreateMenu(event, options={}){
     createMenuPoint = screenToWorld(event);
     createMenuGroupId = options.groupId || '';
     const w = 500;
-    const h = 114;
+    const h = 222;
     const left = Math.max(14, Math.min(window.innerWidth - w - 14, event.clientX + 8));
     const top = Math.max(14, Math.min(window.innerHeight - h - 14, event.clientY + 8));
     createMenu.style.left = `${left}px`;
@@ -15809,6 +17616,7 @@ function createNodeFromMenu(type){
     let created = null;
     if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
+    else if(type === 'minimax') created = createMinimaxNode(p.x - 520, p.y - 320);
     else created = createImageNodeAt(p);
     createMenuGroupId = groupId;
     addCreatedNodeToMenuGroup(created);
@@ -16403,13 +18211,13 @@ window.onmouseup = e => {
     }
 };
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
+    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,.minimax-library-list,.minimax-ref-track,[data-thumb-scroll]')) return;
     e.preventDefault();
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const before = {x:(sx - viewport.x) / viewport.scale, y:(sy - viewport.y) / viewport.scale};
-    const factor = canvasWheelZoomFactor(e, shell.clientHeight || window.innerHeight || 800);
+    const factor = Math.exp(-e.deltaY * 0.001);
     viewport.scale = safeScale(viewport.scale * factor);
     viewport.x = sx - before.x * viewport.scale;
     viewport.y = sy - before.y * viewport.scale;
@@ -16417,6 +18225,22 @@ shell.addEventListener('wheel', e => {
     scheduleSave();
 }, {passive:false});
 shell.ondragover = e => setSmartDropCopyEffect(e, true);
+document.addEventListener('dragover', e => {
+    const ctx = globalMinimaxDropContext(e);
+    if(!ctx || !smartMinimaxDropAccepted(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+    e.dataTransfer.dropEffect = smartDropDataTypes(e.dataTransfer).includes('application/x-minimax-ref') && !e.altKey ? 'move' : 'copy';
+}, true);
+document.addEventListener('drop', e => {
+    const ctx = globalMinimaxDropContext(e);
+    if(!ctx || !smartMinimaxDropAccepted(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+    handleMinimaxTimelineDrop(ctx.el, ctx.node, e, ctx.zone);
+}, true);
 shell.ondrop = async e => {
     e.preventDefault();
     if(e.target.closest('.image-node')) return;
@@ -16467,6 +18291,18 @@ window.addEventListener('paste', e => {
 });
 window.addEventListener('keydown', e => {
     const key = String(e.key || '').toLowerCase();
+    if((e.code === 'Space' || e.key === ' ') && !e.ctrlKey && !e.metaKey && !e.altKey && !isEditableTarget(e.target)){
+        const active = selectedNode();
+        if(active?.type === 'smart-minimax'){
+            const nodeEl = [...(world?.querySelectorAll?.('.image-node') || [])].find(item => item.dataset.id === active.id);
+            const playBtn = nodeEl?.querySelector?.('[data-minimax-play-timeline]');
+            if(playBtn){
+                e.preventDefault();
+                playBtn.click();
+                return;
+            }
+        }
+    }
     if(key === 'r' && !isEditableTarget(e.target)) isRKeyDown = true;
     if(imageEditModal.classList.contains('open') && imageEditMode === 'preview' && !isEditableTarget(e.target)){
         if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
