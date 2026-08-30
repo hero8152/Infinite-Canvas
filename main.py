@@ -1979,6 +1979,9 @@ INSPIRE_SHA_TTL = 15 * 60              # 上游 commit SHA 缓存 15 分钟 → 
 INSPIRE_SHA_FAIL_TTL = 5 * 60          # SHA 解析失败后 5 分钟再试
 INSPIRE_DIMS_PROBE_BUDGET = 6.0        # 单次请求内同步探测图片尺寸的时间预算（秒），剩余转后台继续
 INSPIRE_DIMS_FILE = os.path.join(BASE_DIR, "inspire_image_dims.json")
+# 提示词中文译文（仓库内置静态数据，随 git 分发；上游更新后手动翻译增量并更新此文件）
+INSPIRE_PROMPT_ZH_FILE = os.path.join(DATA_DIR, "inspire_prompt_zh.json")
+_inspire_prompt_zh = {"loaded": False, "mtime": 0.0, "map": {}}   # case_id(str) -> 中文提示词
 _inspire_cases_cache = {"data": None, "sha": "", "ts": 0.0}
 _inspire_sha_cache = {"sha": "", "ts": 0.0}
 _inspire_dims = {"loaded": False, "dims": {}}   # case_id(str) -> [width, height]
@@ -2092,6 +2095,25 @@ def _load_inspire_dims():
         pass
 
 
+def _load_inspire_prompt_zh():
+    """加载提示词中文译文（随文件 mtime 自动重载，便于增量更新翻译）。"""
+    try:
+        mtime = os.path.getmtime(INSPIRE_PROMPT_ZH_FILE)
+    except OSError:
+        return
+    if _inspire_prompt_zh["loaded"] and _inspire_prompt_zh["mtime"] == mtime:
+        return
+    try:
+        with open(INSPIRE_PROMPT_ZH_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            _inspire_prompt_zh["map"] = {str(k): str(v) for k, v in d.items() if v}
+            _inspire_prompt_zh["loaded"] = True
+            _inspire_prompt_zh["mtime"] = mtime
+    except Exception:
+        pass
+
+
 def _save_inspire_dims():
     try:
         with open(INSPIRE_DIMS_FILE, "w", encoding="utf-8") as f:
@@ -2124,6 +2146,7 @@ async def inspire_gallery():
     sha = await _resolve_inspire_sha()
     data = await _fetch_inspire_cases(sha)
     _load_inspire_dims()
+    _load_inspire_prompt_zh()
     cases = data.get("cases", []) or []
     # 找出还没有尺寸记录的案例，起探测任务（预算时间内同步等一部分，其余后台继续）
     missing = []
@@ -2152,10 +2175,13 @@ async def inspire_gallery():
         else:
             img = INSPIRE_RAW_BASE + "/" + img
         dims = _inspire_dims["dims"].get(str(c.get("id") or ""))
+        prompt = c.get("prompt") or c.get("promptPreview") or ""
+        # 优先使用仓库内置的中文译文（见 data/inspire_prompt_zh.json 的维护说明）
+        prompt = _inspire_prompt_zh["map"].get(str(c.get("id") or ""), prompt)
         items.append({
             "id": c.get("id"),
             "title": c.get("title") or "",
-            "prompt": c.get("prompt") or c.get("promptPreview") or "",
+            "prompt": prompt,
             "category": c.get("category") or "",
             "styles": c.get("styles") or [],
             "scenes": c.get("scenes") or [],

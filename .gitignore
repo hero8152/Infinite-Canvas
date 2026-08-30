@@ -3,7 +3,8 @@ API/.env
 
 # 运行时数据
 assets/
-data/
+data/*
+!data/inspire_prompt_zh.json
 
 # 系统文件
 .DS_Store
