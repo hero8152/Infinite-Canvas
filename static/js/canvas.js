@@ -764,6 +764,29 @@ function videoModelOptions(selectedModel, providerId){
     const selected = selectedModel || models[0];
     return uniqueModels([selected, ...models]).filter(Boolean).map(model => `<option value="${escapeHtml(model)}" ${model === selected ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
 }
+function isMinimaxH3Model(model){
+    return /minimax[-_ ]?h3/i.test(String(model || '').trim());
+}
+function videoResolutionOptions(selectedModel, currentValue){
+    const value = String(currentValue || '');
+    if(isMinimaxH3Model(selectedModel)){
+        // MiniMax-H3 只接受 2K / 768P，其他值（含 480p）会被上游直接拒绝
+        const safe = (value === '2K' || value === '768P') ? value : '768P';
+        return [['2K','2K'],['768P','768P']].map(([v,l]) => `<option value="${v}" ${v === safe ? 'selected' : ''}>${l}</option>`).join('');
+    }
+    const options = [['','Auto'],['480p','480p'],['720p','720p'],['1080p','1080p'],['780P','780P']];
+    return options.map(([v,l]) => `<option value="${v}" ${value === v ? 'selected' : ''}>${l}</option>`).join('');
+}
+function syncVideoResolutionToModel(node, resolutionSelect){
+    // 模型和分辨率联动：切到 MiniMax-H3 时把非法分辨率纠正为 768P，
+    // 切走时清掉 MiniMax 专用的 2K/768P 值，避免污染其他模型。
+    if(isMinimaxH3Model(node.model)){
+        if(node.resolution !== '2K' && node.resolution !== '768P') node.resolution = '768P';
+    } else if(node.resolution === '2K' || node.resolution === '768P'){
+        node.resolution = '';
+    }
+    if(resolutionSelect) resolutionSelect.innerHTML = videoResolutionOptions(node.model, node.resolution);
+}
 function allImageModels(providerId){
     const providerModels = providerImageModels(providerId || managedProviderId);
     return uniqueModels(providerModels);
@@ -8752,11 +8775,7 @@ function renderVideoBody(node){
                 <label class="field" style="flex:1">
                     <div class="setting-title">${tr('canvas.videoResolution')}</div>
                     <select class="select-lite video-resolution compact-select">
-                        <option value="">Auto</option>
-                        <option value="480p">480p</option>
-                        <option value="720p">720p</option>
-                        <option value="1080p">1080p</option>
-                        <option value="780P">780P</option>
+                        ${videoResolutionOptions(node.model, node.resolution)}
                     </select>
                 </label>
             </div>
@@ -8784,7 +8803,7 @@ function renderVideoBody(node){
     providerSelect.value = node.apiProvider;
     durationSelect.value = String(node.duration || 5);
     aspectSelect.value = node.aspectRatio || '16:9';
-    resolutionSelect.value = node.resolution || '';
+    syncVideoResolutionToModel(node, resolutionSelect);
     [providerSelect, modelSelect, durationSelect, aspectSelect, resolutionSelect].forEach(input => {
         input.onmousedown = e => e.stopPropagation();
         input.onclick = e => e.stopPropagation();
@@ -8795,9 +8814,15 @@ function renderVideoBody(node){
         const models = providerVideoModels(node.apiProvider);
         if(!models.includes(node.model)) node.model = models[0] || node.model;
         modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
+        syncVideoResolutionToModel(node, resolutionSelect);
         scheduleSave();
     };
-    modelSelect.onchange = e => { e.stopPropagation(); node.model = e.target.value; scheduleSave(); };
+    modelSelect.onchange = e => {
+        e.stopPropagation();
+        node.model = e.target.value;
+        syncVideoResolutionToModel(node, resolutionSelect);
+        scheduleSave();
+    };
     durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(60, Number(e.target.value || 5))); scheduleSave(); };
     durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5)))); };
     aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };

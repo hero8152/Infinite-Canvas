@@ -23,11 +23,11 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.08.04.1785292594"></script>
-    <script src="/static/js/theme.js?v=2026.08.04.1785292593"></script>
-    <script src="/static/js/i18n.js?v=2026.08.04.1785292592"></script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2026.08.29.1784282603"></script>
+    <script src="/static/js/theme.js?v=2026.08.29.1784282603"></script>
+    <script src="/static/js/i18n.js?v=2026.08.29.1784282603"></script>
     <style>
-        @import url('/static/vendor/css/fonts.css?v=2026.08.04.1785292593');
+        @import url('/static/vendor/css/fonts.css?v=2026.08.29.1784282603');
 
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -1614,14 +1614,14 @@
                     </svg>
                     <span class="side-pill-text" data-i18n="common.project">项目主页</span>
                 </button>
-                <button id="update-now-btn" class="update-now-btn" onclick="runProjectUpdate()" type="button" title="一键更新">
+                <button id="update-now-btn" class="update-now-btn" onclick="runProjectUpdate()" type="button" title="一键更新" style="display:none">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
                         <path d="M21 3v6h-6"></path>
                     </svg>
                     <span id="update-now-text" class="update-now-text" data-i18n="update.oneClick">一键更新</span>
                 </button>
-                <div id="project-version-badge" class="project-version-badge" title="点击检测更新" role="button" tabindex="0" onclick="checkForUpdates(true)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();checkForUpdates(true);}">v-</div>
+                <div id="project-version-badge" class="project-version-badge">Agent版</div>
             </div>
 
             <div class="author-box">
@@ -1672,16 +1672,16 @@
         </script>
 
         <main class="stage">
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=2026.08.04.1785891163" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.08.04.1787619792" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.08.04.1785891163" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=2026.08.29.1788009702" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-enhance" data-src="/static/enhance.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
+            <iframe id="frame-angle" data-src="/static/angle.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.08.29.1788009702" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -1794,12 +1794,15 @@
         const DEFAULT_PAGE_ID = 'zimage';
         const PAGE_IDS = ['zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
         const LOCAL_PAGE_IDS = ['zimage','enhance','klein','angle'];
-        const PROJECT_URL = 'https://github.com/hero8152/Infinite-Canvas';
-        let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION' };
+        const PROJECT_URL = 'https://github.com/mufanmu/Infinite-Canvas-agent';
+        let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'' };
         let updateConnectivityResult = null;
         let projectUpdateRunning = false;
         let projectUpdateAbort = null;  // 当前更新请求的 AbortController，便于用户中途取消
-        let updateSource = localStorage.getItem('studio_update_source') || 'github';
+        // 更新源：本分支只跟自有仓库比对。原 ModelScope 备份源指向上游，已禁用。
+        // UPDATE_SOURCE_MODELSCOPE_ENABLED 置 true 且后端填好常量后，下方逻辑会自动恢复双源。
+        const UPDATE_SOURCE_MODELSCOPE_ENABLED = false;
+        let updateSource = 'github';
         let projectUpdateNotes = null;
 
         function setSidebarPinned(pinned, options = {}) {
@@ -2103,7 +2106,7 @@
                 sidebar.addEventListener('mouseenter', () => pauseScaleInFrames());
                 sidebar.addEventListener('mouseleave', () => pauseScaleInFrames());
             }
-            checkForUpdates();
+            checkForUpdates(); // 自动更新检查
         });
 
         // sync theme when iframe loads
@@ -2276,7 +2279,8 @@
         }
 
         function setUpdateSource(source) {
-            updateSource = source === 'modelscope' ? 'modelscope' : 'github';
+            // ModelScope 源禁用时强制 GitHub，避免误拉上游代码覆盖本分支改造
+            updateSource = (UPDATE_SOURCE_MODELSCOPE_ENABLED && source === 'modelscope') ? 'modelscope' : 'github';
             localStorage.setItem('studio_update_source', updateSource);
             refreshProjectUpdateModalText();
         }
@@ -2295,6 +2299,9 @@
         function bestUpdateSourceFromConnectivity(data) {
             const results = data?.results || [];
             const github = sourceConnectivityStats('github', results);
+            if(!UPDATE_SOURCE_MODELSCOPE_ENABLED) {
+                return github.ok ? 'github' : updateSource;
+            }
             const ms = sourceConnectivityStats('modelscope', results);
             if(github.ok && ms.ok) return ms.avg < github.avg ? 'modelscope' : 'github';
             if(ms.ok) return 'modelscope';
@@ -2342,13 +2349,15 @@
             const github = sources.github || {};
             const ms = sources.modelscope || {};
             return [
-                { name:'GitHub 更新列表', url:github.tree_url || appInfo.tree_url || 'https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1', source:'github', required:true },
-                { name:'GitHub 版本文件', url:github.version_url || appInfo.version_url || 'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION', source:'github', required:true },
+                { name:'GitHub 更新列表', url:github.tree_url || appInfo.tree_url || 'https://api.github.com/repos/mufanmu/Infinite-Canvas-agent/git/trees/main?recursive=1', source:'github', required:true },
+                { name:'GitHub 版本文件', url:github.version_url || appInfo.version_url || 'https://raw.githubusercontent.com/mufanmu/Infinite-Canvas-agent/main/VERSION', source:'github', required:true },
                 { name:'GitHub 主页', url:'https://github.com/', source:'github' },
-                { name:'ModelScope 版本文件', url:ms.version_url || 'https://www.modelscope.cn/api/v1/studio/Daniel8152/Infinite-Canvas/repo?Revision=master&FilePath=VERSION', source:'modelscope', required:true },
-                { name:'ModelScope 空间页面', url:ms.repo_url || 'https://modelscope.cn/studios/Daniel8152/Infinite-Canvas', source:'modelscope' },
-                { name:'ModelScope 主页', url:'https://modelscope.cn/', source:'modelscope' },
                 { name:'Google 连通性', url:'https://www.google.com/generate_204', source:'reference' },
+                ...(UPDATE_SOURCE_MODELSCOPE_ENABLED ? [
+                    { name:'ModelScope 版本文件', url:ms.version_url || '', source:'modelscope', required:true },
+                    { name:'ModelScope 空间页面', url:ms.repo_url || '', source:'modelscope' },
+                    { name:'ModelScope 主页', url:'https://modelscope.cn/', source:'modelscope' },
+                ] : []),
             ];
         }
 
@@ -2385,7 +2394,9 @@
             });
             };
             renderInto(document.querySelector('[data-connectivity-source="github"]'), 'github');
-            renderInto(document.querySelector('[data-connectivity-source="modelscope"]'), 'modelscope');
+            if(UPDATE_SOURCE_MODELSCOPE_ENABLED) {
+                renderInto(document.querySelector('[data-connectivity-source="modelscope"]'), 'modelscope');
+            }
         }
 
         function refreshProjectUpdateModalText() {
@@ -2436,8 +2447,12 @@
                     'warn',
                     updateUiText('建议先测试连通性', 'Connectivity test recommended'),
                     updateUiText(
-                        '测试会同时测速 GitHub 和 ModelScope。你可以根据结果切换下载源。',
-                        'The test checks both GitHub and ModelScope. Choose the faster reachable source before updating.'
+                        UPDATE_SOURCE_MODELSCOPE_ENABLED
+                            ? '测试会同时测速 GitHub 和 ModelScope。你可以根据结果切换下载源。'
+                            : '测试会检测自有仓库 mufanmu/Infinite-Canvas-agent 的连通性，确认可访问后再更新。',
+                        UPDATE_SOURCE_MODELSCOPE_ENABLED
+                            ? 'The test checks both GitHub and ModelScope. Choose the faster reachable source before updating.'
+                            : 'The test checks connectivity to mufanmu/Infinite-Canvas-agent before updating.'
                     )
                 );
             } else if(updateConnectivityResult.backend_missing) {
@@ -2477,6 +2492,9 @@
             const modal = document.getElementById('project-update-modal');
             if(!modal) return;
             updateConnectivityResult = null;
+            // ModelScope 源禁用时隐藏该卡片（DOM 结构保留，将来恢复双源会自动重新显示）
+            const msCard = document.getElementById('update-source-modelscope');
+            if(msCard) msCard.hidden = !UPDATE_SOURCE_MODELSCOPE_ENABLED;
             refreshProjectUpdateModalText();
             modal.hidden = false;
             document.getElementById('connectivity-test-btn')?.focus?.();
@@ -2505,7 +2523,7 @@
 
         function computeConnectivitySources(results) {
             const out = {};
-            for(const source of ['github', 'modelscope']) {
+            for(const source of ['github', ...(UPDATE_SOURCE_MODELSCOPE_ENABLED ? ['modelscope'] : [])]) {
                 const reqAll = (results || []).filter(it => it.source === source && it.required);
                 out[source] = {
                     ok: reqAll.length > 0 && reqAll.every(it => it.ok),
@@ -2765,7 +2783,7 @@
                 let best = null;
                 let reachable = false;
                 let serverChecked = false;
-                // 优先走后端检测：服务端用系统代理同时检测 GitHub 和 ModelScope，避免浏览器跨域/被墙
+                // 优先走后端检测：服务端用系统代理检测远端版本，避免浏览器跨域/被墙
                 try {
                     const r = await fetch('/api/check-update', { cache:'no-store' });
                     if(r.ok) {
@@ -2776,12 +2794,12 @@
                         if(d.latest?.version) best = {source:d.latest.source, version:d.latest.version, update_notes:d.latest.update_notes || d.update_notes || null};
                     }
                 } catch(e) {}
-                // 兜底：旧后端无 /api/check-update 时，浏览器直接拉取双源 VERSION
+                // 兜底：旧后端无 /api/check-update 时，浏览器直接拉取远端 VERSION
                 if(!serverChecked) {
                     const sources = appInfo.sources || {};
                     const candidates = [
                         {source:'github', url:sources.github?.version_url || appInfo.version_url || ''},
-                        {source:'modelscope', url:sources.modelscope?.version_url || ''},
+                        ...(UPDATE_SOURCE_MODELSCOPE_ENABLED ? [{source:'modelscope', url:sources.modelscope?.version_url || ''}] : []),
                     ].filter(item => item.url);
                     for(const item of candidates) {
                         try {
@@ -2803,7 +2821,7 @@
                     } else if(reachable) {
                         alert(isEn ? `You are on the latest version (${versionLabel(current)}).` : `已是最新版本（${versionLabel(current)}）。`);
                     } else {
-                        alert(isEn ? 'Could not reach GitHub or ModelScope. Check your network/proxy and try again.' : '无法连接 GitHub 或 ModelScope 更新源，请检查网络或代理后重试。');
+                        alert(isEn ? 'Could not reach the update source. Check your network/proxy and try again.' : '无法连接更新源，请检查网络或代理后重试。');
                     }
                 }
             } catch(e) {

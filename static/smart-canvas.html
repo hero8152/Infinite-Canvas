@@ -16,11 +16,11 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/lucide.js?v=2026.08.04.1785292594"></script>
-    <script src="/static/js/theme.js?v=2026.08.04.1785292593"></script>
-    <script src="/static/js/touch-mouse.js?v=2026.08.04.1785292587"></script>
-    <script src="/static/js/i18n.js?v=2026.08.04.1785292592"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.08.04.1785853706">
+    <script src="/static/vendor/js/lucide.js?v=2026.08.29.1784282603"></script>
+    <script src="/static/js/theme.js?v=2026.08.29.1784282603"></script>
+    <script src="/static/js/touch-mouse.js?v=2026.08.29.1784282603"></script>
+    <script src="/static/js/i18n.js?v=2026.08.29.1784282603"></script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.08.29.1788061223">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -140,6 +140,7 @@
             <div id="promptTemplateBody" class="prompt-template-body"></div>
         </div>
         <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
+        <button id="smartSendAgentBtn" class="minimap-arrange-btn" type="button" title="发送至Agent" aria-label="发送至Agent" hidden><i data-lucide="bot"></i><span>发送至Agent</span></button>
         <div id="minimap" class="smart-minimap" aria-hidden="true">
             <div id="minimapContent" class="smart-minimap-content">
                 <div id="minimapViewport" class="smart-minimap-viewport"></div>
@@ -149,6 +150,8 @@
         <button id="smartShortcutToggle" class="smart-shortcut-toggle" type="button" onclick="openSmartCanvasShortcuts()" title="快捷键" aria-label="快捷键" data-i18n-title="smart.shortcuts"><i data-lucide="keyboard"></i><span data-i18n="smart.shortcuts">快捷键</span></button>
         <button id="smartLogToggle" class="smart-log-toggle" type="button" onclick="openSmartCanvasLog()" title="日志" aria-label="日志" data-i18n-title="canvas.logs"><i data-lucide="list-todo"></i><span data-i18n="canvas.logs">日志</span></button>
         <button id="assetToggle" class="asset-toggle" type="button"><i data-lucide="library"></i><span data-i18n="smart.assetLibrary">资产库</span></button>
+        <button id="agentToggle" class="agent-toggle" type="button"><i data-lucide="bot"></i><span data-i18n="smart.agentPanel">AI Agent</span></button>
+        <button id="inspireToggle" class="inspire-toggle" type="button" title="灵感库：搜参考图、找提示词"><i data-lucide="sparkles"></i><span>灵感库</span></button>
         <aside id="smartWorkflowTransferModal" class="workflow-transfer-panel">
             <div class="workflow-transfer-head">
                 <div>
@@ -199,6 +202,162 @@
             <div id="assetDropZone" class="asset-drop-zone" data-i18n="smart.assetDropHint">把画布图片拖到这里保存到当前文件夹</div>
             <div id="assetGrid" class="asset-grid"></div>
             <div id="workflowEmpty" class="workflow-empty" style="display:none" data-i18n="smart.assetWorkflowEmpty">工作流资产先预留在这里，后续接入。</div>
+        </aside>
+        <aside id="agentPanel" class="agent-panel">
+            <div class="asset-head">
+                <div class="asset-title"><i data-lucide="bot"></i><span data-i18n="smart.agentPanel">AI Agent</span></div>
+                <button id="agentNewChatBtn" class="asset-mini-btn" type="button" title="新建对话"><i data-lucide="plus"></i></button>
+                <button id="agentChatListBtn" class="asset-mini-btn" type="button" title="对话列表"><i data-lucide="list"></i></button>
+                <div class="agent-more-wrap">
+                    <button id="agentMoreBtn" class="asset-mini-btn" type="button" title="更多操作"><i data-lucide="more-horizontal"></i></button>
+                    <div id="agentMorePanel" class="agent-more-panel" hidden>
+                        <button id="agentDeleteChatBtn" class="agent-more-item" type="button"><i data-lucide="trash-2"></i><span>删除当前对话</span></button>
+                    </div>
+                </div>
+            </div>
+            <div class="agent-models" style="display:none">
+                <select id="agentChatProvider" class="agent-select"></select>
+                <select id="agentChatModel" class="agent-select"></select>
+                <select id="agentGenProvider" class="agent-select"></select>
+                <select id="agentGenModel" class="agent-select"></select>
+                <select id="agentGenRatio" class="agent-select">
+                    <option value="square">1:1</option>
+                    <option value="portrait">2:3</option>
+                    <option value="portrait43">3:4</option>
+                    <option value="landscape43">4:3</option>
+                    <option value="landscape">3:2</option>
+                    <option value="story">9:16</option>
+                    <option value="wide">16:9</option>
+                    <option value="ultrawide">21:9</option>
+                    <option value="ultratall">9:21</option>
+                </select>
+                <select id="agentGenResolution" class="agent-select">
+                    <option value="1k">1K</option>
+                    <option value="2k">2K</option>
+                    <option value="4k">4K</option>
+                </select>
+                <select id="agentGenCount" class="agent-select">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                </select>
+            </div>
+            <div id="agentChatListPanel" class="agent-chat-list-panel" hidden></div>
+            <div id="agentMessages" class="agent-messages"></div>
+            <div class="agent-input-area">
+                <div class="agent-onebox">
+                    <div id="agentAttachRow" class="agent-attach-row"></div>
+                    <textarea id="agentInput" rows="2" data-i18n-placeholder="smart.agentPlaceholder" placeholder="输入需求，@ 引用画布图片..."></textarea>
+                    <div class="agent-toolbar">
+                        <button id="agentAttachBtn" class="agent-toolbar-icon" type="button" data-i18n-title="smart.agentAttach" title="添加图片或 Skill"><i data-lucide="paperclip"></i></button>
+                        <div class="agent-toolbar-dropdown-wrap">
+                            <button id="agentModelBtn" class="agent-toolbar-btn" type="button"><span id="agentModelLabel">模型</span><i data-lucide="chevron-down"></i></button>
+                            <div id="agentModelPanel" class="agent-dropdown-panel" hidden>
+                                <div class="agent-dropdown-row"><label>理解</label><div class="agent-dropdown-selects" id="agentChatModelSelects"></div></div>
+                                <div class="agent-dropdown-row"><label>生图</label><div class="agent-dropdown-selects" id="agentGenSelects"></div></div>
+                            </div>
+                        </div>
+                        <div class="agent-toolbar-dropdown-wrap">
+                            <button id="agentParamsBtn" class="agent-toolbar-btn" type="button"><span id="agentParamsLabel">16:9 · 1K · 1张</span><i data-lucide="chevron-down"></i></button>
+                            <div id="agentParamsPanel" class="agent-dropdown-panel agent-params-panel" hidden>
+                                <div class="agent-params-section">
+                                    <div class="agent-params-title">质量</div>
+                                    <div class="agent-quality-seg" id="agentQualitySeg">
+                                        <button class="agent-quality-btn active" type="button" data-quality="">自动</button>
+                                        <button class="agent-quality-btn" type="button" data-quality="high">高</button>
+                                        <button class="agent-quality-btn" type="button" data-quality="medium">中</button>
+                                        <button class="agent-quality-btn" type="button" data-quality="low">低</button>
+                                    </div>
+                                </div>
+                                <div class="agent-params-section">
+                                    <div class="agent-params-title">比例</div>
+                                    <div class="agent-ratio-grid" id="agentRatioGrid">
+                                        <button class="agent-ratio-btn active" type="button" data-ratio="square"><span class="agent-ratio-icon" style="aspect-ratio:1/1"></span><span>1:1</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="landscape"><span class="agent-ratio-icon" style="aspect-ratio:3/2"></span><span>3:2</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="portrait"><span class="agent-ratio-icon" style="aspect-ratio:2/3"></span><span>2:3</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="landscape43"><span class="agent-ratio-icon" style="aspect-ratio:4/3"></span><span>4:3</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="portrait43"><span class="agent-ratio-icon" style="aspect-ratio:3/4"></span><span>3:4</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="story"><span class="agent-ratio-icon" style="aspect-ratio:9/16"></span><span>9:16</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="wide"><span class="agent-ratio-icon" style="aspect-ratio:16/9"></span><span>16:9</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="ultrawide"><span class="agent-ratio-icon" style="aspect-ratio:21/9"></span><span>21:9</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="ultratall"><span class="agent-ratio-icon" style="aspect-ratio:9/21"></span><span>9:21</span></button>
+                                    </div>
+                                </div>
+                                <div class="agent-params-section">
+                                    <div class="agent-params-title">分辨率</div>
+                                    <div class="agent-res-grid" id="agentResGrid">
+                                        <button class="agent-res-btn active" type="button" data-res="1k">1K</button>
+                                        <button class="agent-res-btn" type="button" data-res="2k">2K</button>
+                                        <button class="agent-res-btn" type="button" data-res="4k">4K</button>
+                                    </div>
+                                </div>
+                                <div class="agent-params-section">
+                                    <div class="agent-params-title">数量</div>
+                                    <div class="agent-count-grid" id="agentCountGrid">
+                                        <button class="agent-count-btn active" type="button" data-count="1">1</button>
+                                        <button class="agent-count-btn" type="button" data-count="2">2</button>
+                                        <button class="agent-count-btn" type="button" data-count="3">3</button>
+                                        <button class="agent-count-btn" type="button" data-count="4">4</button>
+                                        <button class="agent-count-btn" type="button" data-count="5">5</button>
+                                        <button class="agent-count-btn" type="button" data-count="6">6</button>
+                                        <button class="agent-count-btn" type="button" data-count="7">7</button>
+                                        <button class="agent-count-btn" type="button" data-count="8">8</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="agent-toolbar-spacer"></div>
+                        <button id="agentThinkingBtn" class="agent-thinking-btn" type="button">
+                            <i data-lucide="brain" class="agent-thinking-icon"></i>
+                            <span class="agent-thinking-label">思维</span>
+                            <div class="agent-thinking-tooltip">
+                                <div class="agent-tooltip-title">思维模式</div>
+                                <div class="agent-tooltip-sub">开启后 AI 会多轮追问补充细节。如果你已有明确描述，建议关闭（可能过度改写）</div>
+                            </div>
+                        </button>
+                        <button id="agentSendBtn" class="agent-send-btn" type="button" data-i18n-title="smart.agentSend" title="发送"><i data-lucide="send"></i></button>
+                    </div>
+                </div>
+                <div id="agentMentionPanel" class="agent-mention-panel" hidden></div>
+                <div class="agent-input-resize" id="agentInputResize"></div>
+            </div>
+            <input id="agentImageInput" type="file" accept="image/*,.md,.markdown,.txt" multiple hidden>
+            <div id="agentRefConfirmPanel" class="agent-ref-confirm" hidden>
+                <div class="agent-ref-confirm-head">
+                    <span class="agent-ref-confirm-title">参考图任务确认</span>
+                    <button id="agentRefConfirmCancel" class="agent-ref-confirm-close" type="button"><i data-lucide="x"></i></button>
+                </div>
+                <div class="agent-ref-confirm-body" id="agentRefConfirmBody"></div>
+                <div class="agent-ref-confirm-actions">
+                    <button id="agentRefConfirmNo" class="agent-ref-confirm-btn secondary" type="button">取消</button>
+                    <button id="agentRefConfirmYes" class="agent-ref-confirm-btn primary" type="button">确认生成</button>
+                </div>
+            </div>
+        </aside>
+        <aside id="inspirePanel" class="inspire-panel">
+            <div class="inspire-head">
+                <div class="asset-title"><i data-lucide="sparkles"></i><span>灵感库</span></div>
+                <span id="inspireCount" class="inspire-count"></span>
+                <button id="inspireRepoBtn" class="inspire-source" type="button" title="灵感库来源：github.com/freestylefly/awesome-gpt-image-2">
+                    <i data-lucide="external-link"></i><span>GitHub</span>
+                </button>
+                <button id="inspireCloseBtn" class="asset-mini-btn" type="button" title="关闭"><i data-lucide="x"></i></button>
+            </div>
+            <div id="inspireGallery" class="inspire-gallery">
+                <div class="inspire-search-wrap">
+                    <button id="inspireSearchBtn" class="inspire-search-btn" type="button" title="搜索"><i data-lucide="search"></i></button>
+                    <input id="inspireSearch" class="inspire-search" type="text" placeholder="搜标题 / 提示词 / 标签，即时过滤…" autocomplete="off">
+                </div>
+                <div id="inspireCats" class="inspire-cats"></div>
+                <div id="inspireMoreTags" class="inspire-more-tags" hidden></div>
+                <div id="inspireScroll" class="inspire-scroll">
+                    <div id="inspireGrid" class="inspire-grid"></div>
+                    <div id="inspireLoader" class="inspire-loader" hidden><span class="agent-gen-spinner"></span><span>加载中…</span></div>
+                    <div id="inspireEnd" class="inspire-end" hidden>没有更多了</div>
+                    <div id="inspireEmpty" class="inspire-empty" hidden>没有找到相关图片</div>
+                </div>
+            </div>
         </aside>
         <div id="assetDialogBackdrop" class="asset-dialog-backdrop" hidden>
             <div class="asset-dialog">
@@ -444,6 +603,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.08.04.1787122358"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.08.29.1788060220"></script>
 </body>
 </html>

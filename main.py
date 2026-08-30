@@ -75,6 +75,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def no_cache_html_middleware(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path.lower()
+    if path.endswith(".html"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
 # --- WebSocket 状态管理器 ---
 class ConnectionManager:
     def __init__(self):
@@ -152,6 +160,32 @@ class ConnectionManager:
                 print(f"Broadcast asset library error: {e}")
                 self.active_connections.remove(connection)
 
+    async def broadcast_canvas_task_done(self, task_id: str, status: str):
+        data = json.dumps({"type": "canvas_task_done", "task_id": task_id, "status": status})
+        for connection in self.active_connections[:]:
+            try:
+                await connection.send_text(data)
+            except Exception as e:
+                print(f"Broadcast canvas task done error: {e}")
+                self.active_connections.remove(connection)
+
+    async def broadcast_agent_llm_done(self, task_id: str, status: str):
+        data = json.dumps({"type": "agent_llm_done", "task_id": task_id, "status": status})
+        for connection in self.active_connections[:]:
+            try:
+                await connection.send_text(data)
+            except Exception as e:
+                print(f"Broadcast agent llm done error: {e}")
+                self.active_connections.remove(connection)
+
+    async def broadcast_agent_llm_token(self, task_id: str, token: str):
+        data = json.dumps({"type": "agent_llm_token", "task_id": task_id, "token": token})
+        for connection in self.active_connections[:]:
+            try:
+                await connection.send_text(data)
+            except Exception:
+                self.active_connections.remove(connection)
+
     async def send_personal_message(self, message: dict, client_id: str):
         ws = self.user_connections.get(client_id)
         if ws:
@@ -162,20 +196,26 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "2026.06.03"
-GITHUB_REPO_URL = "https://github.com/hero8152/Infinite-Canvas"
-GITHUB_VERSION_URL = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION"
-GITHUB_TREE_URL = "https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1"
-GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main"
+APP_VERSION = "2026.08.29"
+# 本分支已脱离上游 hero8152/Infinite-Canvas，自动更新指向自有仓库 mufanmu/Infinite-Canvas-agent
+GITHUB_REPO_URL = "https://github.com/mufanmu/Infinite-Canvas-agent"
+GITHUB_VERSION_URL = "https://raw.githubusercontent.com/mufanmu/Infinite-Canvas-agent/main/VERSION"
+GITHUB_TREE_URL = "https://api.github.com/repos/mufanmu/Infinite-Canvas-agent/git/trees/main?recursive=1"
+GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/mufanmu/Infinite-Canvas-agent/main"
 GITHUB_UPDATE_NOTES_URL = GITHUB_RAW_ROOT + "/static/update-notes.json"
-MODELSCOPE_REPO_URL = "https://modelscope.ai/studios/daniel8152/Infinite-Canvas"
-MODELSCOPE_RAW_ROOT = "https://www.modelscope.ai/studios/daniel8152/Infinite-Canvas/raw/main"
+# 更新源：ModelScope 备份源已禁用（原指向上游 daniel8152 的空间，会把上游代码拉下来覆盖本分支改造）
+# 常量保留为空串，流程中已跳过该源；将来若有自己的 ModelScope 空间，填回这 6 个常量并恢复流程即可。
+# 注意：下面这组常量是【更新源】，不要和 579 行起的【ModelScope AI 服务商】配置混淆，后者是生图/聊天用的，必须保留。
+MODELSCOPE_REPO_URL = ""
+MODELSCOPE_RAW_ROOT = ""
 # ModelScope 仓库默认分支为 master；raw 网页路径会返回 HTML，必须用仓库文件 API 才能拿到纯文本
 # 注意：.ai 站命名空间为小写 daniel8152，API 路径大小写敏感（推送/文件 API 用大写会 404/拒绝）
-MODELSCOPE_FILE_API_ROOT = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infinite-Canvas/repo?Revision=master&FilePath="
-MODELSCOPE_VERSION_URL = MODELSCOPE_FILE_API_ROOT + "VERSION"
-MODELSCOPE_UPDATE_NOTES_URL = MODELSCOPE_FILE_API_ROOT + "static/update-notes.json"
-MODELSCOPE_TREE_URL = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infinite-Canvas/repo/files?Revision=master&Recursive=true"
+MODELSCOPE_FILE_API_ROOT = ""
+MODELSCOPE_VERSION_URL = ""
+MODELSCOPE_UPDATE_NOTES_URL = ""
+MODELSCOPE_TREE_URL = ""
+# 更新源开关：False = 单源（GitHub）。置 True 且填好上面常量即可恢复双源。
+UPDATE_SOURCE_MODELSCOPE_ENABLED = False
 
 @app.on_event("startup")
 async def startup_event():
@@ -607,7 +647,18 @@ ONLINE_IMAGE_PROMPT_MAX_LENGTH = int(os.getenv("ONLINE_IMAGE_PROMPT_MAX_LENGTH",
 VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "4000"))
 LLM_MESSAGE_MAX_LENGTH = int(os.getenv("LLM_MESSAGE_MAX_LENGTH", "20000"))
 CHAT_ATTACHMENT_MAX = int(os.getenv("CHAT_ATTACHMENT_MAX", "20"))
-ONLINE_IMAGE_REFERENCE_MAX = int(os.getenv("ONLINE_IMAGE_REFERENCE_MAX", "20"))
+ONLINE_IMAGE_REFERENCE_MAX = int(os.getenv("ONLINE_IMAGE_REFERENCE_MAX", "10"))
+
+def provider_max_reference_images(provider):
+    """返回当前 provider 的生图参考图上限。
+    agnes-ai (openai-json): 6 张（上游硬限制）
+    其他 provider: ONLINE_IMAGE_REFERENCE_MAX（20 张）"""
+    if not provider:
+        return ONLINE_IMAGE_REFERENCE_MAX
+    image_request_mode = effective_image_request_mode(provider, "")
+    if image_request_mode == "openai-json":
+        return 6
+    return ONLINE_IMAGE_REFERENCE_MAX
 
 FIELD_LABELS = {
     "prompt": "提示词",
@@ -1432,6 +1483,7 @@ def public_provider(provider):
         "has_key": bool(key),
         "key_preview": mask_secret(key),
         "key_env": provider_key_env(provider["id"]),
+        "max_reference_images": provider_max_reference_images(provider),
     }
     if provider.get("id") == "runninghub":
         wallet_key = runninghub_wallet_key_value()
@@ -1654,10 +1706,11 @@ def fetch_remote_update_notes(url: str, version: str = "", timeout: float = 5.0)
 def fetch_update_notes_with_fallback(preferred_source: str, version: str, timeout: float = 3.0) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     urls = {
         "github": GITHUB_UPDATE_NOTES_URL,
-        "modelscope": MODELSCOPE_UPDATE_NOTES_URL,
     }
+    if UPDATE_SOURCE_MODELSCOPE_ENABLED and MODELSCOPE_UPDATE_NOTES_URL:
+        urls["modelscope"] = MODELSCOPE_UPDATE_NOTES_URL
     preferred = preferred_source if preferred_source in urls else "github"
-    order = [preferred, "modelscope" if preferred == "github" else "github"]
+    order = [preferred] + [s for s in urls if s != preferred]
     notes_by_source: Dict[str, Any] = {}
     best_notes: Dict[str, Any] = {"version": version, "items": []}
     for source in order:
@@ -1845,6 +1898,400 @@ def parse_prompt_template_markdown(text: str):
         })
     return templates
 
+YOUMIND_PROMPTS_API = "https://youmind.com/youmarketing-api/prompts"
+
+@app.get("/api/inspire-prompts")
+async def inspire_prompts(
+    q: str = "",
+    category: str = "",
+    page: int = 1,
+    limit: int = 20,
+    sort_by: str = "views",
+):
+    """灵感库提示词数据代理：转发 YouMind 公开提示词 API（提示词 + 参考图 + 分类 + 分页）。
+    YouMind API 有简单防盗链（校验 Origin/Referer），此处伪造请求头绕过；图片无防盗链，前端直连。"""
+    payload = {
+        "model": "gpt-image-2",
+        "sortBy": sort_by if sort_by in ("views", "latest", "likes") else "views",
+        "sortOrder": "desc",
+        "page": max(1, int(page)),
+        "limit": min(60, max(1, int(limit))),
+        "locale": "zh-CN",
+    }
+    if q and q.strip():
+        payload["q"] = q.strip()
+    if category and category.strip():
+        payload["categories"] = category.strip()
+    headers = {
+        "Content-Type": "application/json",
+        "Origin": "https://youmind.com",
+        "Referer": "https://youmind.com/zh-CN/gpt-image-2-prompts/explore",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0)) as client:
+            resp = await client.post(YOUMIND_PROMPTS_API, json=payload, headers=headers)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"提示词库请求失败：{e}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"提示词库上游错误：{resp.status_code}")
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="提示词库响应解析失败")
+    items = []
+    for p in data.get("prompts", []) or []:
+        media = p.get("media") or []
+        thumbs = p.get("mediaThumbnails") or []
+        refs = p.get("referenceImages") or []
+        cats = p.get("promptCategories") or []
+        cat_slugs = [c.get("slug") if isinstance(c, dict) else c for c in cats]
+        items.append({
+            "id": p.get("id"),
+            "title": p.get("title") or "",
+            "description": p.get("description") or "",
+            "prompt": p.get("content") or "",
+            "promptZh": p.get("translatedContent") or "",
+            "image": media[0] if media else "",
+            "thumb": thumbs[0] if thumbs else (media[0] if media else ""),
+            "refs": refs,
+            "needRefs": bool(p.get("needReferenceImages")),
+            "categories": cat_slugs,
+            "likes": p.get("likes") or 0,
+        })
+    return {
+        "items": items,
+        "total": data.get("total") or 0,
+        "page": data.get("page") or page,
+        "totalPages": data.get("totalPages") or 0,
+        "hasMore": bool(data.get("hasMore")),
+    }
+
+# 灵感库数据源：GitHub 项目 awesome-gpt-image-2（GPT-Image2 提示词案例库，541 个案例：图片+提示词+分类标签）
+INSPIRE_GITHUB_REPO = "https://github.com/freestylefly/awesome-gpt-image-2"
+INSPIRE_RAW_BASE = "https://raw.githubusercontent.com/freestylefly/awesome-gpt-image-2/main"
+INSPIRE_CASES_URLS = [
+    "https://cdn.jsdelivr.net/gh/freestylefly/awesome-gpt-image-2@main/data/cases.json",
+    f"{INSPIRE_RAW_BASE}/data/cases.json",
+]
+INSPIRE_UPSTREAM_TTL = 6 * 3600        # 案例数据兜底刷新间隔（上游 SHA 解析失败时）
+INSPIRE_SHA_TTL = 15 * 60              # 上游 commit SHA 缓存 15 分钟 → 上游更新最迟约 15 分钟被发现
+INSPIRE_SHA_FAIL_TTL = 5 * 60          # SHA 解析失败后 5 分钟再试
+INSPIRE_DIMS_PROBE_BUDGET = 6.0        # 单次请求内同步探测图片尺寸的时间预算（秒），剩余转后台继续
+INSPIRE_DIMS_FILE = os.path.join(BASE_DIR, "inspire_image_dims.json")
+# 提示词中文译文（仓库内置静态数据，随 git 分发；上游更新后手动翻译增量并更新此文件）
+INSPIRE_PROMPT_ZH_FILE = os.path.join(DATA_DIR, "inspire_prompt_zh.json")
+_inspire_prompt_zh = {"loaded": False, "mtime": 0.0, "map": {}}   # case_id(str) -> 中文提示词
+_inspire_cases_cache = {"data": None, "sha": "", "ts": 0.0}
+_inspire_sha_cache = {"sha": "", "ts": 0.0}
+_inspire_dims = {"loaded": False, "dims": {}}   # case_id(str) -> [width, height]
+_inspire_dims_task = None                        # 后台尺寸探测任务（防止重复起任务）
+
+
+async def _resolve_inspire_sha():
+    """解析上游最新 commit SHA（github.com 的 commits.atom；api.github.com 会按 TLS 指纹拦截部分客户端返回 403）。
+    SHA 同时用作数据版本号：上游 git 有新提交时 SHA 变化，前端比对版本实现自动更新。"""
+    now = time.time()
+    ttl = INSPIRE_SHA_TTL if _inspire_sha_cache["sha"] else INSPIRE_SHA_FAIL_TTL
+    if now - _inspire_sha_cache["ts"] < ttl:
+        return _inspire_sha_cache["sha"]
+    sha = ""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0), follow_redirects=True) as client:
+            resp = await client.get(f"{INSPIRE_GITHUB_REPO}/commits/main.atom", headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code == 200:
+            m = re.search(r"Grit::Commit/([0-9a-f]{40})", resp.text)
+            sha = m.group(1) if m else ""
+    except (httpx.HTTPError, ValueError):
+        sha = ""
+    _inspire_sha_cache["sha"] = sha
+    _inspire_sha_cache["ts"] = now
+    return sha
+
+
+async def _fetch_inspire_cases(sha: str = ""):
+    """拉取 awesome-gpt-image-2 的 cases.json（jsDelivr 优先，raw 兜底），内存缓存。
+    sha 与缓存版本不一致（上游有更新）时强制重新拉取；上游暂时不可达时回退旧数据保证可用。"""
+    now = time.time()
+    cached = _inspire_cases_cache["data"]
+    if cached and now - _inspire_cases_cache["ts"] < INSPIRE_UPSTREAM_TTL:
+        if not sha or _inspire_cases_cache["sha"] == sha:
+            return cached
+    last_err = None
+    for url in INSPIRE_CASES_URLS:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0), follow_redirects=True) as client:
+                resp = await client.get(url)
+            if resp.status_code != 200:
+                last_err = f"HTTP {resp.status_code}"
+                continue
+            data = resp.json()
+            _inspire_cases_cache["data"] = data
+            _inspire_cases_cache["sha"] = sha
+            _inspire_cases_cache["ts"] = now
+            return data
+        except (httpx.HTTPError, ValueError) as e:
+            last_err = str(e)
+    if cached:
+        return cached
+    raise HTTPException(status_code=502, detail=f"灵感库数据获取失败：{last_err}")
+
+
+def _probe_image_size(head: bytes):
+    """从图片头部字节解析像素尺寸（JPEG/PNG/GIF/WebP），失败返回 None。"""
+    try:
+        if head[:2] == b"\xff\xd8":  # JPEG：遍历段找 SOF0~SOF15
+            i, n = 2, len(head)
+            while i + 9 < n:
+                if head[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = head[i + 1]
+                if marker in (0xD8, 0x01, 0xFF) or 0xD0 <= marker <= 0xD7:
+                    i += 2
+                    continue
+                if marker == 0xD9 or i + 10 > n:
+                    break
+                seg_len = int.from_bytes(head[i + 2:i + 4], "big")
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                    height = int.from_bytes(head[i + 5:i + 7], "big")
+                    width = int.from_bytes(head[i + 7:i + 9], "big")
+                    return (width, height) if width and height else None
+                i += 2 + seg_len
+            return None
+        if head[:8] == b"\x89PNG\r\n\x1a\n" and len(head) >= 24:
+            return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+        if head[:4] == b"GIF8" and len(head) >= 10:
+            return int.from_bytes(head[6:8], "little"), int.from_bytes(head[8:10], "little")
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP" and len(head) >= 30:
+            fmt = head[12:16]
+            if fmt == b"VP8 ":
+                return (int.from_bytes(head[26:28], "little") & 0x3FFF,
+                        int.from_bytes(head[28:30], "little") & 0x3FFF)
+            if fmt == b"VP8L" and head[20] == 0x2F and len(head) >= 25:
+                bits = int.from_bytes(head[21:25], "little")
+                return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+            if fmt == b"VP8X" and len(head) >= 30:
+                return 1 + int.from_bytes(head[24:27], "little"), 1 + int.from_bytes(head[27:30], "little")
+        return None
+    except Exception:
+        return None
+
+
+def _load_inspire_dims():
+    if _inspire_dims["loaded"]:
+        return
+    _inspire_dims["loaded"] = True
+    try:
+        if os.path.isfile(INSPIRE_DIMS_FILE):
+            with open(INSPIRE_DIMS_FILE, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d.get("dims"), dict):
+                _inspire_dims["dims"] = {
+                    str(k): v for k, v in d["dims"].items()
+                    if isinstance(v, list) and len(v) == 2 and v[0] and v[1]
+                }
+    except Exception:
+        pass
+
+
+def _load_inspire_prompt_zh():
+    """加载提示词中文译文（随文件 mtime 自动重载，便于增量更新翻译）。"""
+    try:
+        mtime = os.path.getmtime(INSPIRE_PROMPT_ZH_FILE)
+    except OSError:
+        return
+    if _inspire_prompt_zh["loaded"] and _inspire_prompt_zh["mtime"] == mtime:
+        return
+    try:
+        with open(INSPIRE_PROMPT_ZH_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            _inspire_prompt_zh["map"] = {str(k): str(v) for k, v in d.items() if v}
+            _inspire_prompt_zh["loaded"] = True
+            _inspire_prompt_zh["mtime"] = mtime
+    except Exception:
+        pass
+
+
+def _save_inspire_dims():
+    try:
+        with open(INSPIRE_DIMS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"dims": _inspire_dims["dims"]}, f)
+    except Exception:
+        pass
+
+
+async def _fill_inspire_dims(metas: list):
+    """并发探测缺失案例的图片尺寸：对 raw CDN 发 Range 请求只拉头部 64KB，从图片头解析宽高，磁盘缓存。
+    图片走 raw 直链（jsDelivr 对该仓库图片一律 301 回 raw）。"""
+    sem = asyncio.Semaphore(12)
+    timeout = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async def one(meta):
+            async with sem:
+                r = await client.get(INSPIRE_RAW_BASE + meta["path"], headers={"Range": "bytes=0-65535", "User-Agent": "Mozilla/5.0"})
+                size = _probe_image_size(r.content or b"")
+                if size:
+                    _inspire_dims["dims"][meta["id"]] = [size[0], size[1]]
+        await asyncio.gather(*(one(m) for m in metas), return_exceptions=True)
+    _save_inspire_dims()
+
+
+@app.get("/api/inspire-gallery")
+async def inspire_gallery():
+    """灵感库数据源：awesome-gpt-image-2 案例库全量精简数据（一次拉取，前端本地过滤/分页渲染）。
+    version 为上游 commit SHA：上游 git 有更新时 SHA 变化，前端比对后自动重新拉取实现同步。
+    width/height 由后端预探测（Range 拉图片头部解析，磁盘缓存），前端据此预留宽高比避免瀑布流跳动。"""
+    sha = await _resolve_inspire_sha()
+    data = await _fetch_inspire_cases(sha)
+    _load_inspire_dims()
+    _load_inspire_prompt_zh()
+    cases = data.get("cases", []) or []
+    # 找出还没有尺寸记录的案例，起探测任务（预算时间内同步等一部分，其余后台继续）
+    missing = []
+    for c in cases:
+        img = c.get("image") or ""
+        cid = str(c.get("id") or "")
+        ext = img.rsplit(".", 1)[-1].lower() if "." in img else ""
+        if img and cid and cid not in _inspire_dims["dims"] and ext in ("jpg", "jpeg", "png", "gif", "webp"):
+            missing.append({"id": cid, "path": "/data" + img if img.startswith("/") else "/" + img})
+    if missing:
+        global _inspire_dims_task
+        if not _inspire_dims_task or _inspire_dims_task.done():
+            _inspire_dims_task = asyncio.create_task(_fill_inspire_dims(missing))
+        try:
+            await asyncio.wait({_inspire_dims_task}, timeout=INSPIRE_DIMS_PROBE_BUDGET)
+        except Exception:
+            pass
+    items = []
+    for c in cases:
+        img = c.get("image") or ""
+        if not img:
+            continue
+        # cases.json 里图片路径是 /images/caseN.jpg，仓库实际位置在 data/images/
+        if img.startswith("/"):
+            img = INSPIRE_RAW_BASE + "/data" + img
+        else:
+            img = INSPIRE_RAW_BASE + "/" + img
+        dims = _inspire_dims["dims"].get(str(c.get("id") or ""))
+        prompt = c.get("prompt") or c.get("promptPreview") or ""
+        # 优先使用仓库内置的中文译文（见 data/inspire_prompt_zh.json 的维护说明）
+        prompt = _inspire_prompt_zh["map"].get(str(c.get("id") or ""), prompt)
+        items.append({
+            "id": c.get("id"),
+            "title": c.get("title") or "",
+            "prompt": prompt,
+            "category": c.get("category") or "",
+            "styles": c.get("styles") or [],
+            "scenes": c.get("scenes") or [],
+            "image": img,
+            "thumb": img,
+            "width": dims[0] if dims else None,
+            "height": dims[1] if dims else None,
+            "sourceLabel": c.get("sourceLabel") or "",
+            "sourceUrl": c.get("sourceUrl") or "",
+            "featured": bool(c.get("featured")),
+        })
+    return {
+        "items": items,
+        "total": len(items),
+        "categories": data.get("categories") or [],
+        "styles": data.get("styles") or [],
+        "scenes": data.get("scenes") or [],
+        "version": sha,
+        "repo": INSPIRE_GITHUB_REPO,
+    }
+
+
+@app.get("/api/inspire-local")
+async def inspire_local():
+    """灵感库「本地」标签：本机历史生成的所有图片 + 当时的提示词（读 history.json，最新优先）。
+    image_items 自带宽高，无需探测；已被清理的文件自动过滤。"""
+    try:
+        if os.path.isfile(HISTORY_FILE):
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        else:
+            records = []
+    except Exception:
+        records = []
+    items = []
+    seen = set()
+    for rec in reversed(records if isinstance(records, list) else []):
+        prompt = str(rec.get("prompt") or "").strip()
+        model = str(rec.get("model") or "")
+        provider = str(rec.get("provider_name") or rec.get("provider_id") or "")
+        ts = rec.get("timestamp") or 0
+        for it in rec.get("image_items") or []:
+            url = str(it.get("url") or "")
+            if not url or url in seen:
+                continue
+            fname = os.path.basename(url)
+            if not fname or not os.path.isfile(output_path_for(fname, "output")):
+                continue  # 文件已被清理，跳过
+            seen.add(url)
+            items.append({
+                "id": "local-" + (re.sub(r"[^0-9a-zA-Z_-]", "", os.path.splitext(fname)[0]) or uuid.uuid4().hex[:8]),
+                "title": "",
+                "prompt": prompt,
+                "category": "",
+                "styles": [],
+                "scenes": [],
+                "image": url,
+                "thumb": url,
+                "width": it.get("natural_w") or it.get("width"),
+                "height": it.get("natural_h") or it.get("height"),
+                "sourceLabel": " · ".join(x for x in (provider, model) if x),
+                "sourceUrl": "",
+                "ts": ts,
+                "local": True,
+            })
+    items.sort(key=lambda x: x.get("ts") or 0, reverse=True)
+    return {"items": items[:1000], "total": len(items)}
+
+
+@app.get("/api/inspire-version")
+async def inspire_version():
+    """灵感库上游版本号（最新 commit SHA）。前端打开面板时及定时比对该版本，变化即自动重新拉取数据。"""
+    sha = await _resolve_inspire_sha()
+    data = _inspire_cases_cache["data"]
+    return {"version": sha, "total": len(data.get("cases") or []) if data else 0}
+
+class InspireLocalizeRequest(BaseModel):
+    url: str
+    id: str = ""
+
+@app.post("/api/inspire-localize")
+async def inspire_localize(payload: InspireLocalizeRequest):
+    """把灵感库图片下载保存到本地（output 目录），按来源 id 命名实现去重。
+    已本地化过的直接返回本地地址，不重复下载。"""
+    url = (payload.url or "").strip()
+    cid = str(payload.id or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="缺少图片地址")
+    safe_id = re.sub(r"[^0-9a-zA-Z_-]", "", cid) or uuid.uuid4().hex[:10]
+    ext = ".jpg"
+    m = re.search(r"\.(jpe?g|png|webp|gif)(?:[?#]|$)", url, re.I)
+    if m:
+        ext = "." + m.group(1).lower()
+    filename = f"inspire_{safe_id}{ext}"
+    path = output_path_for(filename, "output")
+    # 去重：已本地化过直接返回本地地址
+    if os.path.isfile(path):
+        return {"url": output_url_for(filename, "output"), "cached": True}
+    try:
+        timeout = httpx.Timeout(connect=20.0, read=120.0, write=60.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 Chrome/124.0 Safari/537.36"})
+            resp.raise_for_status()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(resp.content)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"图片本地化失败：{e}")
+    return {"url": output_url_for(filename, "output"), "cached": False}
+
 @app.get("/api/app-info")
 def app_info():
     version = current_app_version()
@@ -1861,13 +2308,15 @@ def app_info():
                 "tree_url": GITHUB_TREE_URL,
                 "update_notes_url": GITHUB_UPDATE_NOTES_URL,
             },
-            "modelscope": {
-                "label": "ModelScope",
-                "repo_url": MODELSCOPE_REPO_URL,
-                "version_url": MODELSCOPE_VERSION_URL,
-                "tree_url": MODELSCOPE_TREE_URL,
-                "update_notes_url": MODELSCOPE_UPDATE_NOTES_URL,
-            },
+            **({
+                "modelscope": {
+                    "label": "ModelScope",
+                    "repo_url": MODELSCOPE_REPO_URL,
+                    "version_url": MODELSCOPE_VERSION_URL,
+                    "tree_url": MODELSCOPE_TREE_URL,
+                    "update_notes_url": MODELSCOPE_UPDATE_NOTES_URL,
+                },
+            } if UPDATE_SOURCE_MODELSCOPE_ENABLED else {}),
         },
         "update_notes": read_local_update_notes(version),
     }
@@ -1886,7 +2335,7 @@ def connectivity_probe(name: str, url: str, timeout: float = 5.0) -> Dict[str, A
     try:
         response = requests.get(
             url,
-            headers={"User-Agent": "Infinite-Canvas-Updater"},
+            headers=github_auth_headers({"User-Agent": "Infinite-Canvas-Updater"}),
             timeout=timeout,
             stream=True,
             proxies=urllib.request.getproxies() or None,
@@ -1910,11 +2359,12 @@ def update_connectivity_targets() -> List[Tuple[str, str, str, bool]]:
         ("GitHub 更新列表", GITHUB_TREE_URL, "github", True),
         ("GitHub 版本文件", GITHUB_VERSION_URL, "github", True),
         ("GitHub 主页", "https://github.com/", "github", False),
+        ("Google 连通性", "https://www.google.com/generate_204", "reference", False),
+    ] + ([
         ("ModelScope 版本文件", MODELSCOPE_VERSION_URL, "modelscope", True),
         ("ModelScope 空间页面", MODELSCOPE_REPO_URL, "modelscope", False),
         ("ModelScope 主页", "https://modelscope.cn/", "modelscope", False),
-        ("Google 连通性", "https://www.google.com/generate_204", "reference", False),
-    ]
+    ] if UPDATE_SOURCE_MODELSCOPE_ENABLED else [])
 
 @app.get("/api/update-connectivity/probe")
 def update_connectivity_probe(name: str):
@@ -1992,9 +2442,11 @@ def version_gt(a: str, b: str) -> bool:
 
 @app.get("/api/check-update")
 def check_update():
-    """服务端检测 GitHub 与 ModelScope 两个源的远端版本（走系统代理，避免浏览器跨域/被墙）。"""
+    """服务端检测远端版本（走系统代理，避免浏览器跨域/被墙）。
+
+    本分支只跟自有仓库 mufanmu/Infinite-Canvas-agent 比对；原 ModelScope 备份源指向上游，已禁用。
+    """
     current = current_app_version()
-    # 并发检测两个源，避免串行 8s+8s 拖慢首屏更新提示
     holder: Dict[str, Dict[str, Any]] = {}
     def _probe(key: str, url: str):
         item = fetch_remote_version(url, timeout=5.0)
@@ -2002,17 +2454,19 @@ def check_update():
         holder[key] = item
     threads = [
         Thread(target=_probe, args=("github", GITHUB_VERSION_URL), daemon=True),
-        Thread(target=_probe, args=("modelscope", MODELSCOPE_VERSION_URL), daemon=True),
     ]
+    if UPDATE_SOURCE_MODELSCOPE_ENABLED and MODELSCOPE_VERSION_URL:
+        threads.append(Thread(target=_probe, args=("modelscope", MODELSCOPE_VERSION_URL), daemon=True))
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=5.5)
     github = holder.get("github") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": GITHUB_VERSION_URL, "source": "github"}
-    modelscope = holder.get("modelscope") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": MODELSCOPE_VERSION_URL, "source": "modelscope"}
+    modelscope = holder.get("modelscope")
     best: Dict[str, Any] = {}
-    for item in (github, modelscope):
-        if item["ok"] and item["version"]:
+    candidates = [github] + ([modelscope] if modelscope else [])
+    for item in candidates:
+        if item and item["ok"] and item["version"]:
             if not best or version_gt(item["version"], best["version"]):
                 best = {"source": item["source"], "version": item["version"]}
     update_available = bool(best and version_gt(best["version"], current))
@@ -2020,16 +2474,18 @@ def check_update():
     if best and best.get("version"):
         best_notes, notes_by_source = fetch_update_notes_with_fallback(str(best.get("source") or "github"), best["version"], timeout=3.0)
         best["update_notes"] = best_notes if best_notes.get("ok") else {"version": best["version"], "items": []}
-    return {
+    result = {
         "current": current,
         "github": github,
-        "modelscope": modelscope,
         "latest": best,
         "update_notes": best.get("update_notes") if best else {},
         "update_notes_sources": notes_by_source,
         "update_available": update_available,
-        "reachable": bool(github["ok"] or modelscope["ok"]),
+        "reachable": bool(github["ok"]),
     }
+    if modelscope:
+        result["modelscope"] = modelscope
+    return result
 
 def update_allowed_file(path: str) -> bool:
     path = str(path or "").replace("\\", "/").lstrip("/")
@@ -2037,14 +2493,25 @@ def update_allowed_file(path: str) -> bool:
         return False
     return path in {"main.py", "VERSION"} or path.startswith("static/")
 
-# 缓存 GitHub Tree API 响应（含 ETag），减少 60 次/h 限流压力
+# 缓存 GitHub Tree API 响应（含 ETag），减少限流压力
 GITHUB_TREE_CACHE: Dict[str, Any] = {"etag": "", "data": None, "expires_at": 0.0}
+
+# 可选：配置 GitHub Personal Access Token 可把 API 限额从 60 次/h 提到 5000 次/h。
+# 未配置时行为与原来完全一致（匿名访问）。本仓库是公开仓库，token 只需 public_repo 只读权限即可，
+# 也可用无任何权限的空 token（GitHub 对带 token 的请求单独按 5000/h 计）。
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
+
+def github_auth_headers(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    merged = dict(headers or {})
+    if GITHUB_TOKEN:
+        merged["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    return merged
 
 def github_get(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 30) -> requests.Response:
     try:
         response = requests.get(
             url,
-            headers=headers or {},
+            headers=github_auth_headers(headers),
             timeout=timeout,
             proxies=urllib.request.getproxies() or None,
         )
@@ -2290,7 +2757,10 @@ UPDATE_SOURCE_LABELS = {"github": "GitHub", "modelscope": "ModelScope"}
 def normalize_update_source(value: str) -> str:
     source = str(value or "github").strip().lower()
     if source == "ms":
-        return "modelscope"
+        source = "modelscope"
+    if source == "modelscope" and not UPDATE_SOURCE_MODELSCOPE_ENABLED:
+        # 本分支只认自有仓库，任何指向上游 ModelScope 空间的请求一律降级为 GitHub 源
+        return "github"
     if source not in {"github", "modelscope"}:
         return "github"
     return source
@@ -2298,6 +2768,8 @@ def normalize_update_source(value: str) -> str:
 def stage_update_from_source(source: str, staging_root: str) -> Tuple[List[str], List[str], List[str]]:
     """下载指定源的更新文件到 staging，返回 (root_files, static_files, files)。失败抛异常。"""
     if source == "modelscope":
+        if not (UPDATE_SOURCE_MODELSCOPE_ENABLED and MODELSCOPE_VERSION_URL):
+            raise RuntimeError("ModelScope 更新源已禁用，只能使用 GitHub 源")
         download_modelscope_update_files(staging_root)
         return staged_update_file_list(staging_root)
     root_files, static_files, files = github_update_file_list()
@@ -2458,10 +2930,13 @@ def update_from_github(req: UpdateRequest = UpdateRequest()):
     staging_root = ""
     requested_source = normalize_update_source(req.source)
     # 冗余设计：先用用户选择的源，失败后自动切换到另一个源兜底，全部失败才报错
+    # 本分支禁用上游 ModelScope 源，候选里只保留 GitHub（normalize_update_source 已降级）
     source_order = [requested_source]
     if req.fallback:
         other = "modelscope" if requested_source == "github" else "github"
-        source_order.append(other)
+        other = normalize_update_source(other)
+        if other != requested_source:
+            source_order.append(other)
     try:
         backup_root = ""
         backup_manifest: Dict[str, Any] = {}
@@ -2837,6 +3312,8 @@ class ImageTaskQueryRequest(BaseModel):
 
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_TASK_LOCK = Lock()
+AGENT_LLM_TASKS: Dict[str, Dict[str, Any]] = {}
+AGENT_LLM_TASK_LOCK = Lock()
 
 class CanvasVideoRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=VIDEO_PROMPT_MAX_LENGTH)
@@ -4945,6 +5422,7 @@ async def run_codex_cli(prompt, model="", image_paths=None, timeout=None, output
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=BASE_DIR,
+            env=os.environ,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -5098,14 +5576,14 @@ def gpt_image_2_skill_size_arg(size="", model="", prompt="", provider="openai"):
     size_text = str(size or "").strip()
     if str(provider or "").strip().lower() == "codex":
         if "1k" in text or "1024" in text:
-            return "1K"
+            return "auto"
         if "2k" in text or "2048" in text:
             return "2K"
         if "4k" in text or "3840" in text:
             return "4K"
         width, height = parse_size_pair(size_text)
         if 0 < max(width, height) < 1800:
-            return "1K"
+            return "auto"
         if 1800 <= max(width, height) < 3000:
             return "2K"
         return "4K"
@@ -5128,7 +5606,7 @@ def gpt_image_2_skill_size_arg(size="", model="", prompt="", provider="openai"):
     if "4k" in text or "3840" in text:
         return "4K"
     if "1k" in text or "1024" in text:
-        return "1K"
+        return "auto"
     return "2K"
 
 def gpt_image_2_skill_prompt_arg(prompt="", size="", provider="openai"):
@@ -5136,6 +5614,7 @@ def gpt_image_2_skill_prompt_arg(prompt="", size="", provider="openai"):
     if str(provider or "").strip().lower() != "codex":
         return prompt_text
     size_arg = gpt_image_2_skill_size_arg(size, "", prompt, provider)
+    size_display = "1K" if size_arg == "auto" else size_arg
     size_text = str(size or "").strip()
     width, height = parse_size_pair(size_text)
     ratio_text = ""
@@ -5149,15 +5628,15 @@ def gpt_image_2_skill_prompt_arg(prompt="", size="", provider="openai"):
             height = int(ratio_match.group(2))
             ratio_text = f"{width}:{height}"
     if not ratio_text:
-        return f"{prompt_text} 画质要求：目标输出 {size_arg} 高分辨率图片。 Image quality requirement: output a {size_arg} high-resolution image."
+        return f"{prompt_text} 画质要求：目标输出 {size_display} 高分辨率图片。 Image quality requirement: output a {size_display} high-resolution image."
     orientation_zh = "横版/宽幅" if width > height else ("竖版/长幅" if height > width else "正方形")
     orientation_en = "landscape/wide" if width > height else ("portrait/tall" if height > width else "square")
     return (
         f"{prompt_text} "
-        f"画质要求：目标输出 {size_arg} 高分辨率图片。"
+        f"画质要求：目标输出 {size_display} 高分辨率图片。"
         f"画幅要求：必须生成 {orientation_zh} 图片，宽高比 {ratio_text}。"
         f"请不要交换宽高，不要输出反向比例。"
-        f" Image quality requirement: output a {size_arg} high-resolution image."
+        f" Image quality requirement: output a {size_display} high-resolution image."
         f" Canvas requirement: generate a {orientation_en} image with aspect ratio {ratio_text}; "
         "do not swap width and height."
     )
@@ -5465,6 +5944,16 @@ async def generate_codex_provider_image(prompt, size, model, reference_images=No
             except Exception:
                 pass
 
+def system_prompt_requires_json(system_prompt):
+    """检测系统提示词是否要求 JSON 格式输出（如画布 Agent 的结构化回复）。
+
+    当系统提示词包含 JSON 格式要求时（如 AGENT_FORMAT_INSTRUCTION），
+    不应再追加"输出纯文本"指令，否则会导致 LLM 返回自然语言而非 JSON，
+    前端 parseAgentResponse 无法解析，进而无法显示"确认/修改"按钮和触发生图。
+    """
+    text = str(system_prompt or "").strip().lower()
+    return "json" in text or '"reply"' in text or '"generations"' in text or '"options"' in text
+
 def codex_chat_prompt(payload, history_messages=None):
     parts = []
     system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
@@ -5478,7 +5967,11 @@ def codex_chat_prompt(payload, history_messages=None):
             parts.append(f"{label}：\n{content}")
     message = str(getattr(payload, "message", "") or "").strip()
     parts.append(f"用户：\n{message}")
-    parts.append("请直接回答用户，输出纯文本，不要修改项目文件。")
+    # 如果系统要求 JSON 格式输出（如画布 Agent），保持格式要求；否则要求纯文本
+    if system_prompt_requires_json(system_prompt):
+        parts.append("请严格按照系统要求中的格式输出，不要添加 markdown 代码块标记或额外说明，不要修改项目文件。")
+    else:
+        parts.append("请直接回答用户，输出纯文本，不要修改项目文件。")
     return "\n\n".join(part for part in parts if part).strip()
 
 async def codex_chat_text(payload, history_messages=None):
@@ -5627,9 +6120,18 @@ async def run_gemini_cli(prompt, model="", timeout=None, allow_tools=False):
         args.extend(["--prompt", str(prompt or "")])
     proc = None
     try:
+        # 补全大写代理变量（Go CLI 工具通常只认大写 HTTP_PROXY/HTTPS_PROXY）
+        _env = dict(os.environ)
+        if not _env.get('HTTP_PROXY') and _env.get('http_proxy'):
+            _env['HTTP_PROXY'] = _env['http_proxy']
+        if not _env.get('HTTPS_PROXY') and _env.get('https_proxy'):
+            _env['HTTPS_PROXY'] = _env['https_proxy']
+        if not _env.get('ALL_PROXY') and _env.get('all_proxy'):
+            _env['ALL_PROXY'] = _env['all_proxy']
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=BASE_DIR,
+            env=_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -5741,6 +6243,10 @@ async def generate_gemini_cli_provider_image(prompt, size, model, reference_imag
                 if url and url not in urls:
                     urls.append(url)
         if not urls:
+            # agy CLI 无法直接生图时，回退到 gpt-image-2-skill（与 Codex CLI 相同的生图路径）
+            skill_result = await generate_codex_provider_image_via_gpt_image_2_skill(prompt, size, model, ref_paths)
+            if skill_result:
+                return skill_result
             status_text = (raw.get("text") or raw.get("_stdout") or raw.get("_stderr") or "")[:1200]
             raise HTTPException(status_code=502, detail=f"{gemini_cli_display_name()} 已返回，但没有在输出目录发现图片：{status_text}")
         return {"type": "url", "value": urls[0]}, {"images": urls, "text": raw.get("text"), "provider": "gemini-cli", "raw": raw.get("raw")}
@@ -5780,7 +6286,12 @@ async def gemini_cli_chat_text(payload, history_messages=None):
         image_paths, temp_paths = await gemini_cli_reference_paths(image_values)
         if image_paths:
             prompt = f"{prompt}\n\n可参考的本地图片路径：\n" + "\n".join(image_paths)
-        prompt = f"{prompt}\n\n请直接回答用户，输出纯文本，不要修改项目文件。"
+        # 如果系统要求 JSON 格式输出（如画布 Agent），保持格式要求；否则要求纯文本
+        system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
+        if system_prompt_requires_json(system_prompt):
+            prompt = f"{prompt}\n\n请严格按照系统要求中的格式输出，不要添加 markdown 代码块标记或额外说明，不要修改项目文件。"
+        else:
+            prompt = f"{prompt}\n\n请直接回答用户，输出纯文本，不要修改项目文件。"
         raw = await run_gemini_cli(
             prompt,
             model=getattr(payload, "model", "") or GEMINI_CLI_DEFAULT_CHAT_MODELS[0],
@@ -5788,6 +6299,11 @@ async def gemini_cli_chat_text(payload, history_messages=None):
             allow_tools=False,
         )
         text = str(raw.get("text") or "").strip()
+        # 如果系统要求 JSON，优先使用 stdout 原始文本（避免 gemini_cli_text_from_raw 拆解 JSON 结构）
+        if system_prompt_requires_json(system_prompt):
+            stdout_text = str(raw.get("_stdout") or "").strip()
+            if stdout_text and '{' in stdout_text:
+                text = stdout_text
         return text or f"{gemini_cli_display_name()} 返回了空回复。", raw
     finally:
         for path in temp_paths:
@@ -8194,8 +8710,20 @@ def convert_output_to_jpg(url, quality=88):
         print(f"转换 JPG 失败: {e}")
         return url
 
+def ref_image_max_size(num_refs):
+    """根据参考图数量动态计算 max_size，控制总 payload 在 nginx 限制内。
+    nginx 默认 client_max_body_size=1MB，base64 膨胀 33%，需留余量。"""
+    if not num_refs or num_refs <= 1:
+        return 1536
+    if num_refs <= 3:
+        return 1024
+    if num_refs <= 6:
+        return 768
+    return 512
+
 def reference_to_data_url(ref, max_size=None):
-    """把本地输出文件转为 data URL（base64）。max_size 限制最长边像素，避免 payload 过大。"""
+    """把本地输出文件转为 data URL（base64）。max_size 限制最长边像素，避免 payload 过大。
+    始终使用 JPEG 格式（RGBA 合成到白底），避免 PNG 过大导致 413。"""
     path = output_file_from_url(ref.get("url", ""))
     if not path:
         return ref.get("url", "")
@@ -8206,19 +8734,55 @@ def reference_to_data_url(ref, max_size=None):
                 w, h = img.size
                 if max(w, h) > max_size:
                     img.thumbnail((max_size, max_size), Image.LANCZOS)
-                if img.mode not in ("RGB", "RGBA"):
+                # 始终转 RGB：RGBA 合成到白底，P/L 等模式直接转
+                if img.mode == "RGBA":
+                    bg = Image.new("RGB", img.size, (255, 255, 255))
+                    bg.paste(img, mask=img.split()[3])
+                    img = bg
+                elif img.mode != "RGB":
                     img = img.convert("RGB")
                 buf = BytesIO()
-                fmt = "PNG" if img.mode == "RGBA" else "JPEG"
-                img.save(buf, format=fmt, quality=88 if fmt == "JPEG" else None)
+                img.save(buf, format="JPEG", quality=85)
                 encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-                mime = "image/png" if fmt == "PNG" else "image/jpeg"
-                return f"data:{mime};base64,{encoded}"
+                return f"data:image/jpeg;base64,{encoded}"
         except Exception as e:
             print(f"reference resize failed, fallback to raw: {e}")
     with open(path, "rb") as f:
         encoded = base64.b64encode(f.read()).decode("ascii")
     return f"data:{content_type_for_path(path)};base64,{encoded}"
+
+def prepare_reference_for_multipart(ref, max_size=1536):
+    """准备参考图用于 multipart 上传。
+    图片 > max_size 时缩放到 max_size 并保存到临时文件（JPEG quality 88）。
+    图片 <= max_size 时返回原始路径（不压缩、不转码）。
+    返回 (path, cleanup_temp_path_or_None)。"""
+    raw_url = ref.get("url", "") if isinstance(ref, dict) else str(ref or "")
+    path = output_file_from_url(raw_url)
+    if not path:
+        return None, None
+    if not max_size:
+        return path, None
+    try:
+        with Image.open(path) as img:
+            img.load()
+            w, h = img.size
+            if max(w, h) <= max_size:
+                return path, None
+            img.thumbnail((max_size, max_size), Image.LANCZOS)
+            # 始终转 RGB：RGBA 合成到白底，避免 PNG 过大
+            if img.mode == "RGBA":
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[3])
+                img = bg
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg", prefix="ref_multipart_")
+            os.close(tmp_fd)
+            img.save(tmp_path, format="JPEG", quality=85)
+            return tmp_path, tmp_path
+    except Exception as e:
+        print(f"prepare_reference_for_multipart resize failed, fallback to raw: {e}")
+        return path, None
 
 def is_image_reference(ref):
     if not isinstance(ref, dict):
@@ -8828,6 +9392,22 @@ def apimart_veo31_duration(duration) -> int:
 def is_apimart_veo31_model(model: str) -> bool:
     return str(model or "").strip().lower().startswith("veo3.1")
 
+def is_apimart_minimax_h3_model(model: str) -> bool:
+    return str(model or "").strip().lower().replace(" ", "") in {"minimax-h3", "minimaxh3", "minimax_h3"}
+
+def apimart_minimax_h3_resolution(resolution) -> str:
+    """MiniMax-H3 只接受 2K 或 768P，传别的（含通用的 480p 默认值）会直接 400。
+
+    界面上的选项是 480p/720p/1080p 和 1k/2k/4k，需要映射过去：
+    想要高清的（2k/4k/high/hd）给 2K，其余（含留空）给 768P。
+    """
+    value = str(resolution or "").strip().lower()
+    if value in {"2K", "768P"}:
+        return value
+    if value in {"2k", "4k", "high", "hd", "2160p", "1440p"}:
+        return "2K"
+    return "768P"
+
 def apimart_veo31_model(model: str) -> str:
     value = str(model or "").strip().lower()
     aliases = {
@@ -8849,27 +9429,20 @@ def apimart_veo31_resolution(resolution: str) -> str:
     value = aliases.get(value, value)
     return value if value in {"720p", "1080p", "4k"} else "720p"
 
-def apimart_upload_file_payload(path: str):
-    """Return (filename, bytes, content_type), keeping APIMart VEO images under the documented 10MB limit."""
-    max_bytes = 9_500_000
+def apimart_upload_file_payload(path: str, max_bytes: int = 0):
+    """Return (filename, bytes, content_type)，保证不超过上传上限。
+
+    max_bytes 传 0 时用默认上限；413 降档重试时传更小的值。
+    """
+    limit = int(max_bytes) if max_bytes and max_bytes > 0 else apimart_upload_max_bytes()
     size = os.path.getsize(path)
-    if size <= max_bytes:
+    if size <= limit:
         with open(path, "rb") as fh:
             return os.path.basename(path), fh.read(), content_type_for_path(path)
-    with Image.open(path) as img:
-        img = img.convert("RGBA")
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[-1])
-        quality = 92
-        while quality >= 62:
-            buf = BytesIO()
-            bg.save(buf, format="JPEG", quality=quality, optimize=True)
-            data = buf.getvalue()
-            if len(data) <= max_bytes:
-                name = os.path.splitext(os.path.basename(path))[0] + ".jpg"
-                return name, data, "image/jpeg"
-            quality -= 8
-    raise ValueError("图片超过 10MB，且压缩后仍无法满足 VEO3.1 图片限制")
+    with open(path, "rb") as fh:
+        data = fh.read()
+    name_hint = os.path.splitext(os.path.basename(path))[0]
+    return apimart_compress_image(data, limit, name_hint)
 
 def invalid_video_image_preview(value: str) -> str:
     text = str(value or "")
@@ -8902,12 +9475,28 @@ def extract_apimart_asset_url(payload):
             return found
     return ""
 
-def apimart_upload_payload_from_bytes(data: bytes, mime: str, name_hint: str = "image"):
-    """把内存中的图片字节按 APIMart 的 10MB 限制压缩为可上传 payload。"""
-    max_bytes = 9_500_000
-    ext = mimetypes.guess_extension(mime or "image/png") or ".png"
-    if len(data) <= max_bytes and (mime or "").lower() in ("image/png", "image/jpeg", "image/webp"):
-        return f"{name_hint}{ext}", data, (mime or "image/png")
+# APIMart 上传接口的真实体积上限。
+# 实测：apib.ai 前置 nginx 的 client_max_body_size 是 1m（1048576 字节），
+# 文件超过约 1MB 就会被 413 Request Entity Too Large 直接拒绝，而且这个 413
+# 来自 nginx 网关，根本到不了 APIMart 应用层 —— 所以报错里看不到任何业务错误信息。
+# 之前写 9.5MB 是按 APIMart 文档的 10MB 来的，跟中转站实际配置对不上，导致
+# 1MB~9.5MB 之间的图片全部上传失败。
+# 留 ~90KB 余量给 multipart 边界、字段名等开销。不同中转站限制可能不同，
+# 可用环境变量 APIMART_UPLOAD_MAX_BYTES 覆盖。
+def apimart_upload_max_bytes() -> int:
+    raw = str(os.getenv("APIMART_UPLOAD_MAX_BYTES") or "").strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 950_000
+    return value if 50_000 <= value <= 20_000_000 else 950_000
+
+def apimart_compress_image(data: bytes, max_bytes: int, name_hint: str = "image"):
+    """把图片压到 max_bytes 以内，返回 (filename, bytes, content_type)。
+
+    先降 JPEG 质量，压不下去再逐级缩放分辨率，避免 12MB 这种大图
+    靠单纯降质量永远压不到 1MB 以内。
+    """
     with Image.open(BytesIO(data)) as img:
         has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
         if has_alpha:
@@ -8917,15 +9506,35 @@ def apimart_upload_payload_from_bytes(data: bytes, mime: str, name_hint: str = "
             target = bg
         else:
             target = img.convert("RGB")
+        # 第一轮：只降质量不缩放，尽量保住分辨率
         quality = 92
-        while quality >= 62:
+        while quality >= 60:
             buf = BytesIO()
             target.save(buf, format="JPEG", quality=quality, optimize=True)
             payload = buf.getvalue()
             if len(payload) <= max_bytes:
                 return f"{name_hint}.jpg", payload, "image/jpeg"
             quality -= 8
-    raise ValueError("data URL 图片超过 10MB，且压缩后仍无法满足 APIMart 限制")
+        # 第二轮：逐级缩放后再降质量
+        for scale in (0.85, 0.7, 0.55, 0.4, 0.28):
+            width = max(64, int(target.width * scale))
+            height = max(64, int(target.height * scale))
+            resized = target.resize((width, height), Image.LANCZOS)
+            for quality in (88, 80, 72, 64):
+                buf = BytesIO()
+                resized.save(buf, format="JPEG", quality=quality, optimize=True)
+                payload = buf.getvalue()
+                if len(payload) <= max_bytes:
+                    return f"{name_hint}.jpg", payload, "image/jpeg"
+    raise ValueError(f"图片压缩后仍超过上传上限（{max_bytes} 字节）")
+
+def apimart_upload_payload_from_bytes(data: bytes, mime: str, name_hint: str = "image", max_bytes: int = 0):
+    """把内存中的图片字节压到上传上限以内。max_bytes 传 0 时用默认上限。"""
+    limit = int(max_bytes) if max_bytes and max_bytes > 0 else apimart_upload_max_bytes()
+    ext = mimetypes.guess_extension(mime or "image/png") or ".png"
+    if len(data) <= limit and (mime or "").lower() in ("image/png", "image/jpeg", "image/webp"):
+        return f"{name_hint}{ext}", data, (mime or "image/png")
+    return apimart_compress_image(data, limit, name_hint)
 
 def apimart_upload_raw_file_payload(path: str):
     with open(path, "rb") as fh:
@@ -8987,17 +9596,23 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
             header, encoded = ref_url.split(";base64,", 1)
             mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "image/png"
             raw = base64.b64decode(encoded)
-            filename, content, ct = apimart_upload_payload_from_bytes(raw, mime, name_hint="canvas_image")
-            resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
-            if resp.status_code in (200, 201):
-                rj = resp.json()
-                url = extract_apimart_asset_url(rj)
-                if valid_apimart_video_image_input(url):
-                    return url
-                print(f"APIMart 上传 data URL 返回中未找到可用 asset/url: {str(rj)[:300]}")
-                return "ERR:APIMart 上传响应未包含可用 URL"
-            print(f"APIMart 上传 data URL 失败 ({resp.status_code}): {resp.text[:300]}")
-            return f"ERR:APIMart 上传失败({resp.status_code})"
+            base_limit = apimart_upload_max_bytes()
+            for limit in (base_limit, base_limit // 2, base_limit // 4):
+                filename, content, ct = apimart_upload_payload_from_bytes(raw, mime, name_hint="canvas_image", max_bytes=limit)
+                resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
+                if resp.status_code in (200, 201):
+                    rj = resp.json()
+                    url = extract_apimart_asset_url(rj)
+                    if valid_apimart_video_image_input(url):
+                        return url
+                    print(f"APIMart 上传 data URL 返回中未找到可用 asset/url: {str(rj)[:300]}")
+                    return "ERR:APIMart 上传响应未包含可用 URL"
+                if resp.status_code != 413:
+                    print(f"APIMart 上传 data URL 失败 ({resp.status_code}): {resp.text[:300]}")
+                    return f"ERR:APIMart 上传失败({resp.status_code})"
+                print(f"APIMart 上传 data URL 被网关拒绝（413），降档到 {limit // 2 if limit > 1 else limit} 字节重试")
+            print("APIMart 上传 data URL 始终被 413 拒绝（已降档重试）")
+            return "ERR:APIMart 上传被网关拒绝(413)：画布图片压缩后仍超过上游大小限制，请缩小画布导出尺寸或配置 PUBLIC_MEDIA_BASE_URL"
         except ValueError as e:
             return f"ERR:{e}"
         except Exception as e:
@@ -9010,17 +9625,25 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
             print(f"APIMart 上传跳过：本地文件不存在 {ref_url}")
             return "ERR:本地文件不存在或已被删除"
         try:
-            filename, content, ct = apimart_upload_file_payload(path)
-            resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
-            if resp.status_code in (200, 201):
-                rj = resp.json()
-                url = extract_apimart_asset_url(rj)
-                if valid_apimart_video_image_input(url):
-                    return url
-                print(f"APIMart 文件上传返回中未找到可用 asset/url: {str(rj)[:300]}")
-                return "ERR:APIMart 上传响应未包含可用 URL"
-            print(f"APIMart 文件上传失败 ({resp.status_code}): {resp.text[:300]}")
-            return f"ERR:APIMart 上传失败({resp.status_code})"
+            base_limit = apimart_upload_max_bytes()
+            # 默认上限是按 1m 网关限制设的；万一上游限制更严（413），
+            # 逐级把上限砍半重压一次，而不是直接把 413 抛给用户。
+            for limit in (base_limit, base_limit // 2, base_limit // 4):
+                filename, content, ct = apimart_upload_file_payload(path, max_bytes=limit)
+                resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
+                if resp.status_code in (200, 201):
+                    rj = resp.json()
+                    url = extract_apimart_asset_url(rj)
+                    if valid_apimart_video_image_input(url):
+                        return url
+                    print(f"APIMart 文件上传返回中未找到可用 asset/url: {str(rj)[:300]}")
+                    return "ERR:APIMart 上传响应未包含可用 URL"
+                if resp.status_code != 413:
+                    print(f"APIMart 文件上传失败 ({resp.status_code}): {resp.text[:300]}")
+                    return f"ERR:APIMart 上传失败({resp.status_code})"
+                print(f"APIMart 文件上传被网关拒绝（413），降档到 {limit // 2 if limit > 1 else limit} 字节重试：{ref_url}")
+            print(f"APIMart 文件上传始终被 413 拒绝（已降档重试）：{ref_url}")
+            return "ERR:APIMart 上传被网关拒绝(413)：图片即使压缩后仍超过上游大小限制，请换更小的图片或配置 PUBLIC_MEDIA_BASE_URL"
         except ValueError as e:
             return f"ERR:{e}"
         except Exception as e:
@@ -9847,11 +10470,13 @@ async def generate_modelscope_provider_image(prompt, size, model, reference_imag
         raise HTTPException(status_code=400, detail="未配置 ModelScope API Key，请在 API 设置中填写。")
     width, height = parse_size_pair(size)
     refs = []
-    for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
+    _ms_refs = (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
+    _ms_max = ref_image_max_size(len(_ms_refs))
+    for ref in _ms_refs:
         if not ref.get("url"):
             continue
         # 本地参考图转为 data URL；前端已生成的 data URL 保持原样，贴近旧版稳定链路。
-        refs.append(modelscope_image_url(ref.get("url", ""), max_size=1536))
+        refs.append(modelscope_image_url(ref.get("url", ""), max_size=_ms_max))
     headers = {
         "Authorization": f"Bearer {clean_token}",
         "Content-Type": "application/json",
@@ -9924,8 +10549,8 @@ def gemini_image_config(size):
     aspect_ratio, resolution = apimart_size_resolution(size)
     return {"aspectRatio": aspect_ratio, "imageSize": resolution.upper()}
 
-def gemini_reference_part(ref):
-    value = reference_to_data_url(ref, max_size=1536)
+def gemini_reference_part(ref, max_size=1536):
+    value = reference_to_data_url(ref, max_size=max_size)
     if not value:
         return None
     if isinstance(value, str) and value.startswith("data:image/") and ";base64," in value:
@@ -9940,8 +10565,10 @@ async def generate_gemini_provider_image(prompt, size, model, reference_images=N
     model_name = gemini_model_name(model)
     endpoint = gemini_endpoint_url(provider, model_name)
     parts = [{"text": prompt.strip()}]
-    for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
-        part = gemini_reference_part(ref)
+    _refs = (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
+    _max_sz = ref_image_max_size(len(_refs))
+    for ref in _refs:
+        part = gemini_reference_part(ref, max_size=_max_sz)
         if part:
             parts.append(part)
     body = {
@@ -9962,8 +10589,8 @@ async def generate_gemini_provider_image(prompt, size, model, reference_images=N
 def volcengine_endpoint_url(provider):
     return provider_endpoint_url(provider, "image_generation_endpoint", "/api/v3/images/generations")
 
-def volcengine_image_payload(ref):
-    value = reference_to_data_url(ref, max_size=1536)
+def volcengine_image_payload(ref, max_size=1536):
+    value = reference_to_data_url(ref, max_size=max_size)
     if not value:
         return None
     return value
@@ -9977,7 +10604,9 @@ async def generate_volcengine_provider_image(prompt, size, model, reference_imag
         "size": size,
         "response_format": "url",
     }
-    images = [volcengine_image_payload(ref) for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]]
+    _vrefs = (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
+    _vmax = ref_image_max_size(len(_vrefs))
+    images = [volcengine_image_payload(ref, max_size=_vmax) for ref in _vrefs]
     images = [value for value in images if value]
     if images:
         body["image"] = images
@@ -11297,7 +11926,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             # 文生图只传 extra_body.response_format，图生图把参考图放进 extra_body.image。
             extra_body = {"response_format": "url"}
             if image_refs:
-                extra_body["image"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                _ojson_refs = image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
+                extra_body["image"] = [reference_to_data_url(ref, max_size=ref_image_max_size(len(_ojson_refs))) for ref in _ojson_refs]
             body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_apimart:
@@ -11313,7 +11943,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                 "official_fallback": False,
             }
             if image_refs:
-                body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                _apimart_refs = image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
+                body["image_urls"] = [reference_to_data_url(ref, max_size=ref_image_max_size(len(_apimart_refs))) for ref in _apimart_refs]
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_gpt2 and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
@@ -11327,16 +11958,19 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             # GPT-Image-2 参考图不能走 /images/generations JSON，否则部分平台会忽略原图或报 Images API unsupported。
             files = []
             opened = []
+            temp_paths = []
             edit_failed_status = None
             edit_failed_text = ""
             try:
                 for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
-                    path = output_file_from_url(ref.get("url", ""))
-                    if not path:
+                    ref_path, tmp_cleanup = prepare_reference_for_multipart(ref, max_size=1536)
+                    if not ref_path:
                         continue
-                    fh = open(path, "rb")
+                    if tmp_cleanup:
+                        temp_paths.append(tmp_cleanup)
+                    fh = open(ref_path, "rb")
                     opened.append(fh)
-                    files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
+                    files.append(("image", (os.path.basename(ref_path), fh, content_type_for_path(ref_path))))
                 if mask_refs:
                     mask_path = output_file_from_url(mask_refs[0].get("url", ""))
                     if mask_path:
@@ -11356,6 +11990,11 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             finally:
                 for fh in opened:
                     fh.close()
+                for tp in temp_paths:
+                    try:
+                        os.unlink(tp)
+                    except Exception:
+                        pass
             # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
             if response is None:
                 if is_gpt2:
@@ -11364,7 +12003,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                         detail=f"GPT-Image-2 编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
                     )
                 print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
-                image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                _fallback_refs = image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
+                image_payload = [reference_to_data_url(ref, max_size=ref_image_max_size(len(_fallback_refs))) for ref in _fallback_refs]
                 body = {
                     "model": model, "prompt": prompt, "size": size,
                     "response_format": "url", "n": 1,
@@ -13486,13 +14126,80 @@ async def probe_volcengine_auto_detect(client, base_url: str, api_key: str):
         "raw": {"task_probe": task_probe, "openai_compat_probe": compat_probe.get("raw")},
     }
 
+def clean_upstream_model_id(value) -> str:
+    """清洗上游返回的模型 id。
+
+    部分中转站（如 APIMART）会把 id 包成 JSON 数组字符串，例如
+    ``["doubao-seedance-1-0-pro-quality"]``。不清洗的话脏 id 会直接存进配置，
+    后续实际调用必然失败。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list) and parsed:
+                text = str(parsed[0])
+            elif isinstance(parsed, str):
+                text = parsed
+        except Exception:
+            text = text.strip("[]")
+    text = text.strip().strip('"').strip("'").strip()
+    # 多值残留（逗号或空格分隔）只取第一段
+    if "," in text:
+        text = text.split(",", 1)[0].strip().strip('"').strip("'")
+    return text
+
+# ——— 上游模型自动分类 ———
+# 分三层判定，避免纯子串匹配的互相误伤（例如 imagen-4.0 会被 gen-4 命中、
+# wan2.7-image 会被 wan2 命中）：
+#   1) 排除词：语音/向量/审核类一律归 chat，任何情况都不算生成模型
+#   2) 任务标记：名字里写明了 video/image/edit 的，按标记走（最可靠）
+#   3) 厂商或模型名：靠厂商词判断，且必须没有被对侧任务标记否定
+# 新增模型厂商时往 *_VENDOR_KEYS 里加词即可，不需要动函数体。
+
+CHAT_MODEL_OVERRIDE_KEYS = [
+    "moderation", "embedding", "whisper", "transcribe", "tts", "realtime", "ocr",
+]
+VIDEO_TASK_MARKER_KEYS = [
+    "video", "t2v", "i2v", "r2v", "v2v", "s2v", "txt2video", "img2video",
+    "text-to-video", "image-to-video",
+]
+IMAGE_TASK_MARKER_KEYS = [
+    "image", "img2img", "txt2img", "inpaint", "outpaint", "upscale",
+    "text-to-image", "image-to-image", "image-edit",
+]
+VIDEO_VENDOR_KEYS = [
+    "veo", "sora", "kling", "hailuo", "vidu", "pixverse", "skyreels", "seedance",
+    "wan2", "wanx", "wan-", "doubao-1", "minimax-h3", "hunyuan-video", "cogvideo",
+    "runway", "gen-3-", "gen-4-", "luma", "pika", "jimeng", "animate", "framepack",
+    "seedvr", "happyhorse", "omni-flash",
+    # 音频/音乐生成：界面上归入视频桶（同为生成类任务），避免整批漏掉
+    "suno", "flowmusic", "musicgen", "mureka",
+]
+IMAGE_VENDOR_KEYS = [
+    "banana", "dalle", "dall-e", "imagen", "flux", "stable-diffusion", "stable-",
+    "sdxl", "sd3", "midjourney", "ideogram", "fal-ai", "z-image", "qwen-image",
+    "klein", "seedream", "recraft", "omnigen", "pixart", "playground", "kolors",
+    "hidream", "seededit", "kontext", "grok-imagine",
+]
+
 def classify_upstream_model(mid):
     lc = str(mid or "").lower()
-    video_keys = ["veo", "sora", "wan2", "wanx", "doubao-seedance", "doubao-1", "kling", "hailuo", "video", "t2v-", "i2v-", "s2v"]
-    if any(k in lc for k in video_keys):
+    if not lc:
+        return "chat"
+    if any(k in lc for k in CHAT_MODEL_OVERRIDE_KEYS):
+        return "chat"
+    # video 标记优先：image-to-video / video-edit 这类本质仍是视频生成，
+    # 名字里同时出现 image 和 video 时按视频算。
+    if any(k in lc for k in VIDEO_TASK_MARKER_KEYS):
         return "video"
-    image_keys = ["banana", "image", "dalle", "dall-e", "imagen", "flux", "stable", "sdxl", "midjourney", "nano-banana", "ideogram", "fal-ai", "z-image", "qwen-image", "klein", "seedream", "doubao-seedream", "text-to-image", "image-to-image"]
-    if any(k in lc for k in image_keys):
+    if any(k in lc for k in IMAGE_TASK_MARKER_KEYS):
+        return "image"
+    if any(k in lc for k in VIDEO_VENDOR_KEYS):
+        return "video"
+    if any(k in lc for k in IMAGE_VENDOR_KEYS):
         return "image"
     return "chat"
 
@@ -13511,10 +14218,11 @@ def parse_upstream_models(raw, protocol="openai"):
         else:
             mid = ""
         if mid:
-            mid = str(mid)
+            mid = clean_upstream_model_id(mid)
             if protocol == "gemini" and mid.startswith("models/"):
                 mid = mid[len("models/"):]
-            ids.append(mid)
+            if mid:
+                ids.append(mid)
     ids = sorted(set(ids))
     grouped = {"image": [], "chat": [], "video": []}
     for mid in ids:
@@ -13975,6 +14683,10 @@ async def build_online_image_result(payload: OnlineImageRequest):
     request_size = snap_size_to_multiple(payload.size, 16)
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
+    _max_refs = provider_max_reference_images(provider)
+    if len(image_refs) > _max_refs:
+        print(f"[ref-limit] provider={provider.get('id')} refs={len(image_refs)}>max={_max_refs}, truncating")
+        image_refs = image_refs[:_max_refs]
     count = max(1, min(8, int(payload.n or 1)))
     operation = str(payload.operation or "").strip().lower()
     if operation == "upscale":
@@ -13987,10 +14699,23 @@ async def build_online_image_result(payload: OnlineImageRequest):
         if operation == "upscale":
             image_data, raw_item = await generate_jimeng_upscale_image(image_refs, payload.resolution_type)
         else:
-            image_data, raw_item = await generate_ai_image(
-                payload.prompt, request_size, payload.quality, model, image_refs, provider["id"],
-                payload.aspect_ratio, payload.resolution,
-            )
+            # 网络错误自动重试（httpx.HTTPError 但非 HTTPStatusError）
+            # 解决高并发时间歇性网络中断导致"请求上游生图接口失败"但图实际已生成的问题
+            max_retries = 2
+            for attempt in range(max_retries + 1):
+                try:
+                    image_data, raw_item = await generate_ai_image(
+                        payload.prompt, request_size, payload.quality, model, image_refs, provider["id"],
+                        payload.aspect_ratio, payload.resolution,
+                    )
+                    break
+                except httpx.HTTPStatusError:
+                    raise  # HTTP 状态码错误不重试（如 400/401/403）
+                except httpx.HTTPError as exc:
+                    if attempt + 1 <= max_retries:
+                        await asyncio.sleep(1.5 * (attempt + 1))
+                        continue
+                    raise
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
@@ -14471,6 +15196,10 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
                 "error": "",
                 "updated_at": time.time(),
             })
+        try:
+            await manager.broadcast_canvas_task_done(task_id, "succeeded")
+        except Exception:
+            pass
     except JimengPendingError as exc:
         # 即梦云端还在排队：标记为 jimeng_pending，前端据 submit_id 持久续查（任务未丢失）
         info = jimeng_pending_payload(exc)
@@ -14485,6 +15214,10 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
                 "error": "",
                 "updated_at": time.time(),
             })
+        try:
+            await manager.broadcast_canvas_task_done(task_id, "jimeng_pending")
+        except Exception:
+            pass
     except Exception as exc:
         detail = getattr(exc, "detail", None) or str(exc)
         status_code = getattr(exc, "status_code", 500)
@@ -14497,6 +15230,70 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
                 "upstream_task_id": upstream_task_id,
                 "updated_at": time.time(),
             })
+        try:
+            await manager.broadcast_canvas_task_done(task_id, "failed")
+        except Exception:
+            pass
+
+async def run_agent_llm_task(task_id: str, payload: CanvasLLMRequest, stream: bool = False):
+    with AGENT_LLM_TASK_LOCK:
+        if task_id in AGENT_LLM_TASKS:
+            AGENT_LLM_TASKS[task_id]["status"] = "running"
+            AGENT_LLM_TASKS[task_id]["updated_at"] = time.time()
+    try:
+        if stream:
+            result = await canvas_llm_stream(task_id, payload)
+        else:
+            result = await canvas_llm(payload)
+        with AGENT_LLM_TASK_LOCK:
+            AGENT_LLM_TASKS[task_id].update({
+                "status": "succeeded",
+                "result": result,
+                "error": "",
+                "updated_at": time.time(),
+            })
+        try:
+            await manager.broadcast_agent_llm_done(task_id, "succeeded")
+        except Exception:
+            pass
+    except Exception as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        status_code = getattr(exc, "status_code", 500)
+        with AGENT_LLM_TASK_LOCK:
+            AGENT_LLM_TASKS[task_id].update({
+                "status": "failed",
+                "error": str(detail),
+                "status_code": status_code,
+                "updated_at": time.time(),
+            })
+        try:
+            await manager.broadcast_agent_llm_done(task_id, "failed")
+        except Exception:
+            pass
+
+@app.post("/api/agent-llm-task")
+async def create_agent_llm_task(payload: CanvasLLMRequest, stream: bool = False):
+    task_id = f"agent_llm_{uuid.uuid4().hex}"
+    with AGENT_LLM_TASK_LOCK:
+        AGENT_LLM_TASKS[task_id] = {
+            "id": task_id,
+            "type": "agent-llm",
+            "status": "queued",
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "result": None,
+            "error": "",
+        }
+    asyncio.create_task(run_agent_llm_task(task_id, payload, stream=stream))
+    return {"task_id": task_id, "status": "queued"}
+
+@app.get("/api/agent-llm-task/{task_id}")
+async def get_agent_llm_task(task_id: str):
+    with AGENT_LLM_TASK_LOCK:
+        task = dict(AGENT_LLM_TASKS.get(task_id) or {})
+    if not task:
+        raise HTTPException(status_code=404, detail="Agent LLM 任务不存在，可能服务已重启")
+    return task
 
 @app.post("/api/canvas-image-tasks")
 async def create_canvas_image_task(payload: OnlineImageRequest):
@@ -15615,7 +16412,8 @@ async def canvas_video(payload: CanvasVideoRequest):
                 if payload.images and not image_with_roles and not image_payload:
                     first_url, first_reason = invalid_images[0] if invalid_images else ("", "未知错误")
                     sample = invalid_video_image_preview(first_url)
-                    raise HTTPException(status_code=400, detail=f"输入图片无法转换为视频接口支持的格式：{sample}\n原因：{first_reason}\n请确认本地文件存在且不超过 10MB；VEO3.1 需要图片是 APIMart 可访问的 http/https / asset:// / data URL。")
+                    size_hint = f"上传接口实际体积上限约 {apimart_upload_max_bytes() // 1024} KB（超出会被网关直接 413 拒绝，可用 APIMART_UPLOAD_MAX_BYTES 调整）"
+                    raise HTTPException(status_code=400, detail=f"输入图片无法转换为视频接口支持的格式：{sample}\n原因：{first_reason}\n请确认本地文件存在且 {size_hint}；VEO3.1 需要图片是 APIMart 可访问的 http/https / asset:// / data URL。")
                 # --- APIMart 请求体 ---
                 if is_veo31:
                     model = apimart_model
@@ -15638,12 +16436,14 @@ async def canvas_video(payload: CanvasVideoRequest):
                     if model != "veo3.1-lite":
                         body["official_fallback"] = False
                 else:
+                    model = selected_model(payload.model, "doubao-seedance-2.0")
                     body = {
                         "prompt": payload.prompt,
-                        "model": selected_model(payload.model, "doubao-seedance-2.0"),
+                        "model": model,
                         "duration": apimart_video_duration(payload.duration),
                         "size": apimart_video_size(payload.aspect_ratio or payload.size),
-                        "resolution": payload.resolution or "480p",
+                        # MiniMax-H3 只认 2K / 768P，通用的 480p 默认值会被它拒绝
+                        "resolution": apimart_minimax_h3_resolution(payload.resolution) if is_apimart_minimax_h3_model(model) else (payload.resolution or "480p"),
                     }
                     if image_with_roles and video_payload:
                         raise HTTPException(status_code=400, detail="APIMart Seedance 的 image_with_roles 不能和 video_urls 同时使用，请只保留图片首尾帧或参考视频其中一种。")
@@ -15781,7 +16581,9 @@ async def canvas_video(payload: CanvasVideoRequest):
                     # enable_upsample / aspect_ratio（仅 16:9、9:16）。无 duration 字段，
                     # 时长由模型本身决定，所以这里不传 duration/seconds。
                     yuli_images = []
-                    for ref in payload.images[:3]:
+                    _veo_refs = payload.images[:3]
+                    _veo_max = ref_image_max_size(len(_veo_refs))
+                    for ref in _veo_refs:
                         ref_url = str(getattr(ref, "url", "") or "").strip()
                         if not ref_url:
                             continue
@@ -15789,7 +16591,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                             yuli_images.append(ref_url)
                         else:
                             # 本地/dataURL 图片转成 data URL 兜底传递
-                            data_url = reference_to_data_url(ref.dict(), max_size=1536)
+                            data_url = reference_to_data_url(ref.dict(), max_size=_veo_max)
                             if data_url:
                                 yuli_images.append(data_url)
                     prompt_text = str(payload.prompt or "")
@@ -15809,10 +16611,12 @@ async def canvas_video(payload: CanvasVideoRequest):
                     if payload.enable_upsample:
                         body["enable_upsample"] = True
                 else:
+                    _veo3_refs = payload.images[:4]
+                    _veo3_max = ref_image_max_size(len(_veo3_refs))
                     image_payload = []
-                    for ref in payload.images[:4]:
+                    for ref in _veo3_refs:
                         if ref.url:
-                            image_payload.append(reference_to_data_url(ref.dict(), max_size=1536))
+                            image_payload.append(reference_to_data_url(ref.dict(), max_size=_veo3_max))
                     body = {
                         "prompt": payload.prompt,
                         "model": selected_model(payload.model, "veo3-fast"),
@@ -15959,6 +16763,71 @@ async def canvas_video(payload: CanvasVideoRequest):
         raise HTTPException(status_code=502, detail=f"请求上游视频接口失败：{exc}") from exc
 
 # --- Canvas LLM ---
+
+async def canvas_llm_stream(task_id: str, payload: CanvasLLMRequest):
+    """流式调用 LLM，通过 WebSocket 逐 token 广播，最终返回完整结果。"""
+    _provider = get_api_provider(payload.provider)
+    # CLI 协议不支持流式，回退为普通调用
+    if is_codex_provider(_provider) or is_gemini_cli_provider(_provider):
+        return await canvas_llm(payload)
+    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+    _llm_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
+    _is_apimart = is_apimart_provider(_llm_provider)
+    # APIMart 不支持流式，回退
+    if _is_apimart:
+        return await canvas_llm(payload)
+    system_prompt = (payload.system_prompt or "").strip()
+    upstream_messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
+    for item in payload.messages[-MAX_HISTORY_MESSAGES:]:
+        role = item.get("role")
+        content = item.get("content")
+        if role in {"user", "assistant"} and content:
+            upstream_messages.append({"role": role, "content": content})
+    image_inputs = [img for img in (payload.images or []) if is_image_reference_value(img)]
+    if image_inputs:
+        content_parts = [{"type": "text", "text": payload.message}]
+        for img in image_inputs[:8]:
+            if not img or not isinstance(img, str):
+                continue
+            ref_url = media_reference_to_url(img, max_image_size=1024)
+            if ref_url:
+                content_parts.append({"type": "image_url", "image_url": {"url": ref_url}})
+        upstream_messages.append({"role": "user", "content": content_parts})
+    else:
+        upstream_messages.append({"role": "user", "content": payload.message})
+    # 流式请求
+    full_text = ""
+    try:
+        async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
+            req_body = {"model": model, "messages": upstream_messages, "stream": True}
+            async with client.stream("POST", f"{chat_base}/chat/completions", headers=chat_hdrs, json=req_body) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                        token = delta.get("content") or ""
+                        if token:
+                            full_text += token
+                            try:
+                                await manager.broadcast_agent_llm_token(task_id, token)
+                            except Exception:
+                                pass
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+    except httpx.HTTPStatusError as exc:
+        body = exc.response.text or "" if hasattr(exc.response, 'text') else ""
+        friendly = friendly_chat_error_detail(body, model, _llm_provider)
+        raise HTTPException(status_code=exc.response.status_code, detail=friendly or f"上游接口错误：{body[:300]}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
+    text = full_text.strip() or "接口返回了空回复。"
+    return {"text": text, "model": model, "raw_usage": None, "raw": None}
 
 @app.post("/api/canvas-llm")
 async def canvas_llm(payload: CanvasLLMRequest):
@@ -17879,7 +18748,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
     payload = {
         "model": model,
         "prompt": req.prompt.strip(),
-        "image_url": [modelscope_image_url(url, max_size=1536) for url in req.image_urls]
+        "image_url": [modelscope_image_url(url, max_size=ref_image_max_size(len(req.image_urls))) for url in req.image_urls]
     }
     if req.resolution:
         payload["size"] = modelscope_size(req.resolution)
@@ -18069,7 +18938,8 @@ async def ms_generate(req: MsGenerateRequest):
     elif req.size:
         payload["size"] = modelscope_size(req.size)
     if req.image_urls:
-        payload["image_url"] = [modelscope_image_url(url, max_size=1536) for url in req.image_urls]
+        _ms_urls = req.image_urls
+        payload["image_url"] = [modelscope_image_url(url, max_size=ref_image_max_size(len(_ms_urls))) for url in _ms_urls]
     if req.loras is not None:
         payload["loras"] = req.loras
 

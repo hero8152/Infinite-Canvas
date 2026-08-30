@@ -1,3 +1,11 @@
+// 安全提取 fetch 错误响应中的提示信息，避免后端返回非 JSON（如 "Internal Server Error"）时前端崩溃
+async function safeApiError(r, fallback){
+    try {
+        const text = await r.text();
+        try { const d = JSON.parse(text); return d.detail || d.message || text.slice(0,200) || fallback; }
+        catch(_) { return text.slice(0,200) || fallback; }
+    } catch(_) { return fallback; }
+}
 let providers = [];
 let selectedId = '';
 const providerList = document.getElementById('providerList');
@@ -2973,10 +2981,10 @@ async function probeAsync(){
                     image_request_mode:'openai'
                 })
             }).then(async r => {
-                if(!r.ok) throw new Error((await r.json()).detail || '请求失败');
-                return r.json();
-            });
-            applyDetectedProtocol('runninghub');
+if(!r.ok) throw new Error(await safeApiError(r, '请求失败'));
+return r.json();
+});
+applyDetectedProtocol('runninghub');
             setFetchedModelState(data);
             const openBtn = document.getElementById('openPickerBtn');
             if(openBtn){ openBtn.disabled = false; openBtn.style.opacity = '1'; }
@@ -2994,10 +3002,10 @@ async function probeAsync(){
                 image_request_mode: imageRequestModeInput?.value || item.image_request_mode || 'openai'
             })
         }).then(async r => {
-            if(!r.ok) throw new Error((await r.json()).detail || '请求失败');
-            return r.json();
-        });
-        const detectedProtocol = String(data.protocol || '').toLowerCase();
+if(!r.ok) throw new Error(await safeApiError(r, '请求失败'));
+return r.json();
+});
+const detectedProtocol = String(data.protocol || '').toLowerCase();
         const isAsync = data.ok === true && detectedProtocol === 'apimart';
         const isOpenAiCompat = data.ok === true && detectedProtocol === 'openai';
         const keepManualProtocol = ['gemini', 'volcengine', 'jimeng', 'codex', 'gemini-cli'].includes(currentProtocol);
@@ -3061,8 +3069,8 @@ async function testConnection(){
                 image_request_mode: imageRequestModeInput?.value || item.image_request_mode || 'openai'
             })
         }).then(async r => {
-            if(!r.ok) throw new Error((await r.json()).detail || (tr('api.urlInvalid') || '验证失败'));
-            return r.json();
+if(!r.ok) throw new Error(await safeApiError(r, tr('api.urlInvalid') || '验证失败'));
+return r.json();
         });
         if(data.ok){
             const detectedProtocol = String(data.protocol || '').toLowerCase();
@@ -3220,8 +3228,8 @@ async function fetchModels(){
                 image_request_mode:imageRequestModeInput?.value || item.image_request_mode || 'openai'
             })
         }).then(async r => {
-            if(!r.ok) throw new Error((await r.json()).detail || (tr('api.urlInvalid') || '拉取失败'));
-            return r.json();
+if(!r.ok) throw new Error(await safeApiError(r, tr('api.urlInvalid') || '拉取失败'));
+return r.json();
         });
         setFetchedModelState(data);
         const detectedProtocol = String(data.protocol || '').toLowerCase();
@@ -3799,9 +3807,9 @@ async function saveProviders(){
                 clear_volcengine_secret_access_key:item._clearVolcengineSecretKey === true
             })))
         });
-        if(!res.ok) throw new Error((await res.json()).detail || tr('api.saveFailed'));
-        const data = await res.json();
-        providers = data.providers || providers;
+if(!res.ok) throw new Error(await safeApiError(res, tr('api.saveFailed')));
+const data = await res.json();
+providers = data.providers || providers;
         providers.forEach(item => {
             delete item.api_key;
             delete item.wallet_api_key;

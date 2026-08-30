@@ -25,10 +25,15 @@ const SMART_MINIMAX_REF_AUDIO_MAX = 3;
 const SMART_MINIMAX_DEFAULT_ENGINE = 'comfyui';
 const SMART_MINIMAX_RUNNINGHUB_WORKFLOW_ID = '2084608321469898754';
 const SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE = 'Minimax-多参视频生成';
+function providerMaxReferenceImages(providerId){
+    const p = apiProviderById(providerId);
+    return Number(p?.max_reference_images) > 0 ? Number(p.max_reference_images) : SMART_REFERENCE_IMAGE_MAX;
+}
 const inputPromptPreview = document.getElementById('inputPromptPreview');
 const minimap = document.getElementById('minimap');
 const minimapContent = document.getElementById('minimapContent');
 const smartArrangeBtn = document.getElementById('smartArrangeBtn');
+const smartSendAgentBtn = document.getElementById('smartSendAgentBtn');
 const imageEditModal = document.getElementById('imageEditModal');
 const smartLogModal = document.getElementById('smartLogModal');
 const smartLogList = document.getElementById('smartLogList');
@@ -57,6 +62,23 @@ const assetDialogInput = document.getElementById('assetDialogInput');
 const assetDialogCancel = document.getElementById('assetDialogCancel');
 const assetDialogOk = document.getElementById('assetDialogOk');
 const assetHoverPreview = document.getElementById('assetHoverPreview');
+const agentToggle = document.getElementById('agentToggle');
+const agentPanel = document.getElementById('agentPanel');
+const agentCloseBtn = document.getElementById('agentCloseBtn');
+
+const agentChatProvider = document.getElementById('agentChatProvider');
+const agentChatModel = document.getElementById('agentChatModel');
+const agentGenProvider = document.getElementById('agentGenProvider');
+const agentGenModel = document.getElementById('agentGenModel');
+const agentGenRatio = document.getElementById('agentGenRatio');
+const agentGenResolution = document.getElementById('agentGenResolution');
+const agentGenCount = document.getElementById('agentGenCount');
+const agentMessages = document.getElementById('agentMessages');
+const agentAttachRow = document.getElementById('agentAttachRow');
+const agentAttachBtn = document.getElementById('agentAttachBtn');
+const agentImageInput = document.getElementById('agentImageInput');
+const agentInput = document.getElementById('agentInput');
+const agentSendBtn = document.getElementById('agentSendBtn');
 const promptPresetPanel = document.getElementById('promptPresetPanel');
 const promptPresetClose = document.getElementById('promptPresetClose');
 const promptPresetStatus = document.getElementById('promptPresetStatus');
@@ -1295,6 +1317,19 @@ function syncSelectionUi(){
     if(selectedImage.nodeId) touchedIds.add(selectedImage.nodeId);
     world.classList.toggle('smart-multi-selected', ids.length > 1);
     smartArrangeBtn?.classList.toggle('visible', ids.length > 0);
+    // 框选了多张图片节点时显示「发送至Agent」按钮
+    const selectedImgNodes = ids.map(id => nodes.find(n => n.id === id)).filter(n => n && isSmartImageNode(n) && (n.images || []).some(img => img?.url));
+    if(smartSendAgentBtn){
+        if(selectedImgNodes.length > 0){
+            smartSendAgentBtn.hidden = false;
+            smartSendAgentBtn.classList.add('visible');
+            const labelEl = smartSendAgentBtn.querySelector('span');
+            if(labelEl) labelEl.textContent = `发送至Agent(${selectedImgNodes.length}张)`;
+        } else {
+            smartSendAgentBtn.hidden = true;
+            smartSendAgentBtn.classList.remove('visible');
+        }
+    }
     smartNodeElementsByIds(touchedIds).forEach(el => {
         const id = el.dataset.id || '';
         el.classList.toggle('selected', isNodeSelected(id));
@@ -2690,8 +2725,19 @@ function renderVideoAspectControl(){
     </div>`;
 }
 function renderVideoResolutionControl(){
-    const options = [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P']];
-    const value = settings.videoResolution || '';
+    // MiniMax-H3 只接受 2K / 768P，其余模型保留通用档位
+    const isMinimax = /minimax[-_ ]?h3/i.test(String(settings.videoModel || '').trim());
+    const options = isMinimax
+        ? [['2K','2K'], ['768P','768P']]
+        : [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P']];
+    let value = settings.videoResolution || '';
+    if(isMinimax && value !== '2K' && value !== '768P'){
+        value = '768P';
+        settings.videoResolution = value;
+    } else if(!isMinimax && (value === '2K' || value === '768P')){
+        value = '';
+        settings.videoResolution = value;
+    }
     const labelMap = Object.fromEntries(options);
     return `<div class="smart-control resolution-control">
         <button class="smart-pill" type="button"><i data-lucide="monitor"></i><span>${escapeHtml(labelMap[value] || value || tr('smart.videoResAuto'))}</span></button>
@@ -4156,8 +4202,19 @@ function bindDynamicParams(){
             event.preventDefault();
             event.stopPropagation();
             markControlInteracting(btn);
-            setDynamicSetting(btn.dataset.smartParam, btn.dataset.smartValue);
-            if(btn.dataset.smartParam === 'videoDuration') renderDynamicParams();
+            const param = btn.dataset.smartParam;
+            setDynamicSetting(param, btn.dataset.smartValue);
+            if(param === 'videoModel'){
+                // MiniMax-H3 只接受 2K/768P：切换模型时联动纠正分辨率
+                const isMinimax = /minimax[-_ ]?h3/i.test(String(settings.videoModel || '').trim());
+                if(isMinimax && settings.videoResolution !== '2K' && settings.videoResolution !== '768P'){
+                    settings.videoResolution = '768P';
+                } else if(!isMinimax && (settings.videoResolution === '2K' || settings.videoResolution === '768P')){
+                    settings.videoResolution = '';
+                }
+                renderDynamicParams();
+            }
+            if(param === 'videoDuration') renderDynamicParams();
         };
     });
     dynamicParams.querySelectorAll('[data-size-scope]').forEach(btn => {
@@ -5487,6 +5544,9 @@ function connectAssetLibrarySyncSocket(){
                 const data = JSON.parse(event.data);
                 if(data?.type === 'asset_library_updated') handleAssetLibraryUpdatedMessage(data);
                 if(data?.type === 'canvas_updated') handleCanvasUpdatedMessage(data);
+                if(data?.type === 'canvas_task_done') handleCanvasTaskDoneMessage(data);
+                if(data?.type === 'agent_llm_done') handleAgentLlmDoneMessage(data);
+                if(data?.type === 'agent_llm_token') handleAgentLlmTokenMessage(data);
             } catch(e) {}
         };
         socket.onclose = () => {
@@ -5524,6 +5584,7 @@ function setAssetLibraryFromResponse(data, options={}){
 function toggleAssetLibrary(open=!assetLibraryOpen){
     if(!assetPanel || !assetToggle) return;
     assetLibraryOpen = !!open;
+    if(assetLibraryOpen) toggleAgentPanel(false);
     assetPanel.classList.toggle('open', assetLibraryOpen);
     assetToggle?.classList.toggle('active', assetLibraryOpen);
     if(assetLibraryOpen) loadAssetLibrary();
@@ -8178,6 +8239,7 @@ function smartNodeToolbarHtml(node){
     const imageCount = images.filter(img => mediaKindForItem(imageForDisplay(img)) === 'image' && imageForDisplay(img)?.url).length;
     const gridLabel = imageCount > 1 ? '宫格拼接' : '宫格切分';
     const actions = [
+        {key:'sendToAgent', icon:'bot', label:'发送至Agent', enabled:true},
         {key:'preview', icon:'eye', label:'预览', enabled:kind === 'image' || kind === 'video'},
         {key:'crop', icon:'crop', label:'裁剪', enabled:canEditImage},
         {key:'outpaint', icon:'expand', label:'扩图', enabled:canEditImage},
@@ -8217,6 +8279,27 @@ function runSmartNodeToolbarAction(nodeId, action){
     selectedId = nodeId;
     selectedIds = [];
     selectedImage = {nodeId, index};
+    if(action === 'sendToAgent'){
+        // 发送图片到 Agent 面板作为附件
+        if(!agentOpen) toggleAgentPanel(true);
+        if(agentState){
+            if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+            const _genProv = agentGenProviders().some(p => p.id === agentState.genProvider) ? agentState.genProvider : (agentGenProviders()[0]?.id || '');
+            const _refMax = _genProv ? providerMaxReferenceImages(_genProv) : AGENT_LLM_IMAGE_MAX;
+            if(agentState.attachments.length < _refMax && !agentState.attachments.some(a => a.url === item.url)){
+                agentState.attachments.push({url:item.url, name:item.name || node.title || 'image', nodeId:node.id, x:Number(node.x) || 0, y:Number(node.y) || 0});
+                renderAgentAttachments();
+                saveAgentState();
+                toast('已发送至 Agent');
+            } else if(agentState.attachments.length >= _refMax){
+                const _pName = apiProviderById(_genProv)?.name || _genProv;
+                toast(`当前生图平台 ${_pName} 最多支持 ${_refMax} 张参考图，已达上限`);
+            } else {
+                toast('附件已存在');
+            }
+        }
+        return;
+    }
     if(action === 'download'){
         downloadPreviewFile(node.images?.[index] || item);
         return;
@@ -9579,7 +9662,7 @@ function handlePortDrop(drag, e){
         return;
     }
     if(!drag.moved){ discardPendingUndo(); render(); return; }
-    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
+    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
         discardPendingUndo(); render(); return;
     }
     const p = screenToWorld(e);
@@ -16266,6 +16349,7 @@ function comfyFieldKind(field){
 async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
+    const _refMax = providerMaxReferenceImages(runSettings.provider_id);
     const payload = {
         prompt,
         provider_id:runSettings.provider_id,
@@ -16275,7 +16359,7 @@ async function runApiGeneration(prompt, refs, runSettings=settings){
         resolution:['1k','2k','4k'].includes(runSettings.resolution) ? runSettings.resolution : '',
         quality:runSettings.quality || 'auto',
         n:1,
-        reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX)
+        reference_images:imageRefsOnly(refs).slice(0, _refMax)
     };
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
         if(!r.ok) throw new Error(await r.text());
@@ -17070,12 +17154,119 @@ function resumeJimengPendingNodes(){
         startJimengPoll(n);
     });
 }
+// WebSocket 实时任务完成通知：消除轮询延迟
+const _canvasTaskWaiters = new Map();
+function handleCanvasTaskDoneMessage(data){
+    const taskId = data?.task_id;
+    const status = data?.status;
+    if(!taskId) return;
+    const waiter = _canvasTaskWaiters.get(taskId);
+    if(waiter) waiter(status);
+}
+// Agent LLM 任务 WebSocket 通知
+const _agentLlmWaiters = new Map();
+// 流式输出状态
+let _agentStreamTaskId = null;
+let _agentStreamText = '';
+let _agentStreamCancelled = false;
+function handleAgentLlmDoneMessage(data){
+    const taskId = data?.task_id;
+    const status = data?.status;
+    if(!taskId) return;
+    // 流式完成：清除流式状态
+    if(taskId === _agentStreamTaskId){
+        _agentStreamTaskId = null;
+    }
+    const waiter = _agentLlmWaiters.get(taskId);
+    if(waiter) waiter(status || 'done');
+}
+function handleAgentLlmTokenMessage(data){
+    const taskId = data?.task_id;
+    const token = data?.token;
+    if(!taskId || !token) return;
+    if(taskId !== _agentStreamTaskId) return;
+    if(_agentStreamCancelled) return;
+    _agentStreamText += token;
+    // 更新流式气泡 UI
+    renderAgentStreamBubble();
+}
+function renderAgentStreamBubble(){
+    if(!agentMessages) return;
+    let bubble = agentMessages.querySelector('.agent-stream-bubble');
+    if(!bubble){
+        // 创建流式气泡
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'agent-msg assistant';
+        msgDiv.innerHTML = `<div class="agent-msg-bubble agent-stream-bubble"><div class="agent-stream-body"></div><button class="agent-stream-stop" type="button" title="停止">&#9632;</button></div>`;
+        agentMessages.appendChild(msgDiv);
+        bubble = msgDiv.querySelector('.agent-stream-bubble');
+        // 停止按钮
+        bubble.querySelector('.agent-stream-stop').onclick = () => {
+            _agentStreamCancelled = true;
+        };
+    }
+    const body = bubble.querySelector('.agent-stream-body');
+    if(body){
+        body.textContent = _agentStreamText;
+        body.scrollTop = body.scrollHeight;
+    }
+    agentMessages.scrollTop = agentMessages.scrollHeight;
+}
+function startAgentStream(taskId){
+    _agentStreamTaskId = taskId;
+    _agentStreamText = '';
+    _agentStreamCancelled = false;
+}
+function endAgentStream(){
+    // 移除流式气泡（最终结果由正常流程渲染）
+    if(agentMessages){
+        const streamMsg = agentMessages.querySelector('.agent-stream-bubble')?.closest('.agent-msg');
+        if(streamMsg) streamMsg.remove();
+    }
+    _agentStreamTaskId = null;
+    _agentStreamText = '';
+    _agentStreamCancelled = false;
+}
+async function pollAgentLlmTask(taskId){
+    if(!taskId) throw new Error('Invalid task ID');
+    const startTime = Date.now();
+    const MAX_DURATION = 5 * 60 * 1000; // 5 分钟硬超时
+    for(let i = 0; i < 120; i++){
+        if(Date.now() - startTime > MAX_DURATION){
+            throw new Error('LLM task timeout (5min)');
+        }
+        const wsNotify = new Promise(resolve => {
+            _agentLlmWaiters.set(taskId, (status) => resolve(status || 'done'));
+        });
+        const pollInterval = i < 5 ? 1000 : 3000;
+        const timeout = new Promise(resolve => setTimeout(() => resolve('poll'), pollInterval));
+        await Promise.race([wsNotify, timeout]);
+        _agentLlmWaiters.delete(taskId);
+        const task = await fetch(`/api/agent-llm-task/${encodeURIComponent(taskId)}`).then(async r => {
+            if(!r.ok) throw new Error(await r.text());
+            return r.json();
+        });
+        if(task.status === 'succeeded') return task.result || {};
+        if(task.status === 'failed') throw new Error(task.error || 'LLM task failed');
+    }
+    throw new Error('LLM task timeout');
+}
 async function pollSmartCanvasTask(taskId){
     if(!taskId) throw new Error(tr('smart.errRunFailed'));
     if(activeSmartTaskPolls.has(taskId)) return activeSmartTaskPolls.get(taskId);
     const promise = (async () => {
         for(let i = 0; i < 900; i++){
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // 注册 WebSocket 等待器：收到任务完成通知时立即查询，无需等轮询间隔
+            const wsNotify = new Promise(resolve => {
+                _canvasTaskWaiters.set(taskId, (status) => resolve(status || 'done'));
+            });
+            // 同时设置超时轮询作为保底
+            const pollInterval = i < 5 ? 500 : i < 15 ? 1000 : 2000;
+            const timeout = new Promise(resolve => setTimeout(() => resolve('poll'), pollInterval));
+            // 哪个先触发就用哪个
+            const trigger = await Promise.race([wsNotify, timeout]);
+            _canvasTaskWaiters.delete(taskId);
+            // 如果是 WebSocket 通知触发，立即查询；如果是超时触发，也查询
             const task = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`).then(async r => {
                 if(!r.ok) throw new Error(await r.text());
                 return r.json();
@@ -17095,6 +17286,7 @@ async function pollSmartCanvasTask(taskId){
         return await promise;
     } finally {
         activeSmartTaskPolls.delete(taskId);
+        _canvasTaskWaiters.delete(taskId);
     }
 }
 function finalizeSmartPendingTask(node, taskId, images, kind='image'){
@@ -17230,6 +17422,7 @@ function finishSelection(event){
     selectionJustFinished = true;
     selectionBox.style.display = 'none';
     render();
+    syncSelectionUi();
     setTimeout(() => { selectionJustFinished = false; }, 0);
 }
 function groupSelectedNodes(){
@@ -17455,14 +17648,14 @@ function createNodeFromMenu(type){
 shell.addEventListener('mousedown', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
 }, true);
 shell.addEventListener('click', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
     const nodeEl = e.target.closest('.image-node');
@@ -17470,8 +17663,8 @@ shell.addEventListener('click', e => {
     else exitZoomPreview(screenToWorld(e));
 }, true);
 shell.onmousedown = e => {
-    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
-    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
+    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
     closeCreateMenu();
     if(e.button === 0 && e.shiftKey){
         e.preventDefault();
@@ -17508,7 +17701,7 @@ shell.oncontextmenu = e => {
         e.stopPropagation();
         return;
     }
-    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -17524,18 +17717,19 @@ shell.oncontextmenu = e => {
     openCreateMenu(e);
 };
 shell.ondblclick = e => {
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     openCreateMenu(e);
 };
 shell.onclick = e => {
     if(selectionJustFinished) return;
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     closeCreateMenu();
     clearSelection();
     render();
+    syncSelectionUi();
 };
 minimap?.addEventListener('mousedown', e => {
     if(e.button !== 0) return;
@@ -17547,9 +17741,37 @@ minimap?.addEventListener('mousedown', e => {
 });
 smartArrangeBtn?.addEventListener('mousedown', e => e.stopPropagation());
 smartArrangeBtn?.addEventListener('click', e => {
-    e.preventDefault();
-    e.stopPropagation();
-    arrangeSelectedSmartNodes();
+e.preventDefault();
+e.stopPropagation();
+arrangeSelectedSmartNodes();
+});
+smartSendAgentBtn?.addEventListener('mousedown', e => e.stopPropagation());
+smartSendAgentBtn?.addEventListener('click', e => {
+e.preventDefault();
+e.stopPropagation();
+// 收集所有选中节点的第一张图片，批量发送至 Agent
+const ids = selectedNodeIds();
+const imgNodes = ids.map(id => nodes.find(n => n.id === id)).filter(n => n && isSmartImageNode(n) && (n.images || []).some(img => img?.url));
+if(!imgNodes.length){ toast('没有选中的图片节点'); return; }
+if(!agentOpen) toggleAgentPanel(true);
+if(!agentState) return;
+if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+const _genProv = agentGenProviders().some(p => p.id === agentState.genProvider) ? agentState.genProvider : (agentGenProviders()[0]?.id || '');
+const _refMax = _genProv ? providerMaxReferenceImages(_genProv) : AGENT_LLM_IMAGE_MAX;
+let added = 0, skipped = 0;
+for(const node of imgNodes){
+if(agentState.attachments.length >= _refMax){ skipped++; continue; }
+const item = imageForDisplay(node.images[0]);
+if(!item?.url) continue;
+if(agentState.attachments.some(a => a.url === item.url)){ skipped++; continue; }
+agentState.attachments.push({url:item.url, name:item.name || node.title || 'image', nodeId:node.id, x:Number(node.x) || 0, y:Number(node.y) || 0});
+added++;
+}
+renderAgentAttachments();
+saveAgentState();
+if(added > 0 && skipped > 0) toast(`已发送 ${added} 张至 Agent，${skipped} 张因重复或超限跳过`);
+else if(added > 0) toast(`已发送 ${added} 张至 Agent`);
+else if(skipped > 0) toast(`参考图已达上限或全部重复`);
 });
 window.onmousemove = e => {
     lastMouseWorld = screenToWorld(e);
@@ -18011,7 +18233,7 @@ window.onmouseup = e => {
     }
 };
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,.minimax-library-list,.minimax-ref-track,[data-thumb-scroll]')) return;
+    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,.minimax-library-list,.minimax-ref-track,[data-thumb-scroll]')) return;
     e.preventDefault();
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -18045,6 +18267,18 @@ shell.ondrop = async e => {
     e.preventDefault();
     if(e.target.closest('.image-node')) return;
     const p = screenToWorld(e);
+    // 灵感库拖拽：内容脚本已通过 postMessage 暂存图片+提示词（绕开跨域 dataTransfer 限制）
+    if(pendingInspireDrag && pendingInspireDrag.imageUrl){
+        const drag = pendingInspireDrag;
+        pendingInspireDrag = null;
+        pushUndo();
+        createImageNodeAt(p, [{url:drag.imageUrl, name:'inspire-' + Date.now() + '.png', kind:'image'}], {skipUndo:true});
+        if(drag.prompt) setPromptText(drag.prompt);
+        render();
+        scheduleSave();
+        toast(drag.prompt ? '已拖入灵感图 + 提示词' : '已拖入灵感图');
+        return;
+    }
     const assetRaw = e.dataTransfer.getData('application/x-smart-asset');
     if(assetRaw){
         try {
@@ -18578,6 +18812,3757 @@ assetDropZone?.addEventListener('drop', handleAssetPanelDrop);
 assetPanel?.addEventListener('dragover', handleAssetPanelDragOver);
 assetPanel?.addEventListener('dragleave', e => { if(!assetPanel?.contains(e.relatedTarget)) setAssetDragOver(false); });
 assetPanel?.addEventListener('drop', handleAssetPanelDrop);
+// ==================== AI Agent 侧边面板 ====================
+const AGENT_STORAGE_PREFIX = 'smart_agent_v1:';
+const AGENT_SKILL_MAX_BYTES = 512 * 1024;
+const AGENT_HISTORY_MAX = 20;
+const AGENT_LLM_IMAGE_MAX = 8;
+const AGENT_GEN_MAX_PER_MSG = 8;
+const AGENT_MSG_MAX = 60;
+const AGENT_NL = String.fromCharCode(10);
+const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent. Reply with raw JSON only (no markdown, no extra text):
+{"reply":"回复用户的话","options":[],"prompts":[],"generations":[{"prompt":"详细中文提示词","count":1,"use_last_outputs":false,"use_attachments":false}]}
+
+Fields: "reply"=对话回复; "options"=[{label,value}]按钮; "prompts"=待确认的中文提示词; "generations"=立即生成的图片(最多8项). "use_last_outputs":引用/修改上一轮图片时true; "use_attachments":引用/修改用户上传图时true.
+
+核心原则：能生成就生成，不要问。
+- 用户有明确主体+任何细节 → 扩写prompt并立即生成(generations)
+- 用户刚选了选项或回答了问题 → 立即生成，不要再确认
+- 请求模糊有多个方向 → 给2-4个选项(options)，用户选后立即生成
+- 关键信息缺失无法给选项 → 问1-3个短问题(reply)
+- 用户要多张不同图 → generations放多项
+- 所有prompt必须中文，包含主体/风格/构图/光线/色彩/细节/氛围
+- 文字规则：默认情况下prompt不要包含文字内容（标题、对白、台词、旁白、字幕），只描述画面视觉元素；以下情况可以包含文字：1.skill文档明确要求画面中有文字（如标题、批注、标语）；2.用户明确要求"加文字/标题/标语/配文"。当需要文字时用引号标注，如：画面顶部有文字"标题内容"
+- 用户上传角色参考图 → 后续生成保持角色一致性
+- 有skill文档时遵循其风格规则
+- 不要只问"确认要生成吗"而不给完整prompt
+
+修改场景规则（非常重要）：
+当用户要求修改上一张图时，必须区分两种情况：
+
+A. 风格/属性修改（use_last_outputs必须为true）：
+   - 用户只想改变画风、色调、背景、光影等属性，主体不变
+   - 例如："换成像素风"、"改成卡通"、"背景换成蓝色"、"调成暖色调"
+   - prompt应简洁聚焦：只描述要修改的内容+保持原图其他部分不变
+   - 例如用户说"换成像素风"，prompt应该是"将原图转换为像素艺术风格，保持原有的主体、姿态、构图和色彩不变，仅改变渲染风格为像素化"
+
+B. 主体更换（use_last_outputs必须为true）：
+   - 用户要把图片中的主体换成另一个完全不同的主体
+   - 例如："企鹅换成鲨鱼"、"龙换成马"、"把猫变成狗"
+   - 重要：必须引用上一轮图片（use_last_outputs: true），以保留原图的场景、背景、构图
+   - prompt必须明确指示"替换主体+保留场景"，格式："将原图中的[原主体]替换为[新主体]，保持原有的场景、背景、构图、光影、色彩和氛围完全不变，仅改变主体本身，新主体出现在原来主体的位置，保持相似的姿态和构图"
+   - 例如用户说"龙换成马"，prompt应该是"将原图中的龙替换为一匹马，保持原有的场景、背景、构图、光影、色彩和氛围完全不变，仅将主体从龙改为马，马出现在原来龙的位置，保持相似的姿态"
+   - 绝对不要写成全新生成的描述（如"马在草原上奔跑"），那样会丢失原图场景
+
+通用规则：
+1. 绝对不要添加用户没要求的内容，特别是：动画帧、序列帧、多角度视图、动作分解、分镜
+2. 判断依据：如果新主体和原主体是不同的物体/生物/人物 → 主体更换(B)；如果只是改变同一个主体的呈现方式 → 风格修改(A)
+3. 无论A还是B，都使用use_last_outputs: true引用原图，区别在于prompt的写法不同`;
+// OFF模式系统提示词：快速执行器（理解意图但不改写prompt）
+const AGENT_OFF_MODE_INSTRUCTION = `你是一个图像生成 Agent 的意图决策器。分析用户输入+上下文，决定下一步行动。仅返回原始 JSON，不要 markdown。
+
+【输出格式】
+{"intent":"...","reply":"...","prompts":[],"use_attachments":false,"attachment_roles":{},"use_last_outputs":false,"text_only":false,"analysis":"","options":[]}
+
+【intent 类型】
+- generate: 用户想生成新图（给了视觉描述或生图指令）
+- edit: 用户想修改已有的图（"改成/换成/调整/加/去掉"）
+- analyze: 用户想分析/反推/描述/识别图片（不生图）
+- refine: 用户想扩写/优化/翻译提示词（不生图）
+- composite: 多参考图精确分配（"用图1换左边，图2换右边"）
+- clarify: 意图不明，需要问用户确认（用户只发了图没说要干什么，或表述模糊）
+- meta: 用户询问 Agent 自身信息（"你用了什么prompt""支持什么模型""你能做什么"）
+- cancel: 用户想取消/不要了（"算了""取消""不要了""停"）
+
+【字段说明】
+- reply: 给用户的简短回复
+- prompts: 生图 prompt 数组。空[]=用用户原文直接生图（你不改写）
+- use_attachments: 是否携带参考图
+- attachment_roles: 每张参考图角色 {"0":"style","1":"content","2":"target"}
+- use_last_outputs: 是否携带上一轮生成结果
+- text_only: true=纯文本回复，不生图
+- analysis: 分析/扩写结果（text_only=true 时填写）
+- options: clarify 时给用户的选项 [{"label":"...","value":"..."}]
+
+【核心规则】
+1. ★ 不要改写用户的视觉描述。用户给了具体描述时 prompts=[]（用原文生图）。只有抽象指令（"按分析结果做""按上次风格"）时才生成 prompt。
+2. ★ 分析/反推/描述/识别/对比类 → intent=analyze, text_only=true。判断标准：用户要求"分析/描述/反推/识别/总结/提取/对比/看看/这是什么"且没有要求生图。
+3. ★ 提示词扩写/优化/翻译 → intent=refine, text_only=true。
+4. 修改/编辑 → intent=edit, use_last_outputs=true, prompts只写修改指令。
+5. 意图不明（用户只发了图没说要干什么，或表述模糊无法判断）→ intent=clarify，在 reply 中提问，在 options 中给 2-4 个选项。
+6. 用户询问 Agent 信息 → intent=meta, text_only=true。
+7. 用户取消 → intent=cancel, text_only=true, reply="好的，已取消。"
+8. 图片引用："图N" 对应系统提供的图片编号。
+9. 多参考图精确分配 → intent=composite, prompts写完整结构化指令。
+10. 所有 prompt 必须中文。默认不含文字内容。
+11. 有 skill 文档时遵循其风格规则。
+12. 绝对不要添加用户没要求的内容。
+13. 角色参考图 → 后续保持角色一致性。
+
+【修改场景】
+A. 风格/属性修改：use_last_outputs=true，prompt只描述要改的+保持其他不变
+B. 主体更换：use_last_outputs=true，"将原图中的[原主体]替换为[新主体]，保持场景/背景/构图/光影不变"
+
+【analyze 输出规则】
+★ 区分"反推"和"分析"：
+- 用户说"反推/反推提示词" → 只输出 prompt，options=[]，不引导后续操作
+- 用户说"分析/看看/对比" → 输出分析 + options（行动引导）
+
+反推提示词格式（options=[]）：
+主体：...
+风格：...
+构图：...
+配色：...
+光线：...
+氛围：...
+完整Prompt：（可直接用于生图的一段完整描述）
+
+分析格式（options非空，引导用户下一步）：
+analysis 中写分析结果，同时在 options 中给出 2-4 个后续行动建议。
+示例：
+{"intent":"analyze","reply":"分析完成","text_only":true,"analysis":"图1：水墨风格，留白构图，冷色调...\n图2：油画风格，居中构图，暖色调...","options":[{"label":"用图1的风格画新内容","value":"用图1的风格画一张新图"},{"label":"融合两张图的优点","value":"融合图1和图2的优点生成新图"},{"label":"改进某张图","value":"帮我改进图2的构图"}]}
+
+【clarify 示例】
+用户发了一张图但没说要干什么：
+{"intent":"clarify","reply":"你想让我对这张图做什么？","prompts":[],"text_only":true,"options":[{"label":"分析/反推提示词","value":"分析这张图"},{"label":"基于此图生成新图","value":"按这个风格生成"},{"label":"修改这张图","value":"修改这张图"}]}`;
+
+
+let agentOpen = false;
+let agentSending = false;
+let agentThinking = false;
+let agentBypassThinkingNext = false;
+let agentSaveTimer = null;
+let agentState = null;
+let agentMentionIdx = -1;
+function agentDefaultState(){
+    return {skills:[], attachments:[], messages:[], conversations:[], activeConversationId:'', chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, genQuality:'', autoContext:true, inputHeight:0};
+}
+// 将 prompts 规范化为对象数组（兼容旧格式 string[]）
+// 每个 prompt 对象：{prompt, count, use_last_outputs, use_attachments, status}
+// status 取值：pending / current / confirmed / skipped / editing
+function normalizePrompts(prompts){
+    if(!Array.isArray(prompts)) return [];
+    return prompts.map(p => {
+        if(typeof p === 'string'){
+            const t = p.trim();
+            return t ? {prompt:t, count:1, use_last_outputs:false, use_attachments:false, status:'pending'} : null;
+        }
+        if(p && typeof p === 'object' && typeof p.prompt === 'string' && p.prompt.trim()){
+            const normalized = {
+                prompt:p.prompt.trim(),
+                count:Math.max(1, Math.min(8, Number(p.count) || 1)),
+                use_last_outputs:!!p.use_last_outputs,
+                use_attachments:!!p.use_attachments,
+                status:p.status || 'pending'
+            };
+            // attachment_indices: 指定该 prompt 只使用哪些附件作为参考图（0-based 索引数组）
+            // LLM 可用此字段实现"每条 prompt 只带特定参考图"的精细控制
+            if(Array.isArray(p.attachment_indices)){
+                normalized.attachment_indices = p.attachment_indices
+                    .filter(i => Number.isFinite(Number(i)) && Number(i) >= 0)
+                    .map(i => Math.floor(Number(i)));
+            }
+            return normalized;
+        }
+        return null;
+    }).filter(p => p);
+}
+// 确保消息有 current prompt（如果没有 current/editing，找第一个 pending 标记为 current）
+function ensureCurrentPrompt(msg){
+    if(!msg || msg.role !== 'assistant' || !Array.isArray(msg.prompts) || msg.prompts.length === 0) return;
+    if(!msg.prompts.some(p => p.status === 'current' || p.status === 'editing')){
+        const firstPending = msg.prompts.findIndex(p => !p.status || p.status === 'pending');
+        if(firstPending >= 0){
+            msg.prompts[firstPending].status = 'current';
+            msg.promptIdx = firstPending;
+        }
+    }
+}
+function agentStorageKey(){ return AGENT_STORAGE_PREFIX + (canvasId || 'default'); }
+// 生图 provider 列表：与主画布的 imageProviders() 不同，这里不排除 modelscope/volcengine，
+// 因为后端 /api/canvas-image-tasks 统一支持它们（主画布排除它们仅因专用引擎 UI）。
+function agentGenProviders(){
+    return (apiProviders || []).filter(p => p.enabled !== false && (p.image_models || []).length);
+}
+function loadAgentState(){
+    agentState = agentDefaultState();
+    try {
+        const raw = localStorage.getItem(agentStorageKey());
+        if(raw){
+            const data = JSON.parse(raw);
+            if(data && typeof data === 'object') agentState = {...agentState, ...data, messages:Array.isArray(data.messages) ? data.messages : []};
+        }
+    } catch(e) { agentState = agentDefaultState(); }
+    // 旧数据迁移：单个 skill 对象 → skills 数组
+    if(agentState.skill && !Array.isArray(agentState.skills)){
+        agentState.skills = [agentState.skill];
+    } else if(agentState.skill && Array.isArray(agentState.skills) && !agentState.skills.length){
+        agentState.skills = [agentState.skill];
+    }
+    delete agentState.skill;
+    if(!Array.isArray(agentState.skills)) agentState.skills = [];
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+    // 旧数据迁移：messages → conversations
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    if(agentState.messages && agentState.messages.length && !agentState.conversations.length){
+        const firstMsg = agentState.messages[0];
+        const title = firstMsg?.text ? String(firstMsg.text).slice(0, 30) : '对话';
+        agentState.conversations = [{id:uid('ac'), title, messages:agentState.messages, ts:Date.now()}];
+        agentState.activeConversationId = agentState.conversations[0].id;
+    }
+    if(!agentState.activeConversationId && agentState.conversations.length){
+        agentState.activeConversationId = agentState.conversations[0].id;
+    }
+    // 加载当前对话的 messages
+    const activeConv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+    agentState.messages = activeConv ? (activeConv.messages || []).slice(-AGENT_MSG_MAX) : [];
+    // 旧数据迁移：prompts string[] → object[]
+    (agentState.messages || []).forEach(m => {
+        if(m.role === 'assistant' && Array.isArray(m.prompts) && m.prompts.length > 0){
+            const hasObjectPrompts = m.prompts.some(p => typeof p === 'object');
+            if(!hasObjectPrompts){
+                // 旧格式 string[]
+                if(m.generations && m.generations.length > 0){
+                    // 已经生成过了，标记为已确认
+                    m.prompts = m.prompts.map(p => ({prompt:String(p).trim(), count:1, use_last_outputs:false, use_attachments:false, status:'confirmed'}));
+                } else {
+                    // 还在确认阶段
+                    m.prompts = normalizePrompts(m.prompts);
+                    ensureCurrentPrompt(m);
+                }
+            } else {
+                // 新格式但可能缺少 current 指针
+                ensureCurrentPrompt(m);
+            }
+        }
+    });
+    // 恢复中断的操作
+    _setupAgentRecovery();
+}
+// 恢复中断的 Agent 操作（页面刷新后调用）
+let _agentRecoveryInProgress = false;
+function _setupAgentRecovery(){
+    if(!agentState) return;
+    // 超时保护：如果 pending 任务超过 5 分钟，直接清除，不恢复
+    const pendingTs = agentState._pendingLlmTaskTs || 0;
+    if(pendingTs && (Date.now() - pendingTs > 5 * 60 * 1000)){
+        delete agentState._pendingMessage;
+        delete agentState._pendingAttachments;
+        delete agentState._pendingUserMsg;
+        delete agentState._pendingLlmTaskId;
+        delete agentState._pendingLlmTaskTs;
+        saveAgentState();
+    }
+    const pendingLlmTaskId = agentState._pendingLlmTaskId;
+    const pendingText = String(agentState._pendingMessage || '');
+    const pendingAttachments = Array.isArray(agentState._pendingAttachments) ? agentState._pendingAttachments : [];
+    const pendingUserMsg = agentState._pendingUserMsg;
+    // 情况1：LLM task 还在后端跑 → 恢复等待
+    if(pendingLlmTaskId && pendingText && pendingUserMsg){
+        const lastMsg = agentState.messages[agentState.messages.length - 1];
+        if(lastMsg && lastMsg.role === 'user' && lastMsg.text === pendingText){
+            // 在最后一条 user 消息后插入一条"恢复中"的 assistant 占位消息
+            agentState.messages.push({
+                id: uid('am'),
+                role: 'assistant',
+                text: '⏳ ' + (tr('smart.agentRecovering') || '正在恢复上次操作...'),
+                generations: [],
+                ts: Date.now()
+            });
+            agentThinking = true;
+            agentSending = true;
+            renderAgentMessages();
+            _agentRecoveryInProgress = true;
+            // 异步恢复 LLM task
+            (async () => {
+                try {
+                    const result = await pollAgentLlmTask(pendingLlmTaskId);
+                    // 移除占位的"恢复中"消息
+                    agentState.messages = agentState.messages.filter(m => m.text !== '⏳ ' + (tr('smart.agentRecovering') || '正在恢复上次操作...'));
+                    await processAgentLlmResult(result, pendingText, pendingAttachments, pendingUserMsg);
+                } catch(e) {
+                    agentState.messages = agentState.messages.filter(m => !m.text?.startsWith('⏳'));
+                    agentState.messages.push({id:uid('am'), role:'assistant', text:`⚠️ ${String(e.message || e).slice(0, 300)}`, generations:[], ts:Date.now()});
+                    renderAgentMessages();
+                    saveAgentState();
+                } finally {
+                    agentThinking = false;
+                    agentSending = false;
+                    _agentRecoveryInProgress = false;
+                    delete agentState._pendingMessage;
+                    delete agentState._pendingAttachments;
+                    delete agentState._pendingUserMsg;
+                    delete agentState._pendingLlmTaskId;
+                    delete agentState._pendingLlmTaskTs;
+                    renderAgentMessages();
+                    saveAgentState();
+                }
+            })();
+            return;
+        }
+    }
+    // 情况2：生图 task 还在后端跑（LLM 已完成但生图未完成）
+    const msgs = agentState.messages || [];
+    let hasRunningGen = false;
+    for(let i = msgs.length - 1; i >= 0; i--){
+        if(msgs[i].role !== 'assistant') continue;
+        const gens = msgs[i].generations || [];
+        for(const gen of gens){
+            if(gen.status === 'running' && gen.taskIds && gen.taskIds.length){
+                hasRunningGen = true;
+                break;
+            }
+        }
+        break;
+    }
+    if(hasRunningGen){
+        renderAgentMessages();
+        _agentRecoveryInProgress = true;
+        (async () => {
+            try {
+                await recoverAgentGenerations();
+            } finally {
+                _agentRecoveryInProgress = false;
+            }
+        })();
+        return;
+    }
+    // P1-10: 情况2.5 —— 有未完成的 prompts（确认阶段中断）→ 只恢复确认卡片，不触发生图
+    {
+        let hasPendingPrompts = false;
+        for(let i = msgs.length - 1; i >= 0; i--){
+            if(msgs[i].role !== 'assistant') continue;
+            const ps = msgs[i].prompts;
+            if(Array.isArray(ps) && ps.length > 0 && ps.some(p => p.status === 'pending' || p.status === 'current' || p.status === 'editing')){
+                hasPendingPrompts = true;
+            }
+            break;
+        }
+        if(hasPendingPrompts){
+            // 确保当前消息有 current 指针（loadAgentState 已做，这里兜底）
+            ensureCurrentPrompt(msgs[msgs.length - 1]);
+            renderAgentMessages();
+            return;
+        }
+    }
+    // 情况3：只有 pendingMessage 但没有 LLM task（LLM 还没创建就断了）→ 提示重新发送
+    if(pendingText && agentState.messages.length){
+        const lastMsg = agentState.messages[agentState.messages.length - 1];
+        if(lastMsg && lastMsg.role === 'user'){
+            agentState.messages.push({
+                id: uid('am'),
+                role: 'assistant',
+                text: '⚠️ ' + (tr('smart.agentInterrupted') || '上次操作被中断，请重新发送'),
+                options: [{label: tr('smart.agentRetry') || '重新发送', value: pendingText}],
+                generations: [],
+                ts: Date.now()
+            });
+        }
+    }
+    delete agentState._pendingMessage;
+    delete agentState._pendingAttachments;
+    delete agentState._pendingUserMsg;
+    delete agentState._pendingLlmTaskId;
+    delete agentState._pendingLlmTaskTs;
+}
+function saveAgentState(){
+    clearTimeout(agentSaveTimer);
+    agentSaveTimer = setTimeout(() => {
+        try {
+            // 同步当前 messages 到 conversations
+            if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+                const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+                if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+            }
+            const data = {...agentState, messages:(agentState.messages || []).slice(-AGENT_MSG_MAX)};
+            localStorage.setItem(agentStorageKey(), JSON.stringify(data));
+        } catch(e) { /* localStorage 写满时静默忽略 */ }
+    }, 200);
+}
+function toggleAgentPanel(open=!agentOpen){
+    if(!agentPanel || !agentToggle) return;
+    agentOpen = !!open;
+    if(agentOpen) toggleAssetLibrary(false);
+    agentPanel.classList.toggle('open', agentOpen);
+    agentToggle.classList.toggle('active', agentOpen);
+    if(agentOpen){
+        renderAgentModelSelectors();
+        renderAgentMessages();
+    }
+}
+// ============ 灵感库（GitHub awesome-gpt-image-2 · GPT-Image2 提示词案例库） ============
+// 数据源：https://github.com/freestylefly/awesome-gpt-image-2 （541 个案例：图片 + 提示词 + 分类/风格/场景标签）
+const INSPIRE_REPO_URL = 'https://github.com/freestylefly/awesome-gpt-image-2';
+// 分类 chips：英文名对齐 cases.json 的 category 字段，中文名对齐项目 README「分类概览」
+const INSPIRE_CATS = [
+    {zh:'全部', en:''},
+    {zh:'海报与排版', en:'Posters & Typography'},
+    {zh:'摄影与写实', en:'Photography & Realism'},
+    {zh:'UI与界面', en:'UI & Interfaces'},
+    {zh:'插画与艺术', en:'Illustration & Art'},
+    {zh:'图表与信息可视化', en:'Charts & Infographics'},
+    {zh:'商品与电商', en:'Products & E-commerce'},
+    {zh:'人物与角色', en:'Characters & People'},
+    {zh:'品牌与标志', en:'Brand & Logos'},
+    {zh:'场景与叙事', en:'Scenes & Storytelling'},
+    {zh:'历史与古风题材', en:'History & Classical Themes'},
+    {zh:'建筑与空间', en:'Architecture & Spaces'},
+    {zh:'文档与出版物', en:'Documents & Publishing'},
+    {zh:'其他应用场景', en:'Other Use Cases'}
+];
+// 「更多标签」分组面板：项目自带的风格(styles)/场景(scenes)标签，'s:'/'c:' 前缀区分命名空间
+const INSPIRE_TAG_GROUPS = [
+    { name:'风格', tags:[['3D','s:3D'],['写实','s:Realistic'],['UI','s:UI'],['海报','s:Poster'],['插画','s:Illustration'],['人物','s:Character'],['品牌','s:Brand'],['信息图','s:Infographic'],['产品','s:Product'],['古典','s:Classical'],['摄影','s:Photography'],['历史','s:History'],['建筑','s:Architecture'],['图表','s:Charts'],['文档','s:Documents']] },
+    { name:'场景', tags:[['电商','c:Commerce'],['创意','c:Creative'],['教育','c:Education'],['时尚','c:Fashion'],['美食','c:Food'],['社交','c:Social'],['故事','c:Story'],['科技','c:Tech'],['旅行','c:Travel']] },
+];
+const INSPIRE_PAGE_SIZE = 60;      // 每次渲染条数（滚动到底自动加载下一页）
+const INSPIRE_CHECK_MS = 10 * 60 * 1000;   // 面板打开期间每 10 分钟检查一次上游更新
+const INSPIRE_DIMS_KEY = 'inspire_img_dims_v1';   // localStorage 图片尺寸记忆（兜底服务端未探测到的）
+let inspireOpen = false;
+let inspireSource = 'gallery';     // 当前数据源：'gallery' 远程案例库（默认）/ 'local' 本地生成
+let inspireData = null;            // 远程案例全量数据（首次打开拉取一次，会话内复用）
+let inspireDataPromise = null;
+let inspireLocalData = null;       // 本地生成数据（每次切到本地/刷新时重新拉取）
+let inspireVersion = '';           // 已加载数据对应的上游版本（commit SHA）
+let inspireCheckTimer = null;
+let inspireCat = '';               // 当前分类（英文，对应 category 字段）
+let inspireTag = '';               // 当前标签（'s:xxx' 风格 / 'c:xxx' 场景）
+let inspireQuery = '';             // 搜索词（匹配标题/提示词/分类/标签）
+let inspireFiltered = [];          // 当前过滤结果
+let inspireShown = 0;              // 已渲染条数
+let inspireRendering = false;
+// ---- 图片尺寸记忆（localStorage，url -> [w,h]）：服务端未探测到尺寸时兜底，避免占位比例反复变化 ----
+function getInspireDimsCache(url){
+    try {
+        const m = JSON.parse(localStorage.getItem(INSPIRE_DIMS_KEY) || '{}');
+        const d = m[url];
+        return (d && d[0] && d[1]) ? (d[0] + ' / ' + d[1]) : '';
+    } catch(e){ return ''; }
+}
+function saveInspireDimsCache(url, wh){
+    try {
+        const m = JSON.parse(localStorage.getItem(INSPIRE_DIMS_KEY) || '{}');
+        m[url] = wh;
+        const keys = Object.keys(m);
+        if(keys.length > 800) delete m[keys[0]];   // 简单 FIFO，防止无限膨胀
+        localStorage.setItem(INSPIRE_DIMS_KEY, JSON.stringify(m));
+    } catch(e){}
+}
+// ---- 数据拉取：一次全量，会话内复用 ----
+async function ensureInspireData(){
+    if(inspireData) return inspireData;
+    if(!inspireDataPromise){
+        inspireDataPromise = (async () => {
+            const resp = await fetch('/api/inspire-gallery');
+            if(!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            inspireData = Array.isArray(data.items) ? data.items : [];
+            inspireVersion = data.version || inspireVersion;
+            return inspireData;
+        })().catch(e => { inspireDataPromise = null; throw e; });
+    }
+    return inspireDataPromise;
+}
+// 本地生成数据：每次调用都重新拉取，保证刚生成的图片及时出现
+async function ensureInspireLocalData(){
+    const resp = await fetch('/api/inspire-local');
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    inspireLocalData = Array.isArray(data.items) ? data.items : [];
+    return inspireLocalData;
+}
+// ---- 自动更新：上游 git 有新提交 → 后端版本号（commit SHA）变化 → 自动重新拉取案例数据 ----
+async function checkInspireUpdate(){
+    try {
+        const resp = await fetch('/api/inspire-version');
+        if(!resp.ok) return false;
+        const v = await resp.json();
+        const ver = v.version || '';
+        if(!ver) return false;                                     // 上游版本解析失败，跳过本次
+        if(!inspireVersion){ inspireVersion = ver; return false; } // 首次仅记录
+        if(ver === inspireVersion) return false;
+        inspireVersion = ver;
+        inspireData = null; inspireDataPromise = null;             // 失效内存数据，触发重新拉取
+        return true;
+    } catch(e){ return false; }
+}
+function startInspireAutoUpdate(){
+    if(inspireCheckTimer) return;
+    inspireCheckTimer = setInterval(async () => {
+        if(!inspireOpen){ stopInspireAutoUpdate(); return; }
+        if(await checkInspireUpdate()){
+            await loadInspirePage(true);
+            toast('灵感库已同步最新案例（共 ' + ((inspireData || []).length) + ' 个）');
+        }
+    }, INSPIRE_CHECK_MS);
+}
+function stopInspireAutoUpdate(){
+    if(inspireCheckTimer){ clearInterval(inspireCheckTimer); inspireCheckTimer = null; }
+}
+function toggleInspirePanel(open=!inspireOpen){
+    const panel = document.getElementById('inspirePanel');
+    const toggle = document.getElementById('inspireToggle');
+    if(!panel || !toggle) return;
+    inspireOpen = !!open;
+    if(inspireOpen){ toggleAgentPanel(false); toggleAssetLibrary(false); }
+    panel.classList.toggle('open', inspireOpen);
+    toggle.classList.toggle('active', inspireOpen);
+    if(inspireOpen){
+        renderInspireCats();
+        // 打开时先比对上游版本：有更新则自动刷新；无更新且未加载过则首次加载
+        checkInspireUpdate().then(updated => {
+            if(!inspireOpen) return;
+            const grid = document.getElementById('inspireGrid');
+            if(updated || (grid && !grid.dataset.loaded)) loadInspirePage(true);
+        });
+        startInspireAutoUpdate();
+    } else {
+        stopInspireAutoUpdate();
+    }
+}
+// ---- 分类 chips：本地 + 全部 + 13 个项目分类（中文，对齐项目分类） ----
+function renderInspireCats(){
+    const wrap = document.getElementById('inspireCats');
+    if(!wrap) return;
+    const localActive = inspireSource === 'local';
+    const chips = `<button class="inspire-cat ${localActive ? 'active' : ''}" type="button" data-inspire-source="local">本地</button>`
+        + INSPIRE_CATS.map(c => {
+            const active = !localActive && (c.en === inspireCat) && !inspireTag;
+            return `<button class="inspire-cat ${active ? 'active' : ''}" type="button" data-inspire-cat="${escapeAttr(c.en)}">${escapeHtml(c.zh)}</button>`;
+        }).join('');
+    wrap.innerHTML = chips + '<button class="inspire-cat more" type="button" id="inspireMoreBtn">更多标签 ▾</button>';
+    wrap.querySelectorAll('[data-inspire-source]').forEach(btn => {
+        btn.onclick = () => {
+            if(inspireSource === 'local') return;
+            inspireSource = 'local';
+            inspireCat = '';
+            inspireTag = '';
+            const search = document.getElementById('inspireSearch');
+            if(search) search.value = '';
+            inspireQuery = '';
+            closeInspireMoreTags();
+            renderInspireCats();
+            resetInspireAndLoad();
+        };
+    });
+    wrap.querySelectorAll('[data-inspire-cat]').forEach(btn => {
+        btn.onclick = () => {
+            const cat = btn.dataset.inspireCat || '';
+            if(inspireSource === 'gallery' && cat === inspireCat && !inspireTag) return;
+            inspireSource = 'gallery';
+            inspireCat = cat;
+            inspireTag = '';
+            const search = document.getElementById('inspireSearch');
+            if(search) search.value = '';
+            inspireQuery = '';
+            closeInspireMoreTags();
+            renderInspireCats();
+            resetInspireAndLoad();
+        };
+    });
+    const moreBtn = document.getElementById('inspireMoreBtn');
+    if(moreBtn) moreBtn.onclick = () => toggleInspireMoreTags();
+}
+// ---- 「更多标签」分组下拉面板 ----
+function renderInspireMoreTags(){
+    const panel = document.getElementById('inspireMoreTags');
+    if(!panel || panel.dataset.rendered) return;
+    panel.dataset.rendered = '1';
+    panel.innerHTML = INSPIRE_TAG_GROUPS.map(g =>
+        '<div class="inspire-mt-group"><div class="inspire-mt-name">' + escapeHtml(g.name) + '</div><div class="inspire-mt-tags">' +
+        g.tags.map(t => '<button class="inspire-mt-tag" type="button" data-mt-tag="' + escapeAttr(t[1]) + '" data-mt-zh="' + escapeAttr(t[0]) + '">' + escapeHtml(t[0]) + '</button>').join('') +
+        '</div></div>'
+    ).join('');
+    panel.querySelectorAll('[data-mt-tag]').forEach(btn => {
+        btn.onclick = () => {
+            inspireSource = 'gallery';   // 风格/场景标签只对远程案例库有意义
+            inspireTag = btn.dataset.mtTag || '';
+            closeInspireMoreTags();
+            renderInspireCats();
+            resetInspireAndLoad();
+        };
+    });
+}
+function toggleInspireMoreTags(){
+    const panel = document.getElementById('inspireMoreTags');
+    if(!panel) return;
+    if(panel.hidden){ renderInspireMoreTags(); updateInspireMoreActive(); panel.hidden = false; }
+    else { panel.hidden = true; }
+}
+function closeInspireMoreTags(){
+    const panel = document.getElementById('inspireMoreTags');
+    if(panel) panel.hidden = true;
+}
+function updateInspireMoreActive(){
+    const panel = document.getElementById('inspireMoreTags');
+    if(!panel) return;
+    panel.querySelectorAll('[data-mt-tag]').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.mtTag || '') === inspireTag);
+    });
+}
+function resetInspireAndLoad(){
+    loadInspirePage(true);
+}
+// ---- 过滤：数据源 + 分类 + 风格/场景标签 + 搜索词（全量数据在本地，即时过滤） ----
+function filterInspireItems(){
+    const q = inspireQuery.trim().toLowerCase();
+    const source = (inspireSource === 'local' ? inspireLocalData : inspireData) || [];
+    return source.filter(it => {
+        if(inspireCat && it.category !== inspireCat) return false;
+        if(inspireTag){
+            const ns = inspireTag.slice(0, 2), val = inspireTag.slice(2);
+            if(ns === 's:'){ if(!(it.styles || []).includes(val)) return false; }
+            else if(ns === 'c:'){ if(!(it.scenes || []).includes(val)) return false; }
+        }
+        if(q){
+            const hay = ((it.title || '') + ' ' + (it.prompt || '') + ' ' + (it.category || '') + ' '
+                + (it.styles || []).join(' ') + ' ' + (it.scenes || []).join(' ')).toLowerCase();
+            if(!hay.includes(q)) return false;
+        }
+        return true;
+    });
+}
+// ---- 数据加载：首次拉全量，之后本地过滤 + 分页渲染 ----
+async function loadInspirePage(reset=false){
+    if(inspireRendering) return;
+    const loader = document.getElementById('inspireLoader');
+    const empty = document.getElementById('inspireEmpty');
+    const end = document.getElementById('inspireEnd');
+    const grid = document.getElementById('inspireGrid');
+    if(reset){
+        inspireFiltered = [];
+        inspireShown = 0;
+        if(grid){ grid.innerHTML = ''; delete grid.dataset.loaded; }
+        if(empty) empty.hidden = true;
+        if(end) end.hidden = true;
+        const sc = document.getElementById('inspireScroll');
+        if(sc) sc.scrollTop = 0;
+    } else if(inspireShown >= inspireFiltered.length){
+        return;
+    }
+    // 本地数据每次重置都重新读取（刚生成的图及时出现）；远程数据会话内拉取一次
+    const needFetch = inspireSource === 'local' ? (reset || !inspireLocalData) : !inspireData;
+    if(needFetch){
+        if(loader) loader.hidden = false;
+        inspireRendering = true;
+        try {
+            if(inspireSource === 'local') await ensureInspireLocalData();
+            else await ensureInspireData();
+        } catch(e){
+            console.warn('[inspire] 数据加载失败:', e);
+            if(grid && !grid.children.length) grid.innerHTML = '<div class="inspire-empty">加载失败，请检查网络后重试</div>';
+            toast('灵感库加载失败，请稍后重试');
+            return;
+        } finally {
+            inspireRendering = false;
+            if(loader) loader.hidden = true;
+        }
+    }
+    if(reset) inspireFiltered = filterInspireItems();
+    const next = inspireFiltered.slice(inspireShown, inspireShown + INSPIRE_PAGE_SIZE);
+    inspireShown += next.length;
+    const cnt = document.getElementById('inspireCount');
+    if(cnt) cnt.textContent = '已加载 ' + inspireShown + ' / ' + inspireFiltered.length + ' 张';
+    if(reset && inspireFiltered.length === 0){
+        if(empty) empty.hidden = false;
+    } else {
+        appendInspireCards(next);
+        if(grid) grid.dataset.loaded = '1';
+    }
+    if(inspireShown >= inspireFiltered.length && end) end.hidden = false;
+}
+function appendInspireCards(items){
+    const grid = document.getElementById('inspireGrid');
+    if(!grid) return;
+    items.forEach(it => {
+        const imgUrl = it.thumb || it.image;
+        if(!imgUrl) return;
+        const card = document.createElement('div');
+        card.className = 'inspire-card';
+        const promptText = it.prompt || '';
+        const titleLine = it.title
+            ? '<div class="inspire-overlay-title">' + escapeHtml(it.title) + '</div>'
+            : '';
+        const authorLine = it.sourceLabel
+            ? '<div class="inspire-overlay-author">' + escapeHtml(it.sourceLabel) + '</div>'
+            : '';
+        const overlayBody = promptText
+            ? '<div class="inspire-overlay-prompt">' + escapeHtml(promptText) + '</div>'
+            : '<div class="inspire-overlay-prompt">（未提供提示词）</div>';
+        card.innerHTML = '<img loading="lazy" decoding="async" alt="' + escapeAttr(it.title || '') + '">'
+            + '<div class="inspire-overlay">'
+            + titleLine
+            + authorLine
+            + overlayBody
+            + '<button class="inspire-overlay-btn" type="button"><i data-lucide="import"></i><span>导入到画布</span></button>'
+            + '</div>';
+        const img = card.querySelector('img');
+        // 按真实宽高预留占位比例，避免懒加载时瀑布流上下跳动；
+        // 服务端未探测到尺寸时先用 4:5 占位（localStorage 有记忆则用记忆），图片加载后修正并记忆
+        let ratio = (it.width && it.height) ? (it.width + ' / ' + it.height) : getInspireDimsCache(imgUrl);
+        img.style.aspectRatio = ratio || '4 / 5';
+        img.src = imgUrl;
+        img.addEventListener('load', () => {
+            img.classList.add('loaded');
+            if(!(it.width && it.height) && img.naturalWidth && img.naturalHeight){
+                const real = img.naturalWidth + ' / ' + img.naturalHeight;
+                if(img.style.aspectRatio !== real) img.style.aspectRatio = real;
+                saveInspireDimsCache(imgUrl, [img.naturalWidth, img.naturalHeight]);
+            }
+        });
+        // 加载失败重试：自动重试1次 + 点击重试
+        img.addEventListener('error', () => {
+            if(img.dataset.retried){ img.classList.add('loaded'); img.style.minHeight = '90px'; img.style.cursor = 'pointer'; img.title = '加载失败，点击重试'; }
+            else { img.dataset.retried = '1'; setTimeout(() => { const s = img.src; img.src = ''; img.src = s; }, 1500); }
+        });
+        img.addEventListener('click', () => {
+            if(img.dataset.retried && img.naturalWidth === 0){ delete img.dataset.retried; img.classList.remove('loaded'); img.style.minHeight=''; const s = img.src; img.src=''; img.src=s; }
+        });
+        card.querySelector('.inspire-overlay-btn').addEventListener('click', e => { e.stopPropagation(); importInspireToCanvas(it); });
+        grid.appendChild(card);
+    });
+    if(window.lucide) lucide.createIcons();
+}
+// ---- 导入：本地化 + 节点去重 + 来源署名 + 反馈 ----
+function findInspireNode(inspireId){
+    if(inspireId == null || inspireId === '') return null;
+    return (typeof nodes !== 'undefined' ? nodes : []).find(n => (n.images || []).some(img => String(img.inspireId || '') === String(inspireId)));
+}
+async function importInspireToCanvas(it){
+    const url = it.image || it.thumb;
+    if(!url){ toast('该图片无法导入'); return; }
+    // 节点去重：画布已有同图 → 选中它
+    const existing = findInspireNode(it.id);
+    if(existing){
+        selectedId = existing.id; selectedIds = [existing.id];
+        render();
+        const r = nodeRect(existing);
+        if(r) agentCenterOnPoint(r.x + r.width/2, r.y + r.height/2);
+        toast('这张图已在画布中');
+        return;
+    }
+    toast('正在导入到画布…');
+    try {
+        let localUrl = url;
+        let name = 'inspire_gpt2_' + (it.id || Date.now()) + '.jpg';
+        if(it.local){
+            // 本地生成图：已是本机文件，直接引用，不再下载
+            name = (it.image || '').split('/').pop() || name;
+        } else {
+            const locResp = await fetch('/api/inspire-localize', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, id:'gpt2-' + (it.id || '') }) });
+            if(!locResp.ok) throw new Error('localize failed');
+            const loc = await locResp.json();
+            localUrl = loc.url || url;
+        }
+        const prompt = it.prompt || '';
+        const imgObj = {
+            url: localUrl,
+            name: name,
+            kind: 'image',
+            inspireId: String(it.id || ''),
+            inspireSource: it.sourceUrl || (it.local ? '' : INSPIRE_REPO_URL),
+            inspireAuthor: it.sourceLabel || ''
+        };
+        try { addManualReferenceToSelectedNode(imgObj); } catch(e){ console.warn('[inspire] 挂参考图失败', e); }
+        const pos = agentFindEmptyPosition(1);
+        const node = createImageNodeAt(pos, [{ ...imgObj }]);
+        if(node) node.runFinishedAt = nowMs();
+        render();
+        scheduleSave();
+        if(prompt) setPromptText(prompt);
+        toast(prompt
+            ? '已导入：参考图 + 提示词' + (it.sourceLabel ? '（' + it.sourceLabel + '）' : '')
+            : '已导入参考图');
+    } catch(e){
+        console.warn('[inspire] 导入失败', e);
+        toast('导入失败，请重试');
+    }
+}
+function initInspireScroll(){
+    const sc = document.getElementById('inspireScroll');
+    if(!sc || sc.dataset.inspireScrollInit) return;
+    sc.dataset.inspireScrollInit = '1';
+    sc.addEventListener('scroll', () => {
+        if(!inspireOpen || inspireRendering) return;
+        if(inspireShown >= inspireFiltered.length) return;
+        if(sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 500) loadInspirePage(false);
+    });
+}
+// ---- 搜索：本地数据即时过滤（匹配标题/提示词/分类/标签，无需翻译） ----
+function initInspireSearch(){
+    const input = document.getElementById('inspireSearch');
+    const btn = document.getElementById('inspireSearchBtn');
+    if(!input || input.dataset.inspireSearchInit) return;
+    input.dataset.inspireSearchInit = '1';
+    let timer = null;
+    const doSearch = () => {
+        const q = input.value.trim();
+        if(q === inspireQuery) return;
+        inspireQuery = q;
+        loadInspirePage(true);
+    };
+    // 输入防抖 300ms；回车立即触发（兼容中文输入法：isComposing 时不触发）
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(doSearch, 300); });
+    input.addEventListener('keydown', e => {
+        if(e.key === 'Enter' && !e.isComposing && e.keyCode !== 229){ e.preventDefault(); clearTimeout(timer); doSearch(); }
+    });
+    if(btn) btn.addEventListener('click', () => { clearTimeout(timer); doSearch(); });
+}
+// ---- 来源项目入口 ----
+function initInspireRepoBtn(){
+    const btn = document.getElementById('inspireRepoBtn');
+    if(btn && !btn.dataset.init){
+        btn.dataset.init = '1';
+        btn.addEventListener('click', () => window.open(INSPIRE_REPO_URL, '_blank', 'noopener'));
+    }
+}
+function chatRequestedImageCount(text){
+    const t = String(text || '');
+    // 阿拉伯数字 1-8：3张/5个/8条/画4张/生成6个
+    const m = t.match(/(?<!\d)([1-8])\s*(?:张|幅|个|组|套|条|只|名|版|款)(?!\d)/);
+    if(m) return parseInt(m[1], 10);
+    // 中文数字 1-8
+    const cnMap = {一:1, 二:2, 两:2, 俩:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8};
+    for(const [k, v] of Object.entries(cnMap)){
+        if(t.includes(k + '张') || t.includes(k + '幅') || t.includes(k + '个') || t.includes(k + '条')) return v;
+    }
+    return 0;
+}
+// 统一的数量决策函数：输入框显式要求 > 工具栏设置
+// 设计原则：出图数量是"软参数"，输入框显式表达优先；比例/分辨率是"硬参数"，工具栏说了算（不在此函数处理）
+// 返回 {count, source}，count 始终 >=1
+function resolveFinalGenCount(text){
+    const fromInput = chatRequestedImageCount(text);
+    // 只有输入框明确请求 >1 张时才覆盖工具栏设置
+    // 原因：数量1是默认值，且"一条龙"等固定词组会被误判为1
+    if(fromInput > 1) return {count: Math.min(8, fromInput), source:'input'};
+    const toolbar = Math.max(1, Math.min(8, Number(agentState?.genCount) || 1));
+    return {count: toolbar, source:'toolbar'};
+}
+// 判断输入是否"模糊"（缺风格维度），用于思维模式前端兜底
+// 判断标准：字数少 + 不含风格/艺术流派关键词
+// 返回 true 表示需要先走阶段一（返回 options 让用户选风格）
+function isVagueImageRequest(text){
+    const t = String(text || '').trim();
+    if(!t) return false;
+    // 修改请求不算模糊（有明确的修改方向）
+    if(/改成|换成|转换成|修改为|变成|转为|改为|转成|调整|重新画|重画/i.test(t)) return false;
+    // 风格/艺术流派关键词
+    const styleKeywords = ['风','风格','主义','流派','艺术','画法','画风','渲染','摄影','插画','海报','logo','标志','图标','3d','3D','写实','动漫','水墨','油画','水彩','素描','速写','像素','赛博','蒸汽波','极简','极繁','扁平','卡通','可爱','复古','复古风','霓虹','蒸汽','lowpoly','low poly','波普','波普艺术','印象派','抽象','超现实','涂鸦','手绘','国风','中国风','日式','和风','美式','欧式','赛博朋克','蒸汽朋克','未来主义','装饰艺术','artdeco','art deco','bauhaus','包豪斯','印象','点彩','浮世绘','赛璐珞','吉卜力','新海诚','皮克斯','迪士尼','漫威','dc','chibi','q版','q版','q版','q版','q版'];
+    const hasStyle = styleKeywords.some(k => t.toLowerCase().includes(k.toLowerCase()));
+    // 字数少且无风格 → 模糊
+    if(t.length < 25 && !hasStyle) return true;
+    return false;
+}
+// ★ 纯文字引导解析器：从用户输入中识别图N引用，判断拆分/组合模式
+// 返回 { mode, tasks } 或 null（无图引用时）
+// mode: 'split'（每张独立出图） | 'single'（单任务，全发）
+// tasks: [{ prompt, attachment_indices(0-based) }]
+// 核心原则：默认不拆分（全发给模型理解），只有明确的批量独立操作才拆分
+function parseImageRefTasks(text, attachCount){
+    if(!text || !attachCount || attachCount === 0) return null;
+    // 0. 中文数字转阿拉伯（图一→图1，图十→图10）
+    const cnNumMap = {'一':'1','二':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9','十':'10'};
+    let t = text.replace(/图\s*([一二三四五六七八九十])/g, (match, cn) => `图${cnNumMap[cn] || cn}`);
+
+    const uniqueRefs = new Set();
+    const refOccurrences = {}; // 每张图被引用的次数
+    const consumedRanges = [];
+    function addRef(num){ if(num >= 1 && num <= attachCount){ uniqueRefs.add(num); refOccurrences[num] = (refOccurrences[num] || 0) + 1; } }
+
+    // 1. 范围：图1到图7, 图1至7, 图1-4, 图1~4
+    const rangeRe = /图\s*(\d+)\s*[到至\-~]\s*图?\s*(\d+)/g;
+    let m;
+    while((m = rangeRe.exec(t)) !== null){
+        const lo = Math.min(parseInt(m[1]), parseInt(m[2]));
+        const hi = Math.max(parseInt(m[1]), parseInt(m[2]));
+        for(let i = lo; i <= hi; i++) addRef(i);
+        consumedRanges.push({start:m.index, end:m.index + m[0].length});
+    }
+    // 2. 列表和单个：图1、2、3 或 图1
+    const listRe = /图\s*(\d+)((?:\s*[、,，和与]\s*\d+)*)/g;
+    while((m = listRe.exec(t)) !== null){
+        const ms = m.index, me = m.index + m[0].length;
+        if(consumedRanges.some(r => ms >= r.start && me <= r.end)) continue;
+        addRef(parseInt(m[1]));
+        if(m[2]){ const restNums = m[2].match(/\d+/g); if(restNums) restNums.forEach(n => addRef(parseInt(n))); }
+    }
+    // 3. "前面N张" / "前N张"
+    const frontMatch = t.match(/前(?:面)?\s*(\d+)\s*张/);
+    if(frontMatch){ const n = parseInt(frontMatch[1]); for(let i = 1; i <= Math.min(n, attachCount); i++) addRef(i); }
+
+    if(uniqueRefs.size === 0) return null;
+    const allRefs = Array.from(uniqueRefs).sort((a, b) => a - b);
+
+    // 4. 底图检测：仅靠位置/结构模式判断（不靠引用次数，避免公共参考图被误判）
+    const baseImages = new Set();
+    // "图N中/里/的XX位置" 或 "保持图N的XX不变" → 底图
+    const baseRe1 = /图\s*(\d+)\s*(?:中|里)\s*(?:的)?(?:左|右|上|下|中间|旁边)/g;
+    while((m = baseRe1.exec(t)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) baseImages.add(num); }
+    const baseRe2 = /保持\s*图\s*(\d+)\s*的/g;
+    while((m = baseRe2.exec(t)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) baseImages.add(num); }
+    const baseRe3 = /图\s*(\d+)\s*的(?:背景|构图|版式|布局|场景|底色)/g;
+    while((m = baseRe3.exec(t)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) baseImages.add(num); }
+
+    // 5. 模式判断（默认不拆分，交给模型理解）
+    const hasCombineHint = /合成一张|合并|拼在一起|组合成|拼接|融合/.test(t);
+    const hasSplitKeyword = /各出一张|各出|分别|各一张|每张|逐一|逐个|全部重新/.test(t);
+
+    // 规则 1：有底图 → 不拆分（单任务编辑）
+    if(baseImages.size > 0){
+        return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+    }
+    // 规则 2：合成关键词 → 不拆分
+    if(hasCombineHint){
+        return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+    }
+    // 规则 3：只有 1 张引用 → 不拆分
+    if(allRefs.length <= 1){
+        return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+    }
+    // 规则 4：多张独立引用 + (有拆分关键词 或 范围引用) → 拆分
+    // 识别公共参考图：不在范围引用内的单独编号 = 公共图
+    const rangeRefs = new Set();
+    const rangeRe2 = /图\s*(\d+)\s*[到至\-~]\s*图?\s*(\d+)/g;
+    while((m = rangeRe2.exec(t)) !== null){
+        const lo = Math.min(parseInt(m[1]), parseInt(m[2]));
+        const hi = Math.max(parseInt(m[1]), parseInt(m[2]));
+        for(let i = lo; i <= hi; i++){ if(i >= 1 && i <= attachCount) rangeRefs.add(i); }
+    }
+    // 独立图 = 范围引用内的图；公共图 = 不在范围内的单独引用
+    const independentRefs = allRefs.filter(r => rangeRefs.has(r));
+    const commonRefs = allRefs.filter(r => !rangeRefs.has(r));
+
+    const shouldSplit = (hasSplitKeyword || rangeRefs.size > 1) && independentRefs.length > 1;
+    if(shouldSplit){
+        const commonArr = commonRefs.map(r => r - 1);
+        const tasks = independentRefs.map(ref => ({ prompt:text, attachment_indices:[ref - 1, ...commonArr] }));
+        return { mode:'split', tasks };
+    }
+    // 默认：不拆分，全发（让模型理解意图）
+    return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+}
+
+// ★ 确认面板：显示解析后的参考图任务列表，等待用户确认/取消
+let _agentRefConfirmResolver = null;
+function showImageRefConfirmPanel(refTasks){
+    return new Promise(resolve => {
+        const panel = document.getElementById('agentRefConfirmPanel');
+        const body = document.getElementById('agentRefConfirmBody');
+        if(!panel || !body){ resolve(false); return; }
+        const modeLabel = { split:'拆分', combine:'组合', single:'单任务' };
+        let html = '';
+        refTasks.tasks.forEach((task, i) => {
+            const refs = task.attachment_indices.map(idx => `图${idx + 1}`).join(' ');
+            const promptSnippet = String(task.prompt || '').slice(0, 60) + (String(task.prompt || '').length > 60 ? '...' : '');
+            html += `<div class="agent-ref-confirm-task">`;
+            html += `<span class="agent-ref-confirm-task-num">${i + 1}</span>`;
+            html += `<span class="agent-ref-confirm-task-mode ${refTasks.mode}">${modeLabel[refTasks.mode] || ''}</span>`;
+            html += `<div class="agent-ref-confirm-task-refs">`;
+            task.attachment_indices.forEach(idx => { html += `<span class="agent-ref-confirm-task-ref">图${idx + 1}</span>`; });
+            html += `</div>`;
+            html += `<span class="agent-ref-confirm-task-prompt" title="${escapeHtml(task.prompt || '')}">${escapeHtml(promptSnippet)}</span>`;
+            html += `</div>`;
+        });
+        body.innerHTML = html;
+        panel.hidden = false;
+        _agentRefConfirmResolver = resolve;
+    });
+}
+function hideImageRefConfirmPanel(result){
+    const panel = document.getElementById('agentRefConfirmPanel');
+    if(panel) panel.hidden = true;
+    if(_agentRefConfirmResolver){ _agentRefConfirmResolver(result); _agentRefConfirmResolver = null; }
+}
+function agentRatioLabel(key){
+    const map = {square:'1:1', portrait:'2:3', portrait43:'3:4', landscape43:'4:3', landscape:'3:2', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21'};
+    return map[key] || key || '1:1';
+}
+function agentQualityLabel(q){
+    const map = {'':'自动', high:'高', medium:'中', low:'低'};
+    return map[q] || '自动';
+}
+function agentUpdateToolbarLabels(){
+    const modelLabel = document.getElementById('agentModelLabel');
+    const paramsLabel = document.getElementById('agentParamsLabel');
+    if(modelLabel && agentState){
+        const genProviders = agentGenProviders();
+        const provider = genProviders.find(p => p.id === agentState.genProvider);
+        modelLabel.textContent = provider ? (provider.name || provider.id) : '模型';
+    }
+    if(paramsLabel && agentState){
+        const ratio = agentRatioLabel(agentState.genRatio || 'square');
+        const res = (agentState.genResolution || '1k').toUpperCase();
+        const count = agentState.genCount || 1;
+        const quality = agentState.genQuality || '';
+        const qLabel = quality ? ` · ${agentQualityLabel(quality)}` : '';
+        paramsLabel.textContent = `${ratio} · ${res} · ${count}张${qLabel}`;
+    }
+}
+function agentMoveSelectsToDropdown(){
+    const chatModelSelects = document.getElementById('agentChatModelSelects');
+    const genSelects = document.getElementById('agentGenSelects');
+    // 将 LLM 模型选择器放到思维模式面板中
+    if(chatModelSelects && agentChatProvider && agentChatModel){
+        chatModelSelects.appendChild(agentChatProvider);
+        chatModelSelects.appendChild(agentChatModel);
+    }
+    if(genSelects && agentGenProvider && agentGenModel){
+        genSelects.appendChild(agentGenProvider);
+        genSelects.appendChild(agentGenModel);
+    }
+    // 确保下拉面板初始隐藏
+    const modelPanel = document.getElementById('agentModelPanel');
+    const paramsPanel = document.getElementById('agentParamsPanel');
+    const chatModelPanel = document.getElementById('agentChatModelPanel');
+    if(modelPanel) modelPanel.hidden = true;
+    if(paramsPanel) paramsPanel.hidden = true;
+    if(chatModelPanel) chatModelPanel.hidden = true;
+}
+function renderAgentModelSelectors(){
+    if(!agentState) return;
+    const chatProviders = chatApiProviders();
+    if(agentChatProvider){
+        agentState.chatProvider = chatProviders.length ? resolveChatProviderId(agentState.chatProvider) : '';
+        agentChatProvider.innerHTML = chatProviders.length ? chatProviderOptions(agentState.chatProvider) : `<option value="">${escapeHtml(tr('smart.agentNoProviders'))}</option>`;
+    }
+    if(agentChatModel){
+        agentState.chatModel = chatProviders.length ? resolveChatModel(agentState.chatModel, agentState.chatProvider) : '';
+        agentChatModel.innerHTML = chatProviders.length ? chatModelOptions(agentState.chatModel, agentState.chatProvider) : '<option value="">-</option>';
+    }
+    const genProviders = agentGenProviders();
+    if(agentGenProvider){
+        if(genProviders.length){
+            if(!genProviders.some(p => p.id === agentState.genProvider)) agentState.genProvider = genProviders[0].id;
+            agentGenProvider.innerHTML = genProviders.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === agentState.genProvider ? 'selected' : ''}>${escapeHtml(p.name || p.id)}</option>`).join('');
+        } else {
+            agentState.genProvider = '';
+            agentGenProvider.innerHTML = `<option value="">${escapeHtml(tr('smart.agentNoProviders'))}</option>`;
+        }
+    }
+    if(agentGenModel){
+        const models = agentState.genProvider ? providerImageModels(agentState.genProvider) : [];
+        if(models.length){
+            if(!models.includes(agentState.genModel)) agentState.genModel = models[0];
+            agentGenModel.innerHTML = models.map(m => `<option value="${escapeHtml(m)}" ${m === agentState.genModel ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+        } else {
+            agentState.genModel = '';
+            agentGenModel.innerHTML = '<option value="">-</option>';
+        }
+    }
+    agentSyncParamsPanel();
+    agentUpdateToolbarLabels();
+}
+function agentSyncParamsPanel(){
+    if(!agentState) return;
+    const ratio = agentState.genRatio || 'square';
+    const res = agentState.genResolution || '1k';
+    const count = agentState.genCount || 1;
+    const quality = agentState.genQuality || '';
+    // 同步比例网格
+    document.querySelectorAll('.agent-ratio-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.ratio === ratio);
+    });
+    // 同步分辨率网格
+    document.querySelectorAll('.agent-res-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.res === res);
+    });
+    // 同步数量网格
+    document.querySelectorAll('.agent-count-btn').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.count) === count);
+    });
+    // 同步质量
+    document.querySelectorAll('.agent-quality-btn').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.quality || '') === quality);
+    });
+    // 同步隐藏 select（保持后端兼容）
+    if(agentGenRatio) agentGenRatio.value = ratio;
+    if(agentGenResolution) agentGenResolution.value = res;
+    if(agentGenCount) agentGenCount.value = String(count);
+}
+function renderAgentSkill(){ /* Skill 已合并到附件系统，不再需要单独渲染 */ }
+function setAgentSkillFile(file){
+    if(!file || !agentState) return;
+    if(file.size > AGENT_SKILL_MAX_BYTES){ toast(tr('smart.agentSkillTooBig')); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+        if(!Array.isArray(agentState.skills)) agentState.skills = [];
+        agentState.skills.push({name:file.name || 'skill.md', content:String(reader.result || '')});
+        renderAgentAttachments();
+        saveAgentState();
+        toast(`${tr('smart.agentSkillLoaded')}: ${file.name}`);
+    };
+    reader.readAsText(file);
+}
+function renderAgentAttachments(){
+    if(!agentAttachRow || !agentState) return;
+    const skills = Array.isArray(agentState.skills) ? agentState.skills : [];
+    const attachments = Array.isArray(agentState.attachments) ? agentState.attachments : [];
+    let html = '';
+    skills.forEach((skill, i) => {
+        html += `<div class="agent-attach-skill"><i data-lucide="file-text"></i><span class="agent-attach-skill-name">${escapeHtml(skill.name || 'skill.md')}</span><button type="button" data-agent-skill-remove="${i}"><i data-lucide="x"></i></button></div>`;
+    });
+    attachments.forEach((att, i) => {
+        html += `<div class="agent-attach-chip" draggable="${attachments.length > 1 ? 'true' : 'false'}" data-agent-att-index="${i}" title="${escapeHtml(att.name || 'image')}"><span class="agent-att-num">${agentLastResults().length + i + 1}</span><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
+    });
+    agentAttachRow.innerHTML = html;
+    if(window.lucide) lucide.createIcons();
+    agentAttachRow.querySelectorAll('[data-agent-skill-remove]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            agentState.skills.splice(Number(btn.dataset.agentSkillRemove) || 0, 1);
+            renderAgentAttachments();
+            saveAgentState();
+        };
+    });
+    agentAttachRow.querySelectorAll('[data-agent-att-remove]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            agentState.attachments.splice(Number(btn.dataset.agentAttRemove) || 0, 1);
+            renderAgentAttachments();
+            saveAgentState();
+        };
+    });
+    agentAttachRow.querySelectorAll('[data-agent-att-index]').forEach(el => {
+        el.onclick = e => {
+            if(e.target.closest('[data-agent-att-remove]')) return;
+            const att = agentState.attachments[Number(el.dataset.agentAttIndex)];
+            if(!att) return;
+            // 跳转到画布中图片位置
+            if(att.nodeId){
+                const node = (nodes || []).find(n => n.id === att.nodeId);
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    agentCenterOnNode(node);
+                    render();
+                    return;
+                }
+            }
+            // 没有 nodeId 时用坐标跳转
+            if(att.x || att.y){
+                agentCenterOnPoint(Number(att.x) || 0, Number(att.y) || 0);
+            }
+        };
+        // 拖拽排序
+        el.addEventListener('dragstart', e => {
+            e.stopPropagation();
+            el.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', el.dataset.agentAttIndex);
+        });
+        el.addEventListener('dragend', e => {
+            e.stopPropagation();
+            el.classList.remove('dragging');
+            agentAttachRow.querySelectorAll('.agent-attach-chip').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+        });
+        el.addEventListener('dragover', e => {
+            const fromIdx = Number(e.dataTransfer.getData('text/plain'));
+            const toIdx = Number(el.dataset.agentAttIndex);
+            if(!Number.isFinite(fromIdx) || fromIdx < 0 || fromIdx === toIdx) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            agentAttachRow.querySelectorAll('.agent-attach-chip').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+            const rect = el.getBoundingClientRect();
+            const placement = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+            el.classList.add(placement === 'before' ? 'drop-before' : 'drop-after');
+        });
+        el.addEventListener('dragleave', e => {
+            if(el.contains(e.relatedTarget)) return;
+            el.classList.remove('drop-before', 'drop-after');
+        });
+        el.addEventListener('drop', e => {
+            const fromIdx = Number(e.dataTransfer.getData('text/plain'));
+            const toIdx = Number(el.dataset.agentAttIndex);
+            if(!Number.isFinite(fromIdx) || fromIdx < 0 || fromIdx === toIdx) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const rect = el.getBoundingClientRect();
+            const placement = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+            agentAttachRow.querySelectorAll('.agent-attach-chip').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+            // 重排 attachments 数组
+            const atts = agentState.attachments.slice();
+            const [moved] = atts.splice(fromIdx, 1);
+            let insertAt = toIdx;
+            if(placement === 'after') insertAt += 1;
+            if(fromIdx < insertAt) insertAt -= 1;
+            atts.splice(Math.max(0, Math.min(atts.length, insertAt)), 0, moved);
+            agentState.attachments = atts;
+            renderAgentAttachments();
+            saveAgentState();
+        });
+    });
+}
+async function agentAttachFiles(files){
+    if(!agentState) return;
+    const allFiles = [...(files || [])];
+    const skillFiles = allFiles.filter(f => {
+        const name = String(f.name || '').toLowerCase();
+        return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt');
+    });
+    const imageFiles = allFiles.filter(f => String(f.type || '').startsWith('image/')).slice(0, AGENT_LLM_IMAGE_MAX);
+    skillFiles.forEach(f => setAgentSkillFile(f));
+    if(!imageFiles.length) return;
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+    // 检查生图 provider 的参考图上限
+    const _genProvider = agentGenProviders().some(p => p.id === agentState.genProvider) ? agentState.genProvider : (agentGenProviders()[0]?.id || '');
+    const _refMax = _genProvider ? providerMaxReferenceImages(_genProvider) : AGENT_LLM_IMAGE_MAX;
+    const _currentCount = agentState.attachments.length;
+    const _available = Math.max(0, _refMax - _currentCount);
+    if(_available <= 0){
+        const _pName = apiProviderById(_genProvider)?.name || _genProvider;
+        toast(`当前生图平台 ${_pName} 最多支持 ${_refMax} 张参考图，已达上限`);
+        return;
+    }
+    if(imageFiles.length > _available){
+        const _pName = apiProviderById(_genProvider)?.name || _genProvider;
+        toast(`当前生图平台 ${_pName} 最多支持 ${_refMax} 张参考图，仅添加前 ${_available} 张`);
+    }
+    try {
+        const uploaded = await uploadFiles(imageFiles);
+        (uploaded || []).filter(f => f?.url).forEach(f => {
+            if(agentState.attachments.length < _refMax) agentState.attachments.push({url:f.url, name:f.name || 'image'});
+        });
+        renderAgentAttachments();
+        saveAgentState();
+    } catch(e) {
+        toast(String(e.message || e).slice(0, 120));
+    }
+}
+function agentGenCardHtml(gen, numOffset){
+    const status = gen.status || 'running';
+    const statusText = status === 'done' ? tr('smart.agentGenDone') : status === 'error' ? tr('smart.agentGenFail') : tr('smart.agentGenerating');
+    const refTags = [gen.use_last_outputs ? tr('smart.agentRefLast') : '', gen.use_attachments ? tr('smart.agentRefAttach') : ''].filter(Boolean).join(' · ');
+    // 显示参考图索引指示器（当指定了 attachment_indices 时）
+    const attachIdxTag = (Array.isArray(gen.attachment_indices) && gen.attachment_indices.length > 0)
+        ? `参考图#${gen.attachment_indices.map(i => i + 1).join(',')}` : '';
+    const fullRefTags = [refTags, attachIdxTag].filter(Boolean).join(' · ');
+    const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<span class="agent-gen-thumb-wrap"><span class="agent-gen-img-num">${(numOffset || 0) + i + 1}</span><img src="${escapeHtml(r.url)}" alt="" loading="lazy" title="图${(numOffset || 0) + i + 1} - 点击跳转" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer"></span>`).join('');
+    const promptText = escapeHtml(gen.prompt || '');
+    const promptHtml = promptText ? `<div class="agent-gen-prompt agent-gen-prompt-collapsed" data-agent-gen-prompt="1">${promptText}<button class="agent-gen-prompt-toggle" type="button" data-agent-prompt-toggle="1">${escapeHtml(tr('smart.agentExpand') || '展开')}</button></div>` : '';
+    // 生成完成后显示快捷操作栏
+    const quickActions = status === 'done' && thumbs ? `<div class="agent-gen-quick-actions"><button class="agent-quick-btn" type="button" data-agent-quick="edit" title="修改"><i data-lucide="pencil"></i><span>修改</span></button><span class="agent-variant-wrap"><button class="agent-quick-btn" type="button" data-agent-quick="variant" title="变体"><i data-lucide="copy-plus"></i><span>变体</span></button><div class="agent-variant-pop"><button class="agent-variant-opt" type="button" data-agent-variant-count="1">×1</button><button class="agent-variant-opt" type="button" data-agent-variant-count="2">×2</button><button class="agent-variant-opt" type="button" data-agent-variant-count="3">×3</button><button class="agent-variant-opt" type="button" data-agent-variant-count="4">×4</button></div></span><button class="agent-quick-btn" type="button" data-agent-quick="describe" title="反推"><i data-lucide="scan-search"></i><span>反推</span></button></div>` : '';
+    return `<div class="agent-gen-card">${promptHtml}<div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${fullRefTags ? ' · ' + escapeHtml(fullRefTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}${quickActions}</div>`;
+}
+function agentMessageHtml(msg){
+    const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
+    let _genNumOffset = 0;
+    const gens = (msg.generations || []).map(g => { const html = agentGenCardHtml(g, _genNumOffset); _genNumOffset += (g.results || []).filter(r => r?.url).length; return html; }).join('');
+    const actions = msg.text ? `<div class="agent-msg-actions"><button class="agent-msg-action-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}" title="复制"><i data-lucide="copy"></i></button>${msg.role === 'assistant' ? `<button class="agent-msg-action-btn" type="button" data-agent-retry="${escapeHtml(msg.id)}" title="重试"><i data-lucide="refresh-cw"></i></button>` : ''}</div>` : '';
+    // 结构化 options 字段（仅 assistant 消息，且 generations 为空时显示）
+    const hasGenerations = Array.isArray(msg.generations) && msg.generations.length > 0;
+    const options = (!hasGenerations && Array.isArray(msg.options)) ? msg.options : [];
+    const optionsHtml = options.length ? `<div class="agent-msg-options">${options.map(opt => `<button class="agent-msg-option-btn" type="button" data-agent-option="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</button>`).join('')}</div>` : '';
+    // 思维模式提示词确认卡片（有未确认的 prompts 时显示）
+    let promptCardHtml = '';
+    if(msg.role === 'assistant' && Array.isArray(msg.prompts) && msg.prompts.length > 0){
+        const prompts = msg.prompts;
+        const currentIdx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
+        const hasUnresolved = prompts.some(p => p.status === 'pending' || p.status === 'current' || p.status === 'editing');
+        // P2-12: 数量校验显示
+        const requestedCount = msg.requestedCount || 0;
+        const countHint = (requestedCount > 0 && requestedCount !== prompts.length) ? ` · 请求${requestedCount}张/返回${prompts.length}条` : '';
+        const confirmedCount = prompts.filter(p => p.status === 'confirmed').length;
+        const skippedCount = prompts.filter(p => p.status === 'skipped').length;
+        const progressParts = [];
+        if(confirmedCount > 0) progressParts.push(`${confirmedCount}已确认`);
+        if(skippedCount > 0) progressParts.push(`${skippedCount}已跳过`);
+        const progress = progressParts.length ? ` · ${progressParts.join(' · ')}` : '';
+        // 构建 prompt 列表（已确认/已跳过的折叠，当前展开，pending 灰色）
+        const listHtml = prompts.map((p, i) => {
+            const statusIcon = p.status === 'confirmed' ? '✓' : p.status === 'skipped' ? '×' : p.status === 'current' || p.status === 'editing' ? '▶' : '○';
+            const itemClass = p.status === 'confirmed' ? 'confirmed' : p.status === 'skipped' ? 'skipped' : p.status === 'current' || p.status === 'editing' ? 'current' : 'pending';
+            const shortText = (p.prompt || '').length > 40 ? (p.prompt || '').slice(0, 40) + '…' : (p.prompt || '');
+            // 已确认/已跳过的项可点击展开反悔
+            const canReopen = p.status === 'confirmed' || p.status === 'skipped';
+            const reopenAttr = canReopen ? `data-agent-prompt-reopen="${escapeHtml(msg.id)}" data-agent-prompt-index="${i}"` : '';
+            // 当前项展开操作按钮
+            let itemActionsHtml = '';
+            if(p.status === 'current'){
+                itemActionsHtml = `<div class="agent-prompt-item-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="confirm" data-agent-prompt-id="${escapeHtml(msg.id)}">确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="edit" data-agent-prompt-id="${escapeHtml(msg.id)}">修改</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="regenerate" data-agent-prompt-id="${escapeHtml(msg.id)}">重新生成</button></div>`;
+            } else if(p.status === 'editing'){
+                itemActionsHtml = `<div class="agent-prompt-item-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="save-edit" data-agent-prompt-id="${escapeHtml(msg.id)}">保存并确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="cancel-edit" data-agent-prompt-id="${escapeHtml(msg.id)}">取消</button></div>`;
+            }
+            const itemBodyHtml = p.status === 'editing'
+                ? `<textarea class="agent-prompt-edit-area" data-agent-prompt-edit="${escapeHtml(msg.id)}" rows="3">${escapeHtml(p.prompt || '')}</textarea>`
+                : (p.status === 'current' ? `<div class="agent-prompt-card-body">${escapeHtml(p.prompt || '')}</div>` : '');
+            return `<div class="agent-prompt-list-item ${itemClass}" ${reopenAttr}><div class="agent-prompt-list-header"><span class="agent-prompt-list-icon">${statusIcon}</span><span class="agent-prompt-list-index">#${i + 1}</span><span class="agent-prompt-list-text">${escapeHtml(shortText)}</span></div>${itemBodyHtml}${itemActionsHtml}</div>`;
+        }).join('');
+        // P1-7: 全部确认快捷按钮（prompts≥2 且有未处理项时显示）
+        const showConfirmAll = prompts.length >= 2 && hasUnresolved;
+        const confirmAllHtml = showConfirmAll ? `<button class="agent-prompt-btn primary agent-prompt-confirm-all" type="button" data-agent-prompt-action="confirm-all" data-agent-prompt-id="${escapeHtml(msg.id)}">全部确认并生成</button>` : '';
+        // P2-15: 全部取消按钮（有未处理项时显示）
+        const showCancelAll = hasUnresolved;
+        const cancelAllHtml = showCancelAll ? `<button class="agent-prompt-btn agent-prompt-cancel-all" type="button" data-agent-prompt-action="cancel-all" data-agent-prompt-id="${escapeHtml(msg.id)}">全部取消</button>` : '';
+        const footerHtml = (confirmAllHtml || cancelAllHtml) ? `<div class="agent-prompt-card-footer">${confirmAllHtml}${cancelAllHtml}</div>` : '';
+        promptCardHtml = `<div class="agent-prompt-card"><div class="agent-prompt-card-header">📝 提示词确认${countHint}${progress}</div><div class="agent-prompt-list">${listHtml}</div>${footerHtml}</div>`;
+    }
+    // 分析/提示词建议卡片（非思维模式 text_only 回复）
+    let cardHtml = '';
+    if(msg.role === 'assistant' && msg.cardType === 'analysis' && msg.text){
+        cardHtml = `<div class="agent-analysis-card"><div class="agent-analysis-body">${escapeHtml(msg.text)}</div><div class="agent-analysis-actions"><button class="agent-quick-btn primary" type="button" data-agent-card-gen="1"><i data-lucide="palette"></i><span>用这个Prompt生图</span></button><button class="agent-quick-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}"><i data-lucide="copy"></i><span>复制</span></button></div></div>`;
+    } else if(msg.role === 'assistant' && msg.cardType === 'prompt_suggestion' && msg.text){
+        cardHtml = `<div class="agent-prompt-suggest-card"><div class="agent-prompt-suggest-body">${escapeHtml(msg.text)}</div><div class="agent-analysis-actions"><button class="agent-quick-btn primary" type="button" data-agent-card-gen="1"><i data-lucide="palette"></i><span>直接生图</span></button><button class="agent-quick-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}"><i data-lucide="copy"></i><span>复制</span></button></div></div>`;
+    }
+    const bubbleHtml = (msg.text && !cardHtml) ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : '';
+    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${bubbleHtml}${cardHtml}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${promptCardHtml}${optionsHtml}${actions}</div>`;
+}
+function renderAgentMessages(){
+    if(!agentMessages || !agentState) return;
+    const msgs = agentState.messages || [];
+    // 确保 prompts 状态一致（兼容旧数据、恢复 current 指针）
+    msgs.forEach(m => {
+        if(m.role === 'assistant' && Array.isArray(m.prompts) && m.prompts.length > 0){
+            ensureCurrentPrompt(m);
+        }
+    });
+    if(!msgs.length && !agentThinking){
+        agentMessages.innerHTML = `<div class="agent-empty"><i data-lucide="bot"></i>${escapeHtml(tr('smart.agentEmpty'))}</div>`;
+    } else {
+        const thinking = agentThinking ? `<div class="agent-msg assistant"><div class="agent-msg-bubble"><span class="agent-gen-spinner" style="display:inline-block;vertical-align:-2px;margin-right:6px"></span>${escapeHtml(tr('smart.agentThinking'))}</div></div>` : '';
+        agentMessages.innerHTML = msgs.map(agentMessageHtml).join('') + thinking;
+    }
+    if(window.lucide) lucide.createIcons();
+    // 延迟滚动：确保布局完成后再滚动到底部，避免卡片高度变化导致底部按钮被裁切
+    requestAnimationFrame(() => {
+        if(agentMessages) agentMessages.scrollTop = agentMessages.scrollHeight;
+    });
+    if(agentSendBtn) agentSendBtn.disabled = agentSending;
+    // 绑定消息操作按钮
+    agentMessages.querySelectorAll('[data-agent-copy]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const msg = (agentState?.messages || []).find(m => m.id === btn.dataset.agentCopy);
+            if(!msg) return;
+            // 优先复制生图 prompt，其次复制消息文本
+            const gens = msg.generations || [];
+            const firstGen = gens.find(g => g.prompt);
+            const text = firstGen ? firstGen.prompt : msg.text;
+            if(text) agentCopyMessage(text);
+        };
+    });
+    agentMessages.querySelectorAll('[data-agent-retry]').forEach(btn => {
+        btn.disabled = agentSending;
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(!agentSending) agentRetryMessage(btn.dataset.agentRetry);
+        };
+    });
+    // 快捷操作栏事件（修改/变体/反推）
+    agentMessages.querySelectorAll('[data-agent-quick]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const action = btn.dataset.agentQuick;
+            const card = btn.closest('.agent-gen-card');
+            const msgEl = btn.closest('.agent-msg');
+            const msg = (agentState?.messages || []).find(m => m.id === msgEl?.querySelector('[data-agent-copy]')?.dataset?.agentCopy) || [...(agentState?.messages || [])].reverse().find(m => m.role === 'assistant' && m.generations?.length);
+            if(action === 'edit'){
+                // 修改：聚焦输入框，预填"把这张图"
+                if(agentInput){ agentInput.value = '把这张图'; agentInput.focus(); }
+            } else if(action === 'variant'){
+                // 变体：切换数量选择气泡
+                const wrap = btn.closest('.agent-variant-wrap');
+                const pop = wrap?.querySelector('.agent-variant-pop');
+                if(pop){
+                    const wasOpen = pop.classList.contains('open');
+                    // 关闭所有其他气泡
+                    agentMessages.querySelectorAll('.agent-variant-pop.open').forEach(p => { p.classList.remove('open'); });
+                    if(!wasOpen) pop.classList.add('open');
+                }
+            } else if(action === 'describe'){
+                // 反推：取最后一张生成图，发送"分析这张图，反推prompt"
+                const lastUrl = msg?.generations?.flatMap(g => (g.results || []).filter(r => r?.url)).pop()?.url;
+                if(lastUrl){
+                    agentState.attachments = [{url:lastUrl, name:'生成图'}];
+                    renderAgentAttachments();
+                    if(agentInput){ agentInput.value = '分析这张图，反推提示词'; agentInput.focus(); }
+                }
+            }
+        };
+    });
+    // 变体数量选择事件
+    agentMessages.querySelectorAll('[data-agent-variant-count]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const count = Math.min(4, Math.max(1, Number(btn.dataset.agentVariantCount) || 1));
+            const msgEl = btn.closest('.agent-msg');
+            const msg = (agentState?.messages || []).find(m => m.id === msgEl?.querySelector('[data-agent-copy]')?.dataset?.agentCopy) || [...(agentState?.messages || [])].reverse().find(m => m.role === 'assistant' && m.generations?.length);
+            const gen = msg?.generations?.find(g => (g.results || []).some(r => r?.url));
+            // 关闭气泡
+            agentMessages.querySelectorAll('.agent-variant-pop.open').forEach(p => { p.classList.remove('open'); });
+            if(gen?.prompt){ agentVariantGenerate(gen, count, msg); }
+        };
+    });
+    // 分析/提示词卡片的"用这个生图"按钮
+    agentMessages.querySelectorAll('[data-agent-card-gen]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const cardEl = btn.closest('.agent-analysis-card, .agent-prompt-suggest-card');
+            if(!cardEl) return;
+            const bodyEl = cardEl.querySelector('.agent-analysis-body, .agent-prompt-suggest-body');
+            const text = bodyEl?.textContent || '';
+            // 提取"完整Prompt："后的内容，或用全文
+            const promptMatch = text.match(/完整Prompt[：:]\s*([\s\S]+)/i);
+            const prompt = promptMatch ? promptMatch[1].trim() : text.trim();
+            if(prompt) agentSendWithText(prompt);
+        };
+    });
+    // 运行过程中锁定输入框和顶部按钮
+    if(agentInput) agentInput.disabled = agentSending;
+    const newChatBtn = document.getElementById('agentNewChatBtn');
+    const chatListBtn = document.getElementById('agentChatListBtn');
+    const moreBtn = document.getElementById('agentMoreBtn');
+    if(newChatBtn) newChatBtn.disabled = agentSending;
+    if(chatListBtn) chatListBtn.disabled = agentSending;
+    if(moreBtn) moreBtn.disabled = agentSending;
+    // 绑定选项按钮事件
+    agentMessages.querySelectorAll('[data-agent-option]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const value = btn.dataset.agentOption;
+            if(value === '确认'){
+                // 选项"确认"=全部确认并生成：将所有未跳过的 prompts 标记为 confirmed 并构建 generations
+                const lastAssistantMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant' && (m.prompts?.length || m.generations?.length));
+                if(lastAssistantMsg){
+                    const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+                    if(lastAssistantMsg.prompts?.length && !lastAssistantMsg.generations?.length){
+                        // 将所有未跳过的 prompts 标记为 confirmed
+                        lastAssistantMsg.prompts.forEach(p => {
+                            if(p && typeof p === 'object' && p.status !== 'skipped'){
+                                p.status = 'confirmed';
+                            }
+                        });
+                        const confirmedPrompts = lastAssistantMsg.prompts.filter(p => p && typeof p === 'object' && p.status === 'confirmed');
+                        // 构建 generations（透传属性）
+                        lastAssistantMsg.generations = confirmedPrompts.map(p => {
+                            const g = {
+                                prompt:p.prompt,
+                                count:p.count || 1,
+                                use_last_outputs:!!p.use_last_outputs,
+                                use_attachments:!!p.use_attachments,
+                                results:[],
+                                status:'running'
+                            };
+                            if(Array.isArray(p.attachment_indices)) g.attachment_indices = p.attachment_indices;
+                            return g;
+                        });
+                    }
+                    if(lastAssistantMsg.generations?.length){
+                        runAgentGenerations(lastAssistantMsg, lastUserMsg);
+                    }
+                }
+            } else {
+                // 发送文本给 LLM，补全原始请求上下文（带数量信息）
+                const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+                const originalRequest = lastUserMsg ? String(lastUserMsg.text || '').trim() : '';
+                // 检测"自定义输入"类选项 → 只focus输入框，不发送
+                const isCustomInput = /自定义|其他|custom|other|手动/i.test(value) || /自定义|其他|custom|other|手动/i.test(btn.textContent || '');
+                if(isCustomInput){
+                    if(agentInput){ agentInput.value = ''; agentInput.focus(); }
+                    return;
+                }
+                const sendText = originalRequest && originalRequest !== value ? `${originalRequest}，选择：${value}` : value;
+                if(agentInput){
+                    agentInput.value = sendText;
+                    agentInput.focus();
+                }
+                sendAgentMessage();
+            }
+        };
+    });
+    // 绑定提示词确认卡片按钮事件
+    agentMessages.querySelectorAll('[data-agent-prompt-action]').forEach(btn => {
+        btn.disabled = agentSending;
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending && btn.dataset.agentPromptAction !== 'cancel-edit') return;
+            const action = btn.dataset.agentPromptAction;
+            const msgId = btn.dataset.agentPromptId;
+            const msg = (agentState.messages || []).find(m => m.id === msgId);
+            if(!msg) return;
+            if(action === 'confirm') confirmAgentPrompt(msg);
+            else if(action === 'regenerate') regenerateAgentPrompts(msg);
+            else if(action === 'edit') editAgentPrompt(msg);
+            else if(action === 'save-edit') saveAgentPromptEdit(msg);
+            else if(action === 'cancel-edit') cancelAgentPromptEdit(msg);
+            else if(action === 'confirm-all') confirmAllAgentPrompts(msg);
+            else if(action === 'cancel-all') cancelAllAgentPrompts(msg);
+        };
+    });
+    // 绑定已确认/已跳过项的点击反悔事件
+    agentMessages.querySelectorAll('[data-agent-prompt-reopen]').forEach(item => {
+        item.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const msgId = item.dataset.agentPromptReopen;
+            const idx = Number(item.dataset.agentPromptIndex);
+            const msg = (agentState.messages || []).find(m => m.id === msgId);
+            if(!msg) return;
+            reopenAgentPrompt(msg, idx);
+        };
+    });
+    // 绑定生成图片点击跳转事件
+    agentMessages.querySelectorAll('[data-agent-gen-jump]').forEach(img => {
+        img.onclick = e => {
+            e.stopPropagation();
+            const nodeId = img.dataset.agentGenJump;
+            const x = Number(img.dataset.agentGenX) || 0;
+            const y = Number(img.dataset.agentGenY) || 0;
+            const url = img.src || '';
+            // 优先通过 nodeId 查找
+            if(nodeId){
+                const node = (nodes || []).find(n => n.id === nodeId);
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    agentCenterOnNode(node);
+                    render();
+                    return;
+                }
+            }
+            // 没有 nodeId 时通过 url 查找节点
+            if(url){
+                const node = (nodes || []).find(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url && url.includes(img.url)));
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    agentCenterOnNode(node);
+                    render();
+                    return;
+                }
+            }
+            // 最后通过坐标跳转
+            if(x || y) agentCenterOnPoint(x, y);
+        };
+    });
+    // 绑定提示词展开/收起事件
+    agentMessages.querySelectorAll('[data-agent-prompt-toggle]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const promptDiv = btn.closest('[data-agent-gen-prompt]');
+            if(!promptDiv) return;
+            const isCollapsed = promptDiv.classList.contains('agent-gen-prompt-collapsed');
+            if(isCollapsed){
+                promptDiv.classList.remove('agent-gen-prompt-collapsed');
+                promptDiv.classList.add('agent-gen-prompt-expanded');
+                btn.textContent = tr('smart.agentCollapse') || '收起';
+            } else {
+                promptDiv.classList.remove('agent-gen-prompt-expanded');
+                promptDiv.classList.add('agent-gen-prompt-collapsed');
+                btn.textContent = tr('smart.agentExpand') || '展开';
+            }
+        };
+    });
+    // 点击提示词区域也可展开/收起
+    agentMessages.querySelectorAll('[data-agent-gen-prompt]').forEach(div => {
+        div.onclick = e => {
+            if(e.target.closest('[data-agent-prompt-toggle]')) return;
+            const btn = div.querySelector('[data-agent-prompt-toggle]');
+            if(btn) btn.click();
+        };
+    });
+}
+function agentLastResults(){
+    const msgs = agentState?.messages || [];
+    for(let i = msgs.length - 1; i >= 0; i--){
+        const results = (msgs[i].generations || []).flatMap(g => (g.results || []).filter(r => r?.url));
+        if(results.length) return results;
+    }
+    return [];
+}
+function agentLastUserAttachments(){
+    const msgs = agentState?.messages || [];
+    for(let i = msgs.length - 1; i >= 0; i--){
+        if(msgs[i].role === 'user' && (msgs[i].images || []).some(img => img?.url)) return msgs[i].images.filter(img => img?.url);
+    }
+    return [];
+}
+function agentCurrentImageMap(){
+    // 统一编号映射：上一轮生成图(图1~图M) + 当前附件(图M+1~图M+N)
+    const genResults = agentLastResults();
+    const attachments = (agentState?.attachments || []).filter(a => a?.url);
+    const map = [];
+    genResults.forEach((r, i) => map.push({num: i + 1, url: r.url, name: r.name || `图${i + 1}`, source: 'gen'}));
+    const offset = genResults.length;
+    attachments.forEach((a, i) => map.push({num: offset + i + 1, url: a.url, name: a.name || `图${offset + i + 1}`, source: 'att'}));
+    return map;
+}
+function agentNewChat(){
+    if(!agentState) return;
+    // 保存当前对话
+    if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+        const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+        if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+    }
+    // 创建新对话
+    const newConv = {id:uid('ac'), title:'新对话', messages:[], ts:Date.now()};
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    agentState.conversations.unshift(newConv);
+    agentState.activeConversationId = newConv.id;
+    agentState.messages = [];
+    renderAgentMessages();
+    saveAgentState();
+}
+function agentDeleteChat(){
+    if(!agentState || !agentState.activeConversationId) return;
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    agentState.conversations = agentState.conversations.filter(c => c.id !== agentState.activeConversationId);
+    if(agentState.conversations.length){
+        agentState.activeConversationId = agentState.conversations[0].id;
+        agentState.messages = (agentState.conversations[0].messages || []).slice(-AGENT_MSG_MAX);
+    } else {
+        agentState.activeConversationId = '';
+        agentState.messages = [];
+    }
+    renderAgentMessages();
+    renderAgentChatList();
+    saveAgentState();
+}
+function agentSwitchChat(id){
+    if(!agentState || !id || id === agentState.activeConversationId) return;
+    // 保存当前对话
+    if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+        const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+        if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+    }
+    // 切换
+    const target = agentState.conversations.find(c => c.id === id);
+    if(!target) return;
+    agentState.activeConversationId = id;
+    agentState.messages = (target.messages || []).slice(-AGENT_MSG_MAX);
+    renderAgentMessages();
+    renderAgentChatList();
+    saveAgentState();
+}
+function renderAgentChatList(){
+    const panel = document.getElementById('agentChatListPanel');
+    if(!panel || !agentState) return;
+    const convs = Array.isArray(agentState.conversations) ? agentState.conversations : [];
+    if(!convs.length){
+        panel.innerHTML = '<div class="agent-chat-empty">暂无对话</div>';
+        return;
+    }
+    panel.innerHTML = convs.map(conv => {
+        const isActive = conv.id === agentState.activeConversationId;
+        const firstMsg = (conv.messages || []).find(m => m.role === 'user' && m.text);
+        const title = firstMsg ? String(firstMsg.text).slice(0, 30) : (conv.title || '对话');
+        const time = conv.ts ? new Date(conv.ts).toLocaleDateString('zh-CN', {month:'numeric', day:'numeric'}) : '';
+        return `<button class="agent-chat-item${isActive ? ' active' : ''}" type="button" data-chat-id="${escapeHtml(conv.id)}"><span class="agent-chat-item-title">${escapeHtml(title)}</span><span class="agent-chat-item-time">${escapeHtml(time)}</span><button class="agent-chat-item-delete" type="button" data-chat-delete="${escapeHtml(conv.id)}"><i data-lucide="x"></i></button></button>`;
+    }).join('');
+    if(window.lucide) lucide.createIcons();
+    panel.querySelectorAll('[data-chat-id]').forEach(btn => {
+        btn.onclick = e => {
+            if(e.target.closest('[data-chat-delete]')) return;
+            agentSwitchChat(btn.dataset.chatId);
+            panel.hidden = true;
+        };
+    });
+    panel.querySelectorAll('[data-chat-delete]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const id = btn.dataset.chatDelete;
+            if(id === agentState.activeConversationId) agentDeleteChat();
+            else {
+                agentState.conversations = agentState.conversations.filter(c => c.id !== id);
+                renderAgentChatList();
+                saveAgentState();
+            }
+        };
+    });
+}
+function agentCopyMessage(text){
+    if(!text) return;
+    navigator.clipboard?.writeText(text).then(() => toast('已复制')).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toast('已复制');
+    });
+}
+function agentRetryMessage(msgId){
+    if(!agentState || agentSending) return;
+    const msgs = agentState.messages || [];
+    const idx = msgs.findIndex(m => m.id === msgId);
+    if(idx < 0) return;
+    // 找到该 assistant 消息对应的 user 消息
+    let userMsg = null;
+    for(let i = idx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
+    }
+    if(!userMsg) return;
+    // 删除该 assistant 消息及之后的所有消息
+    agentState.messages = msgs.slice(0, idx);
+    // 重新发送
+    if(agentInput) agentInput.value = userMsg.text || '';
+    sendAgentMessage();
+}
+function agentSystemPrompt(bypassThinking, finalCount){
+    const parts = [];
+    const skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+    const hasSkills = skills.length > 0;
+    // 1. 如果有 skill，先放最强指令（首因效应）+ 中英双语，确保所有 LLM provider 都能理解
+    if(hasSkills){
+        parts.push(`【最重要规则 - skill 完整保留 / MOST IMPORTANT: Keep skill document intact】
+Skill 文档描述的是"单张图的样式"，包括：画面风格、背景、构图布局、画面内元素排列（如"横3竖4排列12个方案""九宫格"）、配色、文字排版、图形风格、质量要求等所有细节。
+Skill 不决定生成几张图——出图数量由系统决定（综合工具栏和输入框），系统会告诉你需要几张。你无需从 skill 或用户消息中推断数量。
+即使 skill 中出现"一整页""合集""系列探索板"等词，那也是描述单张图的样式，不代表只生成1张图。
+你生成的每一条 prompt 都必须完整、逐字保留 skill 文档中的所有样式描述。
+你只能在"主题/主体/变体方向"上做差异化，绝不能简化、改写、概括或丢失 skill 中的任何描述。
+正确做法：把 skill 文档的完整描述作为每条 prompt 的主体，然后在末尾或开头添加变体差异。
+错误做法：把"合集/一整页"理解为只出1张；简化 skill 内容；只写简短 prompt。
+每条 prompt 长度应与 skill 文档相当。
+When a skill document is provided, every prompt you generate MUST fully and verbatim retain all style descriptions from the skill document. The skill describes the style of a SINGLE image (including internal element layout like "3x4 grid"). It does NOT decide how many images to generate — that is decided by the system. Even words like "collection/series/full page" in the skill describe single-image style, not output count.`);
+    }
+    // 2. skill 内容（用清晰分隔符标记，便于 LLM 识别边界）
+    skills.forEach(skill => {
+        const text = String(skill?.content || '').trim();
+        if(text) parts.push(`===== Skill 文档开始：${skill.name} =====${AGENT_NL}${AGENT_NL}${text}${AGENT_NL}${AGENT_NL}===== Skill 文档结束：${skill.name} =====`);
+    });
+    // 思维模式和非思维模式使用不同的基础指令，避免冲突
+    const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
+    if(thinkingModeOn){
+        // 思维模式：只注入格式要求，不注入"能生成就生成"指令
+        parts.push(`You are an AI image-generation agent in Thinking Mode (progressive dimension collection mode).
+Reply with raw JSON only (no markdown, no extra text):
+{"reply":"回复用户的话","options":[{"label":"选项名","value":"选项值"}],"collected":{},"next_dimension":"","remaining_dimensions":[],"prompts":[],"generations":[]}
+
+Fields: "reply"=对话回复; "options"=[{label,value}]按钮选项; "collected"=已确认的维度字典; "next_dimension"=下一轮维度; "remaining_dimensions"=剩余维度数组; "prompts"=待确认的中文提示词（仅最终轮返回）; "generations"=立即生成的图片（思维模式下始终为空）.
+
+所有prompt必须中文，包含主体/风格/构图/光线/色彩/细节/氛围
+文字规则：默认情况下prompt不要包含文字内容（标题、对白、台词、旁白、字幕），只描述画面视觉元素`);
+    } else {
+        parts.push(AGENT_FORMAT_INSTRUCTION);
+    }
+    // 注入最终出图数量（前端已决策：输入框显式要求 > 工具栏设置）
+    // LLM 无需自行判断数量，只需按此数量返回对应条数
+    const _finalCount = Math.max(1, Math.min(8, Number(finalCount) || Number(agentState?.genCount) || 1));
+    if(_finalCount > 1){
+        parts.push(`【出图数量 / Output Count】系统要求生成 ${_finalCount} 张图。每张是独立的图片，在主题/品牌方向/变体方向上必须有明显差异（不能只是换个颜色或微调）。数量已由系统决定（综合工具栏设置和输入框显式要求），你无需自行判断，只需返回恰好 ${_finalCount} 条。`);
+    } else {
+        parts.push(`【出图数量 / Output Count】系统只要求生成 1 张图。prompts 数组只返回恰好 1 条，不要返回多条。`);
+    }
+    // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令（thinkingModeOn 已在上方计算）
+    if(thinkingModeOn){
+        parts.push(`当前为思维模式（渐进式多维采集模式）。核心原则：通过多轮提问逐步收集用户需求，所有维度确认后生成详细提示词。
+
+【流程规则 / Process Rules】
+
+总体流程：逐轮提问维度 → 用户选择 → 下一轮提问下一个维度 → ... → 所有维度确认 → 生成最终提示词
+
+★★★ 最高优先级规则 ★★★
+当返回 options 时（即 options 数组非空），prompts 和 generations 必须为空数组 []。
+绝对不允许在同一轮中同时返回 options 和 prompts。
+如果 options 非空，prompts 必须为 []，generations 必须为 []。
+违反此规则会导致流程被跳过，用户体验严重受损。
+
+轮次判断规则：
+- 如果还有 ≥2 个维度未确认 → 返回 options（2-4个选项），prompts=[]
+- 如果只剩 1 个维度未确认 → 返回 options（2-4个选项），prompts=[]
+- 如果所有维度已确认 → prompts 返回最终提示词，options=[]
+- 每一轮只提问一个维度，不要一次性问多个
+- 除非用户明确说"直接生成"或"不用选了"，否则必须逐轮提问
+
+维度优先级（按重要性排序）：
+1. 风格 (画风/艺术流派) - 如水墨风、油画风、赛博朋克、Q版卡通
+2. 场景/背景 - 如留白山水、竹林、雪景、庭院、城市街道
+3. 构图 - 如正面站姿、仰视特写、奔跑动态、侧卧休息、三分法
+4. 配色 - 如暖色调、冷色调、低饱和度、高对比度
+5. 细节特征 - 如毛发质感、光影效果、材质表现、装饰元素
+6. 其他补充 - 如文字要求、品牌元素、特殊效果
+
+【参考图分析规则】
+
+当用户上传了参考图时，第一轮或第二轮必须先分析参考图并提问：
+- 返回 reply 说明参考图的共同特征（风格、配色、构图、光影等）
+- 选项必须包含用户对参考图特征的选择（全部保留/部分保留/不保留）
+- 示例：{"reply":"我看到了7张参考图，它们有共同的特征：低饱和度配色、极简构图、柔和光影。你希望产品图保留哪些特征？","options":[{"label":"全部保留","value":"保留参考图的所有视觉特征：低饱和度配色、极简构图、柔和光影"},{"label":"只保留配色","value":"只保留参考图的低饱和度配色"},{"label":"只保留构图","value":"只保留参考图的极简构图"},{"label":"自定义输入","value":"CUSTOM_INPUT"}],"collected":{"参考图特征":"已分析"}}
+
+【选项规则】
+
+- 每轮返回 2-4 个选项（推荐数量为3）
+- 每个选项必须是简洁明确的值，不是长句子
+- 每轮 options 末尾必须追加一个 {"label":"自定义输入","value":"CUSTOM_INPUT"} 选项
+- 选项示例：[水墨风, 油画风, 赛博朋克, 自定义输入]
+
+【返回字段】
+
+每轮必须返回以下字段：
+{
+  "reply": "简短的问题描述（如'请选择风格方向：'）",
+  "options": [{"label":"选项1","value":"选项1值"}, {"label":"选项2","value":"选项2值"}, {"label":"自定义输入","value":"CUSTOM_INPUT"}],
+  "collected": {"维度1":"已确认值1", "维度2":"已确认值2", ...},  // 累积已确认的维度
+  "next_dimension": "场景",  // 下一轮要问的维度
+  "remaining_dimensions": ["场景", "构图", "配色"],  // 剩余未确认的维度
+  "prompts": [],  // 问答阶段始终为空
+  "generations": []  // 问答阶段始终为空
+}
+
+【最终轮规则】
+
+当所有维度确认后（remaining_dimensions 为空或用户明确要求）：
+- 返回 prompts 数组，每条是完整可直接生图的中文提示词
+- 提示词要综合所有 collected 维度的信息
+- 系统要求生成N张图时（见上方"出图数量"），prompts 数组返回恰好N条
+- 每条 prompt 目标长度：200-500 字，尽可能详细丰富
+- 每条必须包含：主体、风格、场景、构图、光线、色彩、细节、氛围
+
+【参考图选择规则 / attachment_indices】
+
+当用户上传了多张参考图，且需要生成多张图（每张参考不同的参考图风格/版式）时：
+- 每条 prompt 可以指定 attachment_indices 字段（0-based 整数数组），精确控制该条 prompt 只使用哪些参考图
+- 不指定 attachment_indices 时，默认使用全部参考图
+- 示例：用户上传了8张图（7张版式参考+1张产品图，索引0-7），要求按7种版式各出1张产品图：
+  {"prompts":[
+    {"prompt":"产品图，版式A的描述...", "count":1, "use_attachments":true, "attachment_indices":[0, 7]},
+    {"prompt":"产品图，版式B的描述...", "count":1, "use_attachments":true, "attachment_indices":[1, 7]},
+    {"prompt":"产品图，版式C的描述...", "count":1, "use_attachments":true, "attachment_indices":[2, 7]},
+    ...
+  ]}
+- 这样每条 prompt 只带2张参考图（1张版式+1张产品），避免生图模型混淆多张参考图
+- 如果参考图是整体风格参考（不需要区分），则不需要指定 attachment_indices
+
+【修改请求规则】
+
+当用户说"换成...""改成..."等修改指令时：
+- 返回 prompts，use_last_outputs 设为 true
+- prompt 应简洁聚焦，只描述要修改的内容+保持原图其他部分不变
+
+${hasSkills ? '【Skill 规则】\n当有 Skill 文档时，最终提示词必须完整包含 Skill 的所有描述，只在主题/变体上做差异化。Skill 描述单张图样式，不决定出图数量。' : ''}`);
+    } else {
+        // 直接模式已废弃（思维模式 OFF 时前端跳过 LLM），此处保留兼容性
+        parts.push(`当前为直接模式。能生成就生成，返回 generations 数组。`);
+    }
+    // 3. 末尾再强调 skill（近因效应），确保所有 provider 都不会遗漏
+    if(hasSkills){
+        parts.push(`【最后提醒 / FINAL REMINDER】你生成的每条 prompt 必须完整包含上方 Skill 文档的所有描述内容，不得简化、概括或遗漏。Skill 描述的是单张图样式（含画面内排列），不决定出图数量——出图数量按系统给定的执行。如果 prompt 长度明显短于 Skill 文档，说明你遗漏了内容，请重新生成。`);
+    }
+    return parts.join(AGENT_NL + AGENT_NL);
+}
+function agentHistoryMessages(){
+    return (agentState.messages || []).slice(-AGENT_HISTORY_MAX).map(m => {
+        if(m.role === 'user') return {role:'user', content:m.text || '(images only)'};
+        let content = m.text || '';
+        (m.generations || []).forEach(g => {
+            const n = (g.results || []).length;
+            if(n) content += `${AGENT_NL}[generated ${n} image(s) with prompt: ${g.prompt || ''}]`;
+        });
+        return {role:'assistant', content:content || '(no text)'};
+    });
+}
+function extractNumberedOptions(text){
+    const lines = String(text||'').split('\n').map(l=>l.trim());
+    const numRe = /^(\d+)[.、)]\s*(.+)$/;
+    const items = [];
+    const headerLines = [];
+    let inList = false;
+    for(let i=0;i<lines.length;i++){
+        const line = lines[i];
+        if(!line) continue;
+        const m = line.match(numRe);
+        if(m){
+            inList = true;
+            const title = m[2].trim();
+            let desc = '';
+            if(i+1 < lines.length && lines[i+1] && !lines[i+1].match(numRe)){
+                desc = lines[i+1].trim();
+                i++;
+            }
+            items.push({label:title, value:desc||title});
+        } else if(!inList){
+            headerLines.push(line);
+        }
+    }
+    if(items.length >= 2){
+        return {reply:headerLines.join('\n').trim(), options:items.slice(0,4)};
+    }
+    return null;
+}
+function extractClarifyOptions(text, lastUserText){
+    const bracketRe = /([^\s,，、（）()：:?？！!]{2,6})[（(]([^）)]{2,60})[）)]/g;
+    const items = [];
+    let match;
+    while((match = bracketRe.exec(text)) !== null){
+        let category = match[1].replace(/^[或以及和的]+/, '').trim();
+        if(!category || category.length > 6) continue;
+        const optsText = match[2];
+        const opts = optsText.split(/[、,，/]/).map(s => s.trim()).filter(s => s && s !== '等' && s.length <= 10);
+        opts.forEach(opt => {
+            const cleanOpt = opt.replace(/等$/, '').trim();
+            if(cleanOpt){
+                const ctx = lastUserText ? lastUserText + '，' + category + '：' + cleanOpt : category + '：' + cleanOpt;
+                items.push({label:cleanOpt, value:ctx});
+            }
+        });
+    }
+    return items.length >= 2 ? items.slice(0, 8) : null;
+}
+function extractGenPrompt(text){
+    // 从 LLM 回复中提取中文生图提示词（长描述性段落）
+    // 优先匹配以中文或英文开头的长描述行（>=20字符）
+    const lines = String(text||'').split('\n').map(l=>l.trim()).filter(l=>l);
+    for(const line of lines){
+        if(line.length < 20) continue;
+        // 跳过问句和短对话
+        if(/[？?]$/.test(line) && line.length < 40) continue;
+        // 匹配以中文描述或英文大写开头的长行（通常是 prompt）
+        const cnChars = (line.match(/[\u4e00-\u9fff]/g) || []).length;
+        const enLetters = (line.match(/[a-zA-Z]/g) || []).length;
+        const totalLetters = cnChars + enLetters;
+        if(totalLetters / line.length < 0.5) continue;
+        // 跳过纯对话（如"好的，正在为您生成..."）
+        if(/^(好的|没问题|当然|好的[,，])/i.test(line) && line.length < 50) continue;
+        return line;
+    }
+    return null;
+}
+// 从文本中提取所有顶层 JSON 对象（使用括号匹配算法，比 indexOf/lastIndexOf 更可靠）
+function extractJsonBlocks(text){
+    const blocks = [];
+    let i = 0;
+    while(i < text.length){
+        if(text[i] === '{'){
+            let depth = 0;
+            let inStr = false;
+            let escape = false;
+            let end = -1;
+            for(let j = i; j < text.length; j++){
+                const ch = text[j];
+                if(escape){ escape = false; continue; }
+                if(ch === '\\'){ escape = true; continue; }
+                if(ch === '"'){ inStr = !inStr; continue; }
+                if(inStr) continue;
+                if(ch === '{') depth++;
+                else if(ch === '}'){
+                    depth--;
+                    if(depth === 0){ end = j; break; }
+                }
+            }
+            if(end > i){
+                blocks.push(text.slice(i, end + 1));
+                i = end + 1;
+            } else {
+                i++;
+            }
+        } else {
+            i++;
+        }
+    }
+    return blocks;
+}
+// ★ 修复 LLM 返回的常见 JSON 格式问题
+// 处理：尾随逗号、单引号、未加引号的键、注释、智能引号等
+function repairJsonString(str){
+    if(!str || typeof str !== 'string') return str;
+    let s = str;
+    // 1. 移除行注释 // ... 和块注释 /* ... */
+    s = s.replace(/\/\*[\s\S]*?\*\//g, '');
+    // 行注释：只在字符串外移除（简单处理：不匹配引号内的 //）
+    s = s.replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+    // 2. 智能引号 → 普通双引号
+    s = s.replace(/[\u201c\u201d\u201e\u201f]/g, '"');
+    s = s.replace(/[\u2018\u2019\u201a\u201b]/g, "'");
+    // 3. 单引号字符串 → 双引号字符串（仅对键值对中的值）
+    // 匹配 : '...' 或 : '...,' 模式
+    s = s.replace(/:\s*'([^']*)'/g, ': "$1"');
+    // 4. 未加引号的键 → 加引号（匹配 { key: 或 , key: 模式，key 为字母/数字/下划线）
+    s = s.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+    // 5. 尾随逗号（} 或 ] 前的逗号）
+    s = s.replace(/,(\s*[}\]])/g, '$1');
+    // 6. 处理字符串内未转义的换行符（JSON 标准不允许字符串内有 literal newline）
+    // 将字符串值中的 literal \n \r \t 替换为转义形式
+    s = s.replace(/"((?:[^"\\]|\\.)*)"/g, (match, inner) => {
+        // inner 是字符串内容（已处理转义）
+        // 如果包含 literal newline，替换为 \n
+        const fixed = inner.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+        return '"' + fixed + '"';
+    });
+    return s;
+}
+// ★ 用正则从原始文本中提取 JSON 字段（最后兜底）
+function extractFieldsWithRegex(text){
+    const result = { reply:'', options:[], prompts:[], generations:[], collected:{}, next_dimension:'', remaining_dimensions:[] };
+    // 提取 reply
+    const replyMatch = text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if(replyMatch){
+        try { result.reply = JSON.parse('"' + replyMatch[1] + '"'); } catch(e){ result.reply = replyMatch[1]; }
+    }
+    // 提取 options（简单提取 label/value 对）
+    const optionsMatch = text.match(/"options"\s*:\s*\[([\s\S]*?)\]/);
+    if(optionsMatch){
+        const optRe = /"label"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"value"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+        let m;
+        while((m = optRe.exec(optionsMatch[1])) !== null){
+            try {
+                const label = JSON.parse('"' + m[1] + '"');
+                const value = JSON.parse('"' + m[2] + '"');
+                result.options.push({label, value});
+            } catch(e){
+                result.options.push({label:m[1], value:m[2]});
+            }
+        }
+    }
+    // 提取 prompts
+    const promptsMatch = text.match(/"prompts"\s*:\s*\[([\s\S]*?)\]/);
+    if(promptsMatch){
+        const promptRe = /"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+        let m;
+        while((m = promptRe.exec(promptsMatch[1])) !== null){
+            try {
+                const prompt = JSON.parse('"' + m[1] + '"');
+                result.prompts.push({prompt, count:1, use_last_outputs:false, use_attachments:false, status:'pending'});
+            } catch(e){
+                result.prompts.push({prompt:m[1], count:1, use_last_outputs:false, use_attachments:false, status:'pending'});
+            }
+        }
+    }
+    // 提取 generations
+    const gensMatch = text.match(/"generations"\s*:\s*\[([\s\S]*?)\]/);
+    if(gensMatch){
+        const genRe = /"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+        let m;
+        while((m = genRe.exec(gensMatch[1])) !== null){
+            try {
+                const prompt = JSON.parse('"' + m[1] + '"');
+                result.generations.push({prompt, count:1, use_last_outputs:false, use_attachments:false, results:[], status:'running'});
+            } catch(e){
+                result.generations.push({prompt:m[1], count:1, use_last_outputs:false, use_attachments:false, results:[], status:'running'});
+            }
+        }
+    }
+    // 提取 next_dimension
+    const ndMatch = text.match(/"next_dimension"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if(ndMatch) result.next_dimension = ndMatch[1];
+    // 提取 remaining_dimensions
+    const rdMatch = text.match(/"remaining_dimensions"\s*:\s*\[([\s\S]*?)\]/);
+    if(rdMatch){
+        const items = rdMatch[1].match(/"([^"]+)"/g);
+        if(items) result.remaining_dimensions = items.map(s => s.replace(/^"|"$/g, ''));
+    }
+    return result;
+}
+// 非思维模式意图路由解析：从 LLM 返回中提取结构化意图 JSON
+function parseAgentIntentRoute(raw, lastUserText){
+    const text = String(raw || '').trim();
+    const fallback = {intent:'generate', reply:'', prompts:[], use_attachments:false, attachment_roles:{}, use_last_outputs:false, text_only:false, analysis:''};
+    if(!text) return fallback;
+    // 尝试提取 JSON
+    let jsonStr = text;
+    // 去掉可能的 markdown 代码块
+    const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if(fenceMatch) jsonStr = fenceMatch[1].trim();
+    // 尝试找到最外层的 { }
+    const braceStart = jsonStr.indexOf('{');
+    const braceEnd = jsonStr.lastIndexOf('}');
+    if(braceStart >= 0 && braceEnd > braceStart){
+        jsonStr = jsonStr.slice(braceStart, braceEnd + 1);
+    }
+    try {
+        const data = JSON.parse(jsonStr);
+        const intent = String(data.intent || 'generate').toLowerCase();
+        const validIntents = ['generate','edit','analyze','refine','composite','reference_generate','clarify','meta','cancel'];
+        return {
+            intent: validIntents.includes(intent) ? intent : 'generate',
+            reply: String(data.reply || '').slice(0, 500),
+            prompts: Array.isArray(data.prompts) ? data.prompts.filter(p => typeof p === 'string' && p.trim()).map(p => p.trim()) : [],
+            use_attachments: !!data.use_attachments,
+            attachment_roles: (data.attachment_roles && typeof data.attachment_roles === 'object') ? data.attachment_roles : {},
+            use_last_outputs: !!data.use_last_outputs,
+            text_only: !!data.text_only || intent === 'analyze' || intent === 'refine' || intent === 'clarify' || intent === 'meta' || intent === 'cancel',
+            analysis: String(data.analysis || '').slice(0, 5000),
+            options: Array.isArray(data.options) ? data.options.filter(o => o && o.label).slice(0, 6) : []
+        };
+    } catch(e) {
+        // JSON 解析失败，尝试正则提取关键字段
+        console.warn('[IntentRoute] JSON parse failed, regex fallback:', e.message);
+        const textOnlyMatch = text.match(/"text_only"\s*:\s*(true|false)/i);
+        const intentMatch = text.match(/"intent"\s*:\s*"(\w+)"/i);
+        const analysisMatch = text.match(/"analysis"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
+        const replyMatch = text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
+        const isTextOnly = textOnlyMatch ? textOnlyMatch[1] === 'true' : false;
+        const intent = intentMatch ? intentMatch[1].toLowerCase() : 'generate';
+        if(isTextOnly || intent === 'analyze' || intent === 'refine'){
+            let analysis = '';
+            if(analysisMatch){ try { analysis = JSON.parse('"' + analysisMatch[1] + '"'); } catch(e2){ analysis = analysisMatch[1]; } }
+            return {...fallback, intent, text_only:true, analysis: analysis || text};
+        }
+        // 生图类回退：用用户原文
+        return {...fallback, intent:'generate', prompts:[]};
+    }
+}
+function parseAgentResponse(raw, lastUserText){
+    const text = String(raw || '').trim();
+    const candidates = [text];
+    if(text.includes('```')){
+        const firstFence = text.indexOf('```');
+        const secondFence = text.indexOf('```', firstFence + 3);
+        if(secondFence > firstFence){
+            let inner = text.slice(firstFence + 3, secondFence).trim();
+            if(inner.startsWith('json')) inner = inner.slice(4).trim();
+            if(inner) candidates.unshift(inner);
+        }
+    }
+    // 使用括号匹配算法提取所有 JSON 对象（比 indexOf/lastIndexOf 更可靠）
+    const jsonBlocks = extractJsonBlocks(text);
+    for(const block of jsonBlocks){
+        if(!candidates.includes(block)) candidates.unshift(block);
+    }
+    // 先解析所有可成功的 JSON 候选，再按优先级选择最合适的一个
+    const parsedCandidates = [];
+    for(const candidate of candidates){
+        // 先尝试直接解析，失败后尝试修复再解析
+        let data = null;
+        try { data = JSON.parse(candidate); } catch(e1) {
+            try { data = JSON.parse(repairJsonString(candidate)); } catch(e2) { /* 尝试下一个候选 */ }
+        }
+        if(!data || typeof data !== 'object') continue;
+        try {
+            const reply = typeof data.reply === 'string' ? data.reply : (typeof data.text === 'string' ? data.text : '');
+            let options = (Array.isArray(data.options) ? data.options : [])
+                .filter(o => o && typeof o.label === 'string' && typeof o.value === 'string')
+                .slice(0, 8)
+                .map(o => ({label:o.label.trim(), value:o.value.trim()}));
+            if(options.length > 0 && options.length < 8 && !options.some(o => o.value === 'CUSTOM_INPUT')){
+                options.push({label:'自定义输入', value:'CUSTOM_INPUT'});
+            }
+            if(options.length === 0 && reply){
+                const numbered = extractNumberedOptions(reply);
+                if(numbered) options = numbered.options;
+            }
+            const prompts = normalizePrompts(data.prompts).slice(0, AGENT_GEN_MAX_PER_MSG);
+            const generations = (Array.isArray(data.generations) ? data.generations : [])
+                .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
+                .slice(0, AGENT_GEN_MAX_PER_MSG)
+                .map(g => {
+                    const gen = {prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'};
+                    if(Array.isArray(g.attachment_indices)) gen.attachment_indices = g.attachment_indices.filter(i => Number.isFinite(Number(i)) && Number(i) >= 0).map(i => Math.floor(Number(i)));
+                    return gen;
+                });
+            const collected = (data.collected && typeof data.collected === 'object') ? data.collected : {};
+            const nextDimension = typeof data.next_dimension === 'string' ? data.next_dimension : '';
+            const remainingDimensions = Array.isArray(data.remaining_dimensions) ? data.remaining_dimensions : [];
+            parsedCandidates.push({reply, options, prompts, generations, collected, next_dimension, remainingDimensions});
+        } catch(e) { /* 尝试下一个候选 */ }
+    }
+    // 如果有多个解析成功的候选，按优先级选择：
+    // 1. 优先选择有 options 且无 generations 的（思维模式维度选择轮次）
+    // 2. 其次选择有 options 的
+    // 3. 其次选择有 prompts 的
+    // 4. 其次选择有 generations 的
+    // 5. 最后选择有 reply 的
+    if(parsedCandidates.length > 0){
+        const score = c => {
+            let s = 0;
+            if(c.options.length > 0 && c.generations.length === 0) s += 100; // 思维模式维度选择
+            else if(c.options.length > 0) s += 50;
+            if(c.prompts.length > 0) s += 30;
+            if(c.generations.length > 0) s += 20;
+            if(c.reply) s += 10;
+            if(Object.keys(c.collected).length > 0) s += 5;
+            return s;
+        };
+        parsedCandidates.sort((a, b) => score(b) - score(a));
+        return parsedCandidates[0];
+    }
+    // JSON 解析失败时的 fallback 链
+    console.warn('[parseAgentResponse] JSON.parse 失败，尝试 fallback 提取，原始文本:', text.slice(0, 500));
+    // ★ 先尝试用正则从原始文本中提取 JSON 字段（兜底）
+    const regexResult = extractFieldsWithRegex(text);
+    const hasRegexContent = regexResult.reply || regexResult.options.length > 0 || regexResult.prompts.length > 0 || regexResult.generations.length > 0;
+    if(hasRegexContent){
+        // 自动追加自定义输入选项
+        if(regexResult.options.length > 0 && regexResult.options.length < 8 && !regexResult.options.some(o => o.value === 'CUSTOM_INPUT')){
+            regexResult.options.push({label:'自定义输入', value:'CUSTOM_INPUT'});
+        }
+        console.info('[parseAgentResponse] 正则提取成功:', {options:regexResult.options.length, prompts:regexResult.prompts.length, generations:regexResult.generations.length});
+        return regexResult;
+    }
+    const numberedFallback = extractNumberedOptions(text);
+    if(numberedFallback){
+        const fallbackOptions = numberedFallback.options || [];
+        // 自动追加自定义输入选项
+        if(fallbackOptions.length > 0 && fallbackOptions.length < 8 && !fallbackOptions.some(o => o.value === 'CUSTOM_INPUT')){
+            fallbackOptions.push({label:'自定义输入', value:'CUSTOM_INPUT'});
+        }
+        return {reply:numberedFallback.reply || text, options:fallbackOptions, prompts:[], generations:[], collected:{}, next_dimension:'', remaining_dimensions:[]};
+    }
+    const clarifyOptions = extractClarifyOptions(text, lastUserText);
+    if(clarifyOptions){
+        const fallbackOptions = clarifyOptions || [];
+        // 自动追加自定义输入选项
+        if(fallbackOptions.length > 0 && fallbackOptions.length < 8 && !fallbackOptions.some(o => o.value === 'CUSTOM_INPUT')){
+            fallbackOptions.push({label:'自定义输入', value:'CUSTOM_INPUT'});
+        }
+        return {reply:text, options:fallbackOptions, prompts:[], generations:[], collected:{}, next_dimension:'', remaining_dimensions:[]};
+    }
+    return {reply:text, options:[], prompts:[], generations:[], collected:{}, next_dimension:'', remaining_dimensions:[]};
+}
+// 处理 LLM 返回结果：解析、兜底、创建 assistant 消息、运行生图
+// 提取为独立函数，以便刷新恢复时复用
+async function processAgentLlmResult(result, text, attachments, userMsg){
+const parsed = parseAgentResponse(result.text || '', text);
+// 防御性检查：确保 options/prompts/generations 始终是数组
+if(!Array.isArray(parsed.options)) parsed.options = [];
+if(!Array.isArray(parsed.prompts)) parsed.prompts = [];
+if(!Array.isArray(parsed.generations)) parsed.generations = [];
+// 提前计算思维模式状态，使兜底逻辑能感知
+    const bypassThinking = userMsg?.bypassThinking === true;
+    const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
+    // 生图意图兜底 + 修改意图检测
+    {
+        const lastUser = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+        if(lastUser && lastUser.text && parsed.reply){
+            const userText = String(lastUser.text || '').trim();
+            const replyText = String(parsed.reply || '');
+            const genPrompt = extractGenPrompt(replyText);
+            // 修改/转换意图检测
+            const userModifyRe = /改成|转换成|换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
+            const replyModifyRe = /为您(?:将|把).{0,30}?(?:转换|改成|换成|修改|变成|调整|转为|调成|重新画|重画)|(?:将|把).{0,20}?(?:转换|改成|换成|修改|变成).{0,10}?(?:风格|效果|版本|色调)/i;
+            const hasUserModifyIntent = userModifyRe.test(userText);
+            const hasReplyModify = replyModifyRe.test(replyText);
+            let isModifyScenario = hasUserModifyIntent || hasReplyModify;
+            // 修复链路断裂：如果上一条 assistant 有 prompts（确认模式），且当前用户消息是确认/生成意图
+            // 则继承上上条用户消息的修改意图
+            if(!isModifyScenario){
+                const msgs = agentState.messages || [];
+                // 找到最后一条 assistant 消息
+                for(let i = msgs.length - 1; i >= 0; i--){
+                    if(msgs[i].role === 'assistant'){
+                        const prevAssistant = msgs[i];
+                        // 如果上一条 assistant 有 prompts，说明是确认模式
+                        if(Array.isArray(prevAssistant.prompts) && prevAssistant.prompts.length > 0){
+                            // 当前用户消息是确认/生成意图
+                            const confirmRe = /^\s*(确认|生成|好的|好|可以|没问题|就这样|执行|继续|1|yes|ok)\s*$/i;
+                            if(confirmRe.test(userText)){
+                                // 找到上上条用户消息（即提出修改需求的那条）
+                                for(let j = i - 1; j >= 0; j--){
+                                    if(msgs[j].role === 'user'){
+                                        const prevUserText = String(msgs[j].text || '').trim();
+                                        if(userModifyRe.test(prevUserText)){
+                                            isModifyScenario = true;
+                                            // 如果当前消息没有明确 prompt，使用上上条的修改需求作为 prompt
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            if(parsed.generations.length === 0 && parsed.prompts.length === 0){
+                // 场景A：LLM 没返回 generations 也没返回 prompts，需要兜底构造
+                // 思维模式下不创建兜底 generation（让后续 thinkingModeOn 块创建 prompt 待确认）
+                const genInProgressRe = /正在生成|正在为你生成|正在为您生成|生成中|开始生成|马上生成|这就为你生成|这就为您生成|好的[,，]?\s*我来生成|好的[,，]?\s*马上|我将为你生成|我将为您生成|我来为你生成|我来为您生成|正在为你创建|正在为您创建|正在画|正在创建/i;
+                const userGenIntentRe = /我要生成|帮我生成|帮我画|画一|生成一|创建一|制作一|来一张|来幅|来张|给我画|给我生成|帮我创建|帮我做/i;
+                const meaninglessConfirmRe = /确认要生成|确认生成|确认要画|要为您生成.*吗|要生成.*吗|确认.*吗.*[？?]/i;
+                const noOptions = !parsed.options || parsed.options.length === 0;
+                const hasGenInProgress = !thinkingModeOn && genInProgressRe.test(replyText);
+                const hasUserGenIntent = noOptions && userGenIntentRe.test(userText);
+                const hasMeaninglessConfirm = noOptions && meaninglessConfirmRe.test(replyText);
+                const hasAnyIntent = hasGenInProgress || hasUserGenIntent || isModifyScenario || hasMeaninglessConfirm;
+                // 修改场景（风格修改+主体更换）都使用 use_last_outputs: true 引用原图
+                // 区别在于 prompt 写法：风格修改→描述风格变化；主体更换→明确指示替换主体+保留场景
+                const fallbackUseLastOutputs = isModifyScenario;
+                if(hasAnyIntent){
+                        const finalPrompt = genPrompt || userText;
+                        parsed.generations = [{
+                            prompt: finalPrompt,
+                            count: 1,
+                            use_last_outputs: fallbackUseLastOutputs,
+                            use_attachments: !!(lastUser.images && lastUser.images.length),
+                            results: [],
+                            status: 'running'
+                        }];
+                        // 不覆盖 parsed.reply，保留 LLM 原始回复
+                        // generation card 会独立显示状态和 prompt
+                    }
+            } else if(isModifyScenario && parsed.generations.length > 0){
+                // 场景B：LLM 返回了 generations。
+                // 不再盲目强制 use_last_outputs: true —— LLM 会根据系统提示词区分：
+                //   风格修改（use_last_outputs: true）vs 主体更换（use_last_outputs: false）
+                // 仅当 LLM 没有明确设置 use_last_outputs 时，作为兜底设为 true
+                parsed.generations.forEach(g => {
+                    if(g.use_last_outputs === undefined || g.use_last_outputs === null){
+                        g.use_last_outputs = true;
+                    }
+                });
+            }
+        }
+    }
+    // 如果用户点击了"重新生成提示词"，强制将 generations 设为空数组
+    const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+    if(lastUserMsg && String(lastUserMsg.text || '').includes('重新生成提示词')){
+        parsed.generations = [];
+    }
+    // 批量完整性检查（P2-12：弱化为显示提示，不再强制追加 reply）
+    // 前端数量决策：输入框显式要求 > 工具栏设置（与 sendAgentMessage 一致）
+    // 优先用 sendAgentMessage 已存入 userMsg 的值，避免重复计算导致不一致
+    let requestedCount = userMsg?.requestedCount || 0;
+    // 阶段二继承：如果 userMsg 没有 requestedCount，从上一条 user 消息继承
+    if(requestedCount <= 1){
+        const _prevUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+        if(_prevUserMsg?.requestedCount > 1){
+            requestedCount = _prevUserMsg.requestedCount;
+        }
+    }
+    if(requestedCount <= 1) requestedCount = resolveFinalGenCount(text).count;
+    // 如果最终数量 <= 1，相当于没有明确请求多张，设为 0 不触发数量逻辑
+    if(requestedCount <= 1) requestedCount = 0;
+    if(thinkingModeOn){
+        const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
+        const isModifyRequest = userModifyRe.test(text);
+        // ★ 渐进式强制保障：思维模式下，如果 LLM 返回了 options（还在维度采集阶段），
+        //   则无论它是否同时返回了 prompts 或 generations，都强制清空。
+        //   这确保 LLM 无法跳过渐进式流程——prompts 只能在 options 为空时出现。
+        if(parsed.options.length > 0){
+            parsed.prompts = [];
+            parsed.generations = [];
+        }
+        // 思维模式下，无论是否修改请求，都走 prompts 确认流程
+        // 1. generations → prompts 转换（始终转换，不受 options 影响）
+        //    之前的 bug：条件含 parsed.options.length === 0，导致 LLM 同时返回 options+generations 时
+        //    generations 跳过转换直接执行，绕过了确认流程
+        if(parsed.generations.length > 0){
+            // 将 generations 转为 prompts 对象数组（透传 count/use_last_outputs/use_attachments）
+            // 兜底：如果某个 generation 的 count>1，拆成多条 prompts（每条 count=1），确保用户逐个确认
+            // 保留 LLM 已返回的 prompts，只在前面追加转换结果
+            const convertedPrompts = [];
+            parsed.generations.forEach(g => {
+                const promptText = String(g.prompt || '').trim();
+                if(!promptText) return;
+                const c = Math.max(1, Math.min(8, Number(g.count) || 1));
+                for(let i = 0; i < c; i++){
+                    const p = {
+                        prompt:promptText,
+                        count:1,
+                        use_last_outputs:!!g.use_last_outputs,
+                        use_attachments:!!g.use_attachments,
+                        status:'pending'
+                    };
+                    if(Array.isArray(g.attachment_indices)) p.attachment_indices = g.attachment_indices;
+                    convertedPrompts.push(p);
+                }
+            });
+            // 如果 LLM 同时返回了 prompts，合并（generations 转换的在前）
+            parsed.prompts = convertedPrompts.concat(parsed.prompts);
+            parsed.generations = [];
+        }
+        // 1.5 前端兜底：思维模式下，如果输入模糊（缺风格）但 LLM 返回了 prompts（没走阶段一），强制走 options
+        // 这样即使 LLM 没按系统提示词执行阶段一，前端也能保证"先选风格再扩写"的流程
+        if(!isModifyRequest && parsed.prompts.length > 0 && parsed.options.length === 0 && isVagueImageRequest(text)){
+            parsed.prompts = [];
+            parsed.options = [
+                {label:'水墨风', value:'水墨风'},
+                {label:'油画风', value:'油画风'},
+                {label:'赛博朋克', value:'赛博朋克'},
+                {label:'Q版卡通', value:'Q版卡通'}
+            ];
+            parsed.reply = '你的输入比较简略，请先选择一个风格方向，我再为你扩写完整提示词：';
+        }
+        // 2. 如果 prompts 仍为空，创建默认 prompt
+        if(parsed.prompts.length === 0 && parsed.options.length === 0 && parsed.generations.length === 0){
+            // 检查 reply 是否包含 JSON 标记（说明解析失败了，但 LLM 确实返回了结构化数据）
+            const replyLooksLikeJson = parsed.reply && (parsed.reply.includes('"reply"') || parsed.reply.includes('"options"') || parsed.reply.trim().startsWith('{'));
+            if(replyLooksLikeJson){
+                // 解析失败但 LLM 返回了 JSON：尝试从 reply 文本中提取有用信息
+                console.warn('[thinkingMode] LLM 返回了 JSON 但 JSON.parse 和正则提取均失败，尝试最后兜底，reply:', parsed.reply?.slice(0, 200));
+                // 尝试从 raw reply 中提取 reply 字段的值
+                const replyValMatch = parsed.reply.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+                if(replyValMatch){
+                    try { parsed.reply = JSON.parse('"' + replyValMatch[1] + '"'); } catch(e){ parsed.reply = replyValMatch[1]; }
+                    // 提取到了 reply，继续走正常流程创建 prompt
+                    parsed.prompts = [{prompt:text, count:1, use_last_outputs:isModifyRequest, use_attachments:false, status:'pending'}];
+                } else {
+                    // 彻底无法提取：给用户友好的提示 + 默认风格选项
+                    parsed.reply = '抱歉，AI 回复格式异常。请重新描述你的需求，或者选择一个风格方向开始：';
+                    parsed.options = [
+                        {label:'水墨风', value:'水墨风'},
+                        {label:'油画风', value:'油画风'},
+                        {label:'赛博朋克', value:'赛博朋克'},
+                        {label:'Q版卡通', value:'Q版卡通'},
+                        {label:'自定义输入', value:'CUSTOM_INPUT'}
+                    ];
+                }
+            } else if(isVagueImageRequest(text) && !isModifyRequest){
+                // 模糊请求：强制走维度选择
+                parsed.options = [
+                    {label:'水墨风', value:'水墨风'},
+                    {label:'油画风', value:'油画风'},
+                    {label:'赛博朋克', value:'赛博朋克'},
+                    {label:'Q版卡通', value:'Q版卡通'}
+                ];
+                parsed.reply = '你的输入比较简略，请先选择一个风格方向，我再为你逐步完善：';
+            } else {
+                parsed.prompts = [{prompt:text, count:1, use_last_outputs:isModifyRequest, use_attachments:false, status:'pending'}];
+                if(!parsed.reply) parsed.reply = '请确认以下提示词：';
+            }
+        }
+        // 3. 数量校准：如果用户设置了 genCount>1 或文本请求了N张
+        // 3a. 少于请求数量 → 补充（加入差异化方向，避免生成的图几乎一样）
+        if(requestedCount > 1 && parsed.prompts.length > 0 && parsed.prompts.length < requestedCount){
+            const basePrompts = parsed.prompts.slice();
+            const variantDirections = [
+                '不同姿态与动作', '不同场景与氛围', '不同视角与构图',
+                '不同配色与光线', '不同细节与装饰', '不同表情与神态',
+                '不同背景与环境', '不同材质与质感'
+            ];
+            while(parsed.prompts.length < requestedCount){
+                const base = basePrompts[parsed.prompts.length % basePrompts.length];
+                const variantIdx = Math.floor(parsed.prompts.length / basePrompts.length);
+                const direction = variantDirections[variantIdx % variantDirections.length];
+                parsed.prompts.push({
+                    prompt: base.prompt + `（变体${variantIdx + 1}，${direction}）`,
+                    count: 1,
+                    use_last_outputs: base.use_last_outputs,
+                    use_attachments: base.use_attachments,
+                    status: 'pending'
+                });
+            }
+        }
+        // 3b. 多于请求数量 → 截断到请求数量
+        if(requestedCount > 1 && parsed.prompts.length > requestedCount){
+            parsed.prompts = parsed.prompts.slice(0, requestedCount);
+        }
+        // 3c. 用户未要求多张（genCount=1）→ 强制只保留1条，防止LLM返回多条
+        if(requestedCount === 0 && parsed.prompts.length > 1){
+            parsed.prompts = parsed.prompts.slice(0, 1);
+        }
+    }
+    // 直接模式数量校准：如果非思维模式，校准 generations 条数到 requestedCount
+    // 重要：不通过增加 count 来补充（count>1 会用同一 prompt 发多次请求，导致生成重复图）
+    // 而是追加新的 generation 条目，并加上变体指令让 LLM 的 prompt 有差异
+    if(!thinkingModeOn && requestedCount > 1 && parsed.generations.length > 0){
+        const currentCount = parsed.generations.length;
+        if(currentCount < requestedCount){
+            // 少于请求数量 → 追加新 generation（不增加 count，避免重复）
+            const basePrompts = parsed.generations.slice();
+            while(parsed.generations.length < requestedCount){
+                const base = basePrompts[parsed.generations.length % basePrompts.length];
+                const variantIdx = parsed.generations.length - basePrompts.length + 1;
+                parsed.generations.push({
+                    prompt: String(base.prompt || text || '') + `（请使用完全不同的品牌主题/行业方向作为变体${variantIdx}，确保与前面生成的内容有明显差异）`,
+                    count: 1,
+                    use_last_outputs: !!base.use_last_outputs,
+                    use_attachments: !!base.use_attachments,
+                    results: [],
+                    status: 'running'
+                });
+            }
+        } else if(currentCount > requestedCount){
+            // 多于请求数量 → 截断到请求数量
+            parsed.generations = parsed.generations.slice(0, requestedCount);
+        }
+    }
+    // 直接模式下，无论 requestedCount 多少，强制所有 generation 的 count=1
+    // （防止 LLM 返回 count>1 导致同一 prompt 发多次请求、生成重复图）
+if(!thinkingModeOn && parsed.generations.length > 0){
+    parsed.generations.forEach(g => { g.count = 1; });
+}
+const assistantMsg = {
+    id:uid('am'), 
+    role:'assistant', 
+    text:parsed.reply, 
+    options:parsed.options || [], 
+    prompts:parsed.prompts || [], 
+    generations:parsed.generations, 
+    ts:Date.now(),
+    collected: parsed.collected || {},
+    next_dimension: parsed.next_dimension || '',
+    remaining_dimensions: parsed.remaining_dimensions || []
+};
+    // P2-12: 记录请求数量到消息，用于卡片显示校验
+    if(requestedCount > 0) assistantMsg.requestedCount = requestedCount;
+    if(assistantMsg.prompts.length > 0){
+        assistantMsg.promptIdx = 0;
+        // 设置第一个 prompt 为 current
+        if(!assistantMsg.prompts[0].status || assistantMsg.prompts[0].status === 'pending'){
+            assistantMsg.prompts[0].status = 'current';
+        }
+    }
+    agentState.messages.push(assistantMsg);
+    agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+    agentThinking = false;
+    renderAgentMessages();
+    saveAgentState();
+    if(assistantMsg.generations.length && assistantMsg.prompts.length === 0) await runAgentGenerations(assistantMsg, userMsg);
+}
+// 快捷操作辅助：设置输入框文本并触发发送
+function agentSendWithText(text){
+    if(!text || agentSending) return;
+    if(agentInput) agentInput.value = text;
+    sendAgentMessage();
+}
+// 变体生成：用同一 prompt 生成 count 张变体（带差异化指令）
+async function agentVariantGenerate(sourceGen, count, sourceMsg){
+    if(!sourceGen?.prompt || agentSending) return;
+    const basePrompt = sourceGen.prompt;
+    const variantDirections = ['不同姿态与动作', '不同场景与氛围', '不同视角与构图', '不同配色与光线'];
+    const gens = [];
+    for(let i = 0; i < count; i++){
+        const direction = variantDirections[i % variantDirections.length];
+        gens.push({
+            prompt: count > 1 ? basePrompt + `（变体${i + 1}，${direction}）` : basePrompt,
+            count: 1,
+            use_last_outputs: !!sourceGen.use_last_outputs,
+            use_attachments: !!sourceGen.use_attachments,
+            results: [],
+            status: 'running'
+        });
+    }
+    const assistantMsg = {id:uid('am'), role:'assistant', text:`正在生成 ${count} 张变体...`, options:[], prompts:[], generations:gens, ts:Date.now()};
+    agentState.messages.push(assistantMsg);
+    agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+    renderAgentMessages();
+    saveAgentState();
+    // 找到对应的 userMsg
+    const msgs = agentState.messages || [];
+    const msgIdx = msgs.indexOf(assistantMsg);
+    let userMsg = null;
+    for(let i = msgIdx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
+    }
+    await runAgentGenerations(assistantMsg, userMsg);
+}
+async function sendAgentMessage(){
+    if(agentSending || !agentState) return;
+    // P2-14: 确认中发送新消息拦截 —— 检测有未完成的 prompts 时弹 toast
+    {
+        const lastAssistant = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant');
+        if(lastAssistant && Array.isArray(lastAssistant.prompts) && lastAssistant.prompts.length > 0){
+            const pendingCount = lastAssistant.prompts.filter(p => p.status === 'pending' || p.status === 'current' || p.status === 'editing').length;
+            if(pendingCount > 0){
+                if(!confirm(`还有 ${pendingCount} 条提示词未确认，是否放弃当前确认并发送新消息？`)){
+                    return;
+                }
+                // 用户确认放弃 → 清除当前 prompts
+                lastAssistant.prompts = [];
+                delete lastAssistant.promptIdx;
+                renderAgentMessages();
+                saveAgentState();
+            }
+        }
+    }
+    const text = String(agentInput?.value || '').trim();
+    const attachments = (Array.isArray(agentState.attachments) ? agentState.attachments : []).slice();
+    if(!text && !attachments.length) return;
+    
+    // ============ OFF模式：意图路由 + 快速路径 ============
+    const thinkingModeOn = agentState?.thinkingMode;
+    if(!thinkingModeOn){
+        const _skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+        const hasLastOutputs = agentLastResults().length > 0;
+        const modifyRe = /改成|换成|变成|转为|改为|转成|调整为|修改成|修改一下|改一下|调整一下|重新画|重画|重新生成|加一个|去掉|删除|移除/i;
+        const analyzeRe = /^(分析|描述|看看|识别|反推|总结|提取|解读|评价|对比|比较|说说|告诉我|这是什么|里面有什么|什么风格|什么特点|什么构图)/i;
+        const refineRe = /(扩写|优化|翻译|改写|写prompt|写提示词|帮我写|生成prompt)/i;
+        const noGenRe = /(不要生成|不用画|不需要出图|只分析|只描述|只看|别画|别生成)/i;
+        const genIntentRe = /生成|画一|做一|出一|来一|帮我画|帮我做|帮我生|设计|创作/i;
+
+        // 创建user消息（所有路径共用）
+        const userMsg = {id:uid('am'), role:'user', text, images:attachments, ts:Date.now()};
+        agentState.messages.push(userMsg);
+        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+        agentState.attachments = [];
+        if(agentInput) agentInput.value = '';
+        renderAgentAttachments();
+        agentSending = true;
+        saveAgentState();
+
+        // ===== 快速路径：跳过LLM直接生图 =====
+        const _hasGenVerb = /画|生成|设计|创作|做一张|出一张|来一张|帮我画|帮我做|帮我生/.test(text);
+        const isFastPath = text && !attachments.length && !hasLastOutputs
+            && _skills.length === 0
+            && !analyzeRe.test(text.trim()) && !refineRe.test(text) && !noGenRe.test(text)
+            && !modifyRe.test(text)
+            && !/图\d|参考图/.test(text)
+            && (_hasGenVerb || text.trim().length > 10);
+        if(isFastPath){
+            // 直接用原文生图，零延迟
+            const gens = [{prompt:text, count:1, use_last_outputs:false, use_attachments:false, results:[], status:'running'}];
+            const assistantMsg = {id:uid('am'), role:'assistant', text:'', options:[], prompts:[], generations:gens, ts:Date.now()};
+            agentState.messages.push(assistantMsg);
+            agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+            saveAgentState();
+            renderAgentMessages();
+            agentSending = false;
+            await runAgentGenerations(assistantMsg, userMsg);
+            agentSending = false;
+            renderAgentMessages();
+            saveAgentState();
+            return;
+        }
+
+        // ===== 修改快速路径：有last_outputs + 修改意图，跳过LLM =====
+        const isEditFastPath = text && hasLastOutputs && modifyRe.test(text) && !attachments.length
+            && !analyzeRe.test(text.trim()) && !refineRe.test(text);
+        if(isEditFastPath){
+            const gens = [{prompt:text, count:1, use_last_outputs:true, use_attachments:false, results:[], status:'running'}];
+            const assistantMsg = {id:uid('am'), role:'assistant', text:'', options:[], prompts:[], generations:gens, ts:Date.now()};
+            agentState.messages.push(assistantMsg);
+            agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+            saveAgentState();
+            renderAgentMessages();
+            agentSending = false;
+            await runAgentGenerations(assistantMsg, userMsg);
+            agentSending = false;
+            renderAgentMessages();
+            saveAgentState();
+            return;
+        }
+
+        // ===== 需要LLM意图路由 =====
+        if(!chatApiProviders().length){ toast(tr('smart.agentNeedChatModel') || '请先配置理解模型'); agentSending = false; renderAgentMessages(); return; }
+        const chatProvider = resolveChatProviderId(agentState.chatProvider);
+        const chatModel = resolveChatModel(agentState.chatModel, chatProvider);
+        agentState.chatProvider = chatProvider;
+        agentState.chatModel = chatModel;
+
+        // 构建上下文图片
+        const contextImages = attachments.slice();
+        if(agentState.autoContext !== false){
+            [...agentLastResults(), ...agentLastUserAttachments()].forEach(item => {
+                if(item?.url && contextImages.length < AGENT_LLM_IMAGE_MAX && !contextImages.some(i => i.url === item.url)) contextImages.push(item);
+            });
+        }
+
+        // 图片编号映射
+        const imageMap = agentCurrentImageMap();
+        let imageMapDesc = '';
+        if(imageMap.length > 0){
+            imageMapDesc = '\n\n【当前可用图片编号】\n' + imageMap.map(m => `图${m.num} = ${m.source === 'gen' ? '上一轮生成图' : '用户上传附件'}（${m.name || ''}）`).join('\n');
+        }
+
+        // 构建消息文本
+        let messageText = text || '(请分析这些图片)';
+        messageText += imageMapDesc;
+        if(_skills.length > 0){
+            const skillNames = _skills.map(s => s?.name).filter(Boolean).join('、');
+            messageText += `\n\n【Skill提醒】遵循 Skill 文档（${skillNames}）的所有样式描述。`;
+        }
+
+        const llmPayload = {
+            message: messageText,
+            messages: agentHistoryMessages().slice(0, -1),
+            images: contextImages.slice(0, AGENT_LLM_IMAGE_MAX).map(i => i.url),
+            videos: [],
+            model: chatModel,
+            provider: chatProvider,
+            ms_model: chatProvider === 'modelscope' ? chatModel : '',
+            system_prompt: AGENT_OFF_MODE_INSTRUCTION + (_skills.length > 0 ? '\n\n' + _skills.map(s => `===== Skill: ${s.name} =====\n${s.content || ''}\n===== End =====`).join('\n') : '')
+        };
+
+        agentThinking = true;
+        renderAgentMessages();
+        saveAgentState();
+
+        try {
+            const taskRes = await fetch('/api/agent-llm-task', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(llmPayload)
+            }).then(async r => {
+                if(!r.ok) throw new Error(await responseErrorMessage(r, 'LLM调用失败'));
+                return r.json();
+            });
+            const taskId = taskRes.task_id;
+            if(!taskId) throw new Error('LLM任务创建失败');
+            const llmResult = await pollAgentLlmTask(taskId);
+            agentThinking = false;
+
+            // 解析意图路由 JSON
+            const routed = parseAgentIntentRoute(llmResult.text || '', text);
+
+            // 最小安全网：剥离@mention后，如果文本以分析动词开头且无生图动词，强制 text_only
+            // （仅针对 LLM 反复误判的最明显场景，不是旧的多层正则）
+            const _cleanText = text.replace(/@[^\s]+/g, '').trim();
+            const _isObviousAnalysis = /^(分析|描述|反推|识别|总结|提取|解读|对比|比较|看看这|这是什么|什么风格|什么特点|什么构图)/.test(_cleanText);
+            const _hasExplicitGen = /生成|画一|做一|出一|来一|帮我画|帮我做|帮我生|设计一|创作一/.test(_cleanText);
+            if(_isObviousAnalysis && !_hasExplicitGen && !routed.text_only){
+                routed.text_only = true;
+                routed.intent = 'analyze';
+                if(!routed.analysis && routed.reply) routed.analysis = routed.reply;
+            }
+
+            // 意图分发（信任 LLM 判断，不再用正则覆盖）
+            if(routed.intent === 'cancel'){
+                // 取消
+                const assistantMsg = {id:uid('am'), role:'assistant', text:routed.reply || '好的，已取消。', options:[], prompts:[], generations:[], ts:Date.now()};
+                agentState.messages.push(assistantMsg);
+                agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+                saveAgentState(); renderAgentMessages();
+            } else if(routed.intent === 'clarify'){
+                // 意图不明，问用户
+                const assistantMsg = {id:uid('am'), role:'assistant', text:routed.reply || '你想让我做什么？', options:routed.options || [], prompts:[], generations:[], ts:Date.now()};
+                agentState.messages.push(assistantMsg);
+                agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+                saveAgentState(); renderAgentMessages();
+            } else if(routed.text_only){
+                // 纯文本回复（分析/反推/提示词扩写/meta）
+                const analysisText = routed.analysis || routed.reply || llmResult.text || '';
+                const cardType = routed.intent === 'refine' ? 'prompt_suggestion' : routed.intent === 'meta' ? '' : 'analysis';
+                const assistantMsg = {id:uid('am'), role:'assistant', text:analysisText, options:routed.options || [], prompts:[], generations:[], ts:Date.now(), cardType:cardType || undefined};
+                agentState.messages.push(assistantMsg);
+                agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+                saveAgentState(); renderAgentMessages();
+            } else {
+                // 生图类意图（generate/edit/composite/reference_generate）
+                const prompts = (Array.isArray(routed.prompts) && routed.prompts.length > 0) ? routed.prompts : [text];
+                const gens = prompts.map(p => ({
+                    prompt: p,
+                    count: 1,
+                    use_last_outputs: !!routed.use_last_outputs,
+                    use_attachments: !!routed.use_attachments || attachments.length > 0,
+                    results: [],
+                    status: 'running'
+                }));
+                const assistantMsg = {id:uid('am'), role:'assistant', text:routed.reply || '', options:[], prompts:[], generations:gens, ts:Date.now()};
+                agentState.messages.push(assistantMsg);
+                agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+                saveAgentState();
+                renderAgentMessages();
+                await runAgentGenerations(assistantMsg, userMsg);
+            }
+        } catch(e) {
+            agentThinking = false;
+            // Fallback：LLM失败时直接用原文生图
+            console.warn('[OFF mode] LLM intent route failed, fallback:', e.message);
+            const fallbackGens = [{prompt:text, count:1, use_last_outputs:hasLastOutputs && modifyRe.test(text), use_attachments:attachments.length > 0, results:[], status:'running'}];
+            const assistantMsg = {id:uid('am'), role:'assistant', text:'', options:[], prompts:[], generations:fallbackGens, ts:Date.now()};
+            agentState.messages.push(assistantMsg);
+            agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+            saveAgentState();
+            renderAgentMessages();
+            try { await runAgentGenerations(assistantMsg, userMsg); } catch(e2) {
+                assistantMsg.generations.forEach(g => { g.status = 'failed'; g.error = String(e2.message || e2); });
+                renderAgentMessages(); saveAgentState();
+            }
+        } finally {
+            agentSending = false;
+            agentThinking = false;
+            renderAgentMessages();
+            saveAgentState();
+        }
+        return;
+    }
+    // ============ OFF模式结束 ============
+    
+    // 思维模式开启：走原有 LLM 流程
+    if(!chatApiProviders().length){ toast(tr('smart.agentNeedChatModel')); return; }
+    const provider = resolveChatProviderId(agentState.chatProvider);
+    const model = resolveChatModel(agentState.chatModel, provider);
+    agentState.chatProvider = provider;
+    agentState.chatModel = model;
+    const userMsg = {id:uid('am'), role:'user', text, images:attachments, ts:Date.now()};
+    const bypassThinking = agentBypassThinkingNext;
+    agentBypassThinkingNext = false;
+    userMsg.bypassThinking = bypassThinking;
+    agentState.messages.push(userMsg);
+    agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+    agentState.attachments = [];
+    if(agentInput) agentInput.value = '';
+    renderAgentAttachments();
+    agentSending = true;
+    agentThinking = true;
+    // 保存待处理消息，刷新后可恢复
+    agentState._pendingMessage = text;
+    agentState._pendingAttachments = attachments.slice();
+    agentState._pendingUserMsg = userMsg;
+    renderAgentMessages();
+    saveAgentState();
+    const contextImages = attachments.slice();
+    if(agentState.autoContext !== false){
+        [...agentLastResults(), ...agentLastUserAttachments()].forEach(item => {
+            if(item?.url && contextImages.length < AGENT_LLM_IMAGE_MAX && !contextImages.some(i => i.url === item.url)) contextImages.push(item);
+        });
+    }
+    // 通用保障：当有 skill 时，在 user message 末尾注入 skill 强制提醒
+    // 原因：不同 LLM provider 对 system_prompt 的处理方式不同：
+    //   - OpenAI 兼容 API（agnes/魔搭等）：system_prompt 作为 system role，高优先级 ✓
+    //   - gemini-cli（agy）：system_prompt 被拼成普通文本"系统要求：..."，优先级低，易忽略 ✗
+    // 在 user message 里追加提醒，确保所有 provider 都能看到 skill 要求
+    let messageText = text || '(please help me edit these images)';
+    // 多轮对话：注入已确认的维度信息
+    const lastAssistant = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant');
+    const prevCollected = lastAssistant?.collected || {};
+    if(Object.keys(prevCollected).length > 0){
+        messageText += `${AGENT_NL}${AGENT_NL}【已确认维度】以下维度已在之前的对话中确认：`;
+        for(const [key, value] of Object.entries(prevCollected)){
+            messageText += `${AGENT_NL}- ${key}：${value}`;
+        }
+    }
+    // 前端数量决策：输入框显式要求 > 工具栏设置（软参数覆盖）
+    const _finalCount = resolveFinalGenCount(text);
+    // 阶段二继承：如果当前没有明确请求多张，但上一条 user 消息有 requestedCount，继承它
+    // 这确保阶段二（选风格后）和阶段一的数量一致
+    if(_finalCount.count <= 1){
+        const _prevUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+        if(_prevUserMsg?.requestedCount > 1){
+            _finalCount.count = _prevUserMsg.requestedCount;
+            _finalCount.source = 'inherited';
+        }
+    }
+    if(_finalCount.count > 1) userMsg.requestedCount = _finalCount.count;
+    const _skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+    if(_skills.length > 0){
+        const skillNames = _skills.map(s => s?.name).filter(Boolean).join('、');
+        messageText += `${AGENT_NL}${AGENT_NL}【重要提醒】你必须完整遵循 Skill 文档（${skillNames}）的所有描述。Skill 描述的是单张图的样式（含画面内元素排列、构图、配色、排版等），每条 prompt 必须逐字保留这些样式描述，只能改变主题/变体方向。不得简化、概括或遗漏。每条 prompt 长度应与 Skill 文档相当。注意：Skill 不决定生成几张图，出图数量由系统决定（${_finalCount.count}张${_finalCount.source === 'input' ? '，来自你的输入要求' : '，来自工具栏设置'}）。`;
+    }
+    const llmPayload = {
+        message:messageText,
+        messages:agentHistoryMessages().slice(0, -1),
+        images:contextImages.slice(0, AGENT_LLM_IMAGE_MAX).map(i => i.url),
+        videos:[],
+        model,
+        provider,
+        ms_model:provider === 'modelscope' ? model : '',
+        system_prompt:agentSystemPrompt(bypassThinking, _finalCount.count)
+    };
+    try {
+        // 创建后端 LLM 任务（流式输出）
+        const taskRes = await fetch('/api/agent-llm-task?stream=true', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(llmPayload)
+        }).then(async r => {
+            if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.promptLlmFailed')));
+            return r.json();
+        });
+        const llmTaskId = taskRes.task_id;
+        if(!llmTaskId) throw new Error('Failed to create LLM task');
+        // 启动流式渲染
+        startAgentStream(llmTaskId);
+        // 保存 LLM task ID，刷新后可恢复
+        agentState._pendingLlmTaskId = llmTaskId;
+        agentState._pendingLlmTaskTs = Date.now();
+        saveAgentState();
+        // 等待 LLM 结果（WebSocket 实时通知 + 轮询保底）
+        const result = await pollAgentLlmTask(llmTaskId);
+        endAgentStream();
+        delete agentState._pendingLlmTaskId;
+        delete agentState._pendingLlmTaskTs;
+        // 处理结果
+        await processAgentLlmResult(result, text, attachments, userMsg);
+    } catch(e) {
+        agentThinking = false;
+        agentState.messages.push({id:uid('am'), role:'assistant', text:`⚠️ ${String(e.message || e).slice(0, 300)}`, generations:[], ts:Date.now()});
+        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+        renderAgentMessages();
+        saveAgentState();
+    } finally {
+        agentSending = false;
+        agentThinking = false;
+        // 清除待处理消息标记
+        if(agentState._pendingMessage !== undefined){
+            delete agentState._pendingMessage;
+            delete agentState._pendingAttachments;
+            delete agentState._pendingUserMsg;
+            delete agentState._pendingLlmTaskId;
+            delete agentState._pendingLlmTaskTs;
+            saveAgentState();
+        }
+        renderAgentMessages();
+    }
+}
+function agentCenterOnPoint(x, y){
+    // 考虑 Agent 面板宽度，使用可视区域中心
+    const agentPanelWidth = agentOpen ? 382 : 0;
+    const visibleCenterX = (shell.clientWidth - agentPanelWidth) / 2;
+    viewport.x = visibleCenterX - x * viewport.scale;
+    viewport.y = shell.clientHeight / 2 - y * viewport.scale;
+    applyViewport();
+    scheduleSave();
+}
+function agentCenterOnNode(node){
+    if(!node) return;
+    const rect = nodeRect(node);
+    agentCenterOnPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+}
+function agentFindEmptyPosition(count=1){
+    // A+C 方案：计算空白区域 + 右侧追加（水平排列，顶部对齐）
+    // 注意：必须包含 pending 状态的占位节点，否则并发生成多张图时占位节点会叠在一起
+    const imageNodes = (nodes || []).filter(n => isSmartImageNode(n) && ((n.images || []).some(img => img?.url) || Number(n.pending) > 0));
+    const center = viewportCenter();
+    if(!imageNodes.length) return {x:center.x, y:center.y};
+    // 找到最右边的节点
+    let maxX = -Infinity;
+    let maxXNode = null;
+    imageNodes.forEach(n => {
+        const rect = nodeRect(n);
+        const right = rect.x + rect.width;
+        if(right > maxX){ maxX = right; maxXNode = n; }
+    });
+    if(!maxXNode) return {x:center.x, y:center.y};
+    // 在最右边节点的右侧水平放置新图，顶部对齐，有一点间距
+    const rect = nodeRect(maxXNode);
+    const gap = 40;
+    return {x:rect.x + rect.width + gap + 130, y:rect.y};
+}
+// Agent 占位节点尺寸：复用主画布的 pendingBoxSize 逻辑，但使用 Agent 自己的比例设置
+function agentPendingBoxSize(count, options={}){
+    // 用 Agent 的比例设置算出请求尺寸
+    const ratioSize = apiImageSize(agentState.genRatio || 'square', agentState.genResolution || '1k') || '1024x1024';
+    const parsed = parseSizeValue(ratioSize);
+    const requestSize = parsed ? {w:Number(parsed.width) || 1024, h:Number(parsed.height) || 1024} : {w:1024, h:1024};
+    // Agent 始终用选中比例计算占位尺寸，不使用参考图尺寸。
+    // 因为 Agent 总是发送 size 参数（基于选中比例），占位应与最终生成尺寸一致。
+    // 参考图只用于内容编辑，不影响输出尺寸。
+    const base = displayBoxFromNaturalSize(requestSize);
+    // 多张图时按网格排列（和主画布的 pendingBoxSize 完全一致）
+    const c = Math.max(1, Number(count) || 1);
+    if(c <= 1) return {w:Math.round(base.w), h:Math.round(base.h)};
+    const aspect = base.w / Math.max(1, base.h);
+    const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(c))));
+    const rows = Math.ceil(c / cols);
+    const cellMax = Math.max(96, Math.min(220, Math.max(base.w, base.h) * 0.42));
+    let cellW, cellH;
+    if(base.w >= base.h){
+        cellW = cellMax;
+        cellH = Math.max(40 * MEDIA_NODE_DEFAULT_SCALE, Math.round(cellMax / aspect));
+    } else {
+        cellH = cellMax;
+        cellW = Math.max(40 * MEDIA_NODE_DEFAULT_SCALE, Math.round(cellMax * aspect));
+    }
+    const w = cols * (cellW + 8) + 16;
+    const h = rows * (cellH + 8) + 16;
+    return {w, h};
+}
+// 检查是否所有 prompts 都已处理完（无 pending/current/editing），如是则构建 generations 并统一生图
+async function _triggerGenerationsIfAllDone(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    // 还有未处理的 prompt，不触发
+    if(prompts.some(p => p.status === 'pending' || p.status === 'current' || p.status === 'editing')) return;
+    // 收集 confirmed 的 prompts
+    const confirmedPrompts = prompts.filter(p => p.status === 'confirmed');
+    if(confirmedPrompts.length === 0) return; // 全部跳过，不生图
+    // 找到对应的用户消息
+    const msgs = agentState.messages || [];
+    const msgIdx = msgs.indexOf(assistantMsg);
+    let userMsg = null;
+    for(let i = msgIdx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
+    }
+    // 构建 generations（透传 LLM 返回的 count/use_last_outputs/use_attachments）
+    // 用赋值而非 push，避免重复调用时 generations 重复追加
+    assistantMsg.generations = confirmedPrompts.map(cp => {
+        const g = {
+            prompt:cp.prompt,
+            count:cp.count || 1,
+            use_last_outputs:cp.use_last_outputs || false,
+            use_attachments:cp.use_attachments || false,
+            results:[],
+            status:'running'
+        };
+        if(Array.isArray(cp.attachment_indices)) g.attachment_indices = cp.attachment_indices;
+        return g;
+    });
+    // 统一生图（所有 confirmed prompts 一次性传入，整齐排列）
+    await runAgentGenerations(assistantMsg, userMsg);
+}
+// 推进到下一个 pending prompt，如果全部处理完则触发生图
+async function _advanceToNextOrGenerate(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const nextIdx = prompts.findIndex(p => p.status === 'pending');
+    if(nextIdx >= 0){
+        prompts[nextIdx].status = 'current';
+        assistantMsg.promptIdx = nextIdx;
+        renderAgentMessages();
+        saveAgentState();
+        return;
+    }
+    // 没有 pending 了 → 全部处理完，触发生图
+    assistantMsg.promptIdx = prompts.length;
+    renderAgentMessages();
+    saveAgentState();
+    await _triggerGenerationsIfAllDone(assistantMsg);
+}
+// 确认当前提示词：标记为 confirmed，推进到下一个 pending，全部处理完才生图
+async function confirmAgentPrompt(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
+    if(idx < 0) return;
+    prompts[idx].status = 'confirmed';
+    await _advanceToNextOrGenerate(assistantMsg);
+}
+// 修改提示词：进入内联编辑模式（不跳出确认流程，不设置 bypass 标志）
+function editAgentPrompt(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'current');
+    if(idx < 0) return;
+    prompts[idx].status = 'editing';
+    assistantMsg.promptIdx = idx;
+    renderAgentMessages();
+    saveAgentState();
+    // 聚焦到 textarea
+    const ta = agentMessages?.querySelector('textarea[data-agent-prompt-edit]');
+    if(ta){
+        ta.focus();
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+    }
+}
+// 保存内联编辑的提示词：更新文本，标记为 confirmed，推进到下一个
+async function saveAgentPromptEdit(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'editing');
+    if(idx < 0) return;
+    const ta = agentMessages?.querySelector('textarea[data-agent-prompt-edit]');
+    const newText = ta ? String(ta.value || '').trim() : '';
+    if(!newText){
+        toast('提示词不能为空');
+        return;
+    }
+    prompts[idx].prompt = newText;
+    prompts[idx].status = 'confirmed';
+    await _advanceToNextOrGenerate(assistantMsg);
+}
+// 取消内联编辑：恢复为 current 状态
+function cancelAgentPromptEdit(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'editing');
+    if(idx < 0) return;
+    prompts[idx].status = 'current';
+    renderAgentMessages();
+    saveAgentState();
+}
+// P1-7: 全部确认并生成：将所有未跳过的 prompts 标记为 confirmed，触发生图
+async function confirmAllAgentPrompts(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    if(!prompts.length) return;
+    // 将所有 pending/current/editing 的标记为 confirmed（保留 skipped）
+    prompts.forEach(p => {
+        if(p.status !== 'skipped' && p.status !== 'confirmed'){
+            p.status = 'confirmed';
+        }
+    });
+    // 清除 current 指针
+    assistantMsg.promptIdx = prompts.length;
+    renderAgentMessages();
+    saveAgentState();
+    await _triggerGenerationsIfAllDone(assistantMsg);
+}
+// P2-15: 全部取消：清除当前 assistant 消息的 prompts，不触发生图
+function cancelAllAgentPrompts(assistantMsg){
+    assistantMsg.prompts = [];
+    delete assistantMsg.promptIdx;
+    if(!assistantMsg.text) assistantMsg.text = '已取消全部提示词，请重新输入需求。';
+    renderAgentMessages();
+    saveAgentState();
+}
+// P2-13: 已确认/已跳过项反悔：改回 pending 并设为 current
+function reopenAgentPrompt(assistantMsg, idx){
+    const prompts = assistantMsg.prompts || [];
+    if(idx < 0 || idx >= prompts.length) return;
+    // 如果有正在编辑的，不允许反悔（避免状态混乱）
+    if(prompts.some(p => p.status === 'editing' || p.status === 'current')){
+        toast('请先完成当前提示词的确认或修改');
+        return;
+    }
+    prompts[idx].status = 'current';
+    assistantMsg.promptIdx = idx;
+    renderAgentMessages();
+    saveAgentState();
+}
+// 重新生成当前提示词：只重新生成当前这一条，不影响其他已确认的
+async function regenerateAgentPrompts(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const currentIdx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
+    if(currentIdx < 0) return;
+    const currentPrompt = prompts[currentIdx];
+    // 找到对应的原始用户消息
+    const msgs = agentState.messages || [];
+    const msgIdx = msgs.indexOf(assistantMsg);
+    let originalUserText = '';
+    let userMsg = null;
+    for(let i = msgIdx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){
+            originalUserText = msgs[i].text || '';
+            userMsg = msgs[i];
+            break;
+        }
+    }
+    if(!originalUserText) return;
+    const provider = resolveChatProviderId(agentState.chatProvider);
+    const model = resolveChatModel(agentState.chatModel, provider);
+    agentSending = true;
+    agentThinking = true;
+    renderAgentMessages();
+    let regenMessage = originalUserText + AGENT_NL + AGENT_NL + `请重新生成第${currentIdx + 1}条提示词，要求与之前不同。当前第${currentIdx + 1}条是："${currentPrompt.prompt}"。请只返回一条新的提示词。`;
+    // 通用保障：重新生成时也注入 skill 强制提醒
+    const _regenSkills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+    if(_regenSkills.length > 0){
+        const skillNames = _regenSkills.map(s => s?.name).filter(Boolean).join('、');
+        regenMessage += `${AGENT_NL}${AGENT_NL}【重要提醒】你必须完整遵循 Skill 文档（${skillNames}）的所有描述。重新生成的 prompt 必须逐字保留 Skill 文档的风格、背景、构图、配色、排版等全部细节，只能改变主题/变体方向。不得简化、概括或遗漏。`;
+    }
+    const llmPayload = {
+        message: regenMessage,
+        messages: agentHistoryMessages().slice(0, -1),
+        images: userMsg?.images ? userMsg.images.map(i => i.url) : [],
+        videos: [],
+        model,
+        provider,
+        ms_model: provider === 'modelscope' ? model : '',
+        system_prompt: agentSystemPrompt(false)
+    };
+    try {
+        const taskRes = await fetch('/api/agent-llm-task', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(llmPayload)
+        }).then(async r => {
+            if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.promptLlmFailed')));
+            return r.json();
+        });
+        const result = await pollAgentLlmTask(taskRes.task_id);
+        const parsed = parseAgentResponse(result.text || '', originalUserText);
+        // 提取新提示词文本和属性
+        let newPromptText = '';
+        let newCount = currentPrompt.count;
+        let newUseLast = currentPrompt.use_last_outputs;
+        let newUseAttach = currentPrompt.use_attachments;
+        if(parsed.prompts && parsed.prompts.length > 0){
+            const first = parsed.prompts[0];
+            newPromptText = first.prompt || '';
+            if(first.count !== undefined) newCount = first.count;
+            if(first.use_last_outputs !== undefined) newUseLast = !!first.use_last_outputs;
+            if(first.use_attachments !== undefined) newUseAttach = !!first.use_attachments;
+        } else if(parsed.generations && parsed.generations.length > 0){
+            const first = parsed.generations[0];
+            newPromptText = first.prompt || '';
+            if(first.count !== undefined) newCount = first.count;
+            if(first.use_last_outputs !== undefined) newUseLast = !!first.use_last_outputs;
+            if(first.use_attachments !== undefined) newUseAttach = !!first.use_attachments;
+        }
+        if(newPromptText.trim()){
+            prompts[currentIdx].prompt = newPromptText.trim();
+            prompts[currentIdx].count = newCount;
+            prompts[currentIdx].use_last_outputs = newUseLast;
+            prompts[currentIdx].use_attachments = newUseAttach;
+            // 保持 status 为 current（用户继续确认）
+        }
+        if(parsed.reply) assistantMsg.text = parsed.reply;
+    } catch(e) {
+        assistantMsg.text = `⚠️ ${String(e.message || e).slice(0, 300)}`;
+    } finally {
+        agentSending = false;
+        agentThinking = false;
+        renderAgentMessages();
+        saveAgentState();
+    }
+}
+async function runAgentGenerations(assistantMsg, userMsg){
+    const gens = assistantMsg.generations || [];
+    if(!gens.length) return;
+    const genProviders = agentGenProviders();
+    if(!genProviders.length){
+        gens.forEach(g => { g.status = 'error'; g.error = tr('smart.agentNeedGenModel'); });
+        toast(tr('smart.agentNeedGenModel'));
+        renderAgentMessages();
+        saveAgentState();
+        return;
+    }
+    const providerId = genProviders.some(p => p.id === agentState.genProvider) ? agentState.genProvider : genProviders[0].id;
+    const models = providerImageModels(providerId);
+    const genModel = models.includes(agentState.genModel) ? agentState.genModel : (models[0] || '');
+    agentState.genProvider = providerId;
+    agentState.genModel = genModel;
+    const size = apiImageSize(agentState.genRatio || 'square', agentState.genResolution || '1k') || '1024x1024';
+    const lastResults = agentLastResults();
+    const currentAttach = (userMsg?.images || []).filter(i => i?.url);
+    const attachRefs = currentAttach.length ? currentAttach : agentLastUserAttachments();
+    // 第一步：串行创建所有占位节点（确保位置不重叠、顶部对齐）
+    const pendingGens = gens.filter(gen => !(gen.results && gen.results.length) && gen.status !== 'done' && gen.status !== 'error');
+    const placeholders = [];
+    for(const gen of pendingGens){
+        gen.status = 'running';
+        const pos = agentFindEmptyPosition(gen.count);
+        const placeholderNode = createImageNodeAt(pos, []);
+        if(placeholderNode){
+            placeholderNode.pending = gen.count;
+            placeholderNode.title = gen.prompt?.slice(0, 30) || '生成中...';
+            placeholderNode.runStartedAt = nowMs();
+            placeholderNode.runTimerHidden = false;
+            let refsForBox = [];
+            if(Array.isArray(gen.direct_refs) && gen.direct_refs.length > 0){
+                refsForBox = gen.direct_refs.filter(r => r?.url);
+            } else {
+                if(gen.use_last_outputs) refsForBox = refsForBox.concat(lastResults);
+                if(gen.use_attachments) refsForBox = refsForBox.concat(attachRefs);
+            }
+            refsForBox = imageRefsOnly(refsForBox).slice(0, providerMaxReferenceImages(providerId));
+            const pendingBox = agentPendingBoxSize(gen.count, {refs: refsForBox});
+            placeholderNode.w = pendingBox.w;
+            placeholderNode.h = pendingBox.h;
+            // 顶部对齐 — 找到已有图片节点和已创建的 pending 占位节点的最小顶部 y
+            const existingNodes = (nodes || []).filter(n => isSmartImageNode(n) && n.id !== placeholderNode.id && ((n.images || []).some(img => img?.url) || Number(n.pending) > 0));
+            if(existingNodes.length){
+                let topY = Infinity;
+                existingNodes.forEach(n => { const r = nodeRect(n); if(r.y < topY) topY = r.y; });
+                placeholderNode.y = topY;
+            }
+            render();
+        }
+        placeholders.push({gen, placeholderNode});
+    }
+    renderAgentMessages();
+    // 第二步：并行发起所有生图请求
+    await Promise.all(placeholders.map(async ({gen, placeholderNode}) => {
+        // 保存占位节点 ID，后续通过 ID 从 nodes 数组重新查找，避免 nodes 被重新赋值后引用悬空
+        const placeholderId = placeholderNode?.id || null;
+        try {
+            let refs = [];
+            if(Array.isArray(gen.direct_refs) && gen.direct_refs.length > 0){
+                // ★ 统一编号引用：直接使用预解析的参考图 URL
+                refs = gen.direct_refs.filter(r => r?.url);
+            } else {
+                if(gen.use_last_outputs) refs = refs.concat(lastResults);
+                if(gen.use_attachments){
+                    // 如果指定了 attachment_indices，只取对应的附件（0-based 索引）
+                    if(Array.isArray(gen.attachment_indices) && gen.attachment_indices.length > 0){
+                        const filtered = gen.attachment_indices
+                            .filter(i => i >= 0 && i < attachRefs.length)
+                            .map(i => attachRefs[i])
+                            .filter(Boolean);
+                        refs = refs.concat(filtered);
+                    } else {
+                        refs = refs.concat(attachRefs);
+                    }
+                }
+            }
+            const _agentRefMax = providerMaxReferenceImages(providerId);
+            const _allImageRefs = imageRefsOnly(refs);
+            if(_allImageRefs.length > _agentRefMax){ toast(`参考图超出上限（最多${_agentRefMax}张），已截取前${_agentRefMax}张`); }
+            refs = _allImageRefs.slice(0, _agentRefMax).map(r => ({url:r.url, name:r.name || 'ref'}));
+            // ★ 编号翻译层：将 prompt 中的"图N/图一"替换为"第X张参考图"，注入角色说明
+            let _finalPrompt = gen.prompt;
+            if(Array.isArray(gen.direct_refs) && gen.direct_refs.length > 0){
+                // 先做中文数字→阿拉伯转换（与 parseImageRefTasks 一致）
+                const _cnMap = {'一':'1','二':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9','十':'10'};
+                _finalPrompt = _finalPrompt.replace(/图\s*([一二三四五六七八九十])/g, (m, cn) => `图${_cnMap[cn] || cn}`);
+                const _imgMap = agentCurrentImageMap();
+                const _roleDescs = [];
+                gen.direct_refs.forEach((ref, idx) => {
+                    const _entry = _imgMap.find(m => m.url === ref.url);
+                    const _origNum = _entry ? _entry.num : null;
+                    if(_origNum){
+                        const _re = new RegExp('图\\s*' + _origNum + '(?![0-9])', 'g');
+                        _finalPrompt = _finalPrompt.replace(_re, `第${idx + 1}张参考图`);
+                    }
+                    _roleDescs.push(`第${idx + 1}张`);
+                });
+                // 注入角色说明头（让模型知道参考图数组的顺序含义）
+                if(_roleDescs.length > 1){
+                    _finalPrompt = `[参考图顺序：${_roleDescs.join('、')}，与下方参考图数组一一对应]\n${_finalPrompt}`;
+                }
+            }
+            const payload = {prompt:_finalPrompt, provider_id:providerId, model:genModel, size, quality:agentState.genQuality || 'auto', n:1, reference_images:refs};
+            const tasks = await Promise.all(Array.from({length:gen.count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
+                if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.agentGenFail')));
+                return r.json();
+            })));
+            const imageTaskIds = tasks.map(t => t.task_id).filter(Boolean);
+            gen.taskIds = imageTaskIds;
+            if(placeholderId) gen.placeholderNodeId = placeholderId;
+            saveAgentState();
+            const results = await Promise.all(imageTaskIds.map(id => pollSmartCanvasTask(id)));
+            // 限制每个 generation 最多只取 gen.count 张图（防止 API 单次返回多张图导致节点图片重复）
+            // 同时过滤掉参考图 URL（防止某些 provider 在响应中回显输入的参考图，造成"重复"问题）
+            const _maxCount = Math.max(1, Math.min(8, Number(gen.count) || 1));
+            const _refUrlSet = new Set((refs || []).map(r => r?.url).filter(Boolean));
+            const urls = results.flatMap(res => resultMediaUrls(res)).map((item, i) => {
+                const url = typeof item === 'string' ? item : item?.url || '';
+                return {url, name:(typeof item === 'object' && item?.name) || `agent-${Date.now()}-${i + 1}.png`, kind:'image'};
+            }).filter(i => i.url && !_refUrlSet.has(i.url)).slice(0, _maxCount);
+            gen.results = urls;
+            gen.status = 'done';
+            // 关键：通过 ID 从当前 nodes 数组重新查找节点引用
+            // nodes 可能在异步等待期间被重新赋值（如 saveCanvas 409 合并、applyMergedServerCanvas），
+            // 导致之前捕获的 placeholderNode 变成悬空引用
+            const liveNode = placeholderId ? nodes.find(n => n.id === placeholderId) : null;
+            if(urls.length && liveNode){
+                undoSuppressed = true;
+                liveNode.images = urls.map(u => ({...u}));
+                liveNode.pending = 0;
+                liveNode.title = urls.length > 1 ? 'Group' : 'Image';
+                liveNode.runFinishedAt = nowMs();
+                liveNode.scale = mediaNodeDefaultScale(liveNode);
+                delete liveNode.w;
+                delete liveNode.h;
+                selectedId = liveNode.id;
+                undoSuppressed = false;
+                gen.results = gen.results.map((r, i) => ({...r, nodeId: liveNode.id, nodeX: Number(liveNode.x) || 0, nodeY: Number(liveNode.y) || 0}));
+            } else if(urls.length && !liveNode){
+                // 占位节点已不在 nodes 中（可能被用户删除或被合并操作移除）
+                // 创建新节点放置生成结果
+                console.warn('[runAgentGenerations] placeholder node not found, creating new node for results');
+                const pos = agentFindEmptyPosition(urls.length);
+                const newNode = createImageNodeAt(pos, urls.map(u => ({...u})));
+                if(newNode){
+                    newNode.runFinishedAt = nowMs();
+                    newNode.runStartedAt = newNode.runFinishedAt;
+                    gen.results = gen.results.map((r, i) => ({...r, nodeId: newNode.id, nodeX: Number(newNode.x) || 0, nodeY: Number(newNode.y) || 0}));
+                }
+            }
+        } catch(e) {
+            gen.status = 'error';
+            gen.error = String(e.message || e).slice(0, 200);
+            const liveNode = placeholderId ? nodes.find(n => n.id === placeholderId) : null;
+            if(liveNode){
+                undoSuppressed = true;
+                nodes = nodes.filter(n => n.id !== placeholderId);
+                undoSuppressed = false;
+            }
+        }
+        renderAgentMessages();
+        saveAgentState();
+        render();
+        scheduleSave();
+    }));
+}
+// 恢复中断的 Agent 生图任务（页面刷新后调用）
+async function recoverAgentGenerations(){
+    if(!agentState?.messages) return;
+    const msgs = agentState.messages;
+    for(let i = msgs.length - 1; i >= 0; i--){
+        const msg = msgs[i];
+        if(msg.role !== 'assistant') continue;
+        const gens = msg.generations || [];
+        for(const gen of gens){
+            if(gen.status !== 'running' || !gen.taskIds || !gen.taskIds.length) continue;
+            // 找到占位节点
+            const placeholderNode = gen.placeholderNodeId ? nodes.find(n => n.id === gen.placeholderNodeId) : null;
+            if(placeholderNode){
+                placeholderNode.runStartedAt = placeholderNode.runStartedAt || nowMs();
+                placeholderNode.pending = gen.taskIds.length;
+            }
+            try {
+                const results = await Promise.all(gen.taskIds.map(id => pollSmartCanvasTask(id)));
+                // 限制每个 generation 最多只取 gen.count 张图（与 runAgentGenerations 一致，防止 API 单次返回多张图）
+                const _maxCount = Math.max(1, Math.min(8, Number(gen.count) || 1));
+                const urls = results.flatMap(res => resultMediaUrls(res)).map((item, idx) => {
+                    const url = typeof item === 'string' ? item : item?.url || '';
+                    return {url, name:(typeof item === 'object' && item?.name) || `agent-${Date.now()}-${idx + 1}.png`, kind:'image'};
+                }).filter(i => i.url).slice(0, _maxCount);
+                gen.results = urls;
+                gen.status = 'done';
+                if(urls.length && placeholderNode){
+                    undoSuppressed = true;
+                    placeholderNode.images = urls.map(u => ({...u}));
+                    placeholderNode.pending = 0;
+                    placeholderNode.title = urls.length > 1 ? 'Group' : 'Image';
+                    placeholderNode.runFinishedAt = nowMs();
+                    // 修复：删除占位尺寸，让节点根据实际图片自然尺寸重新计算
+                    placeholderNode.scale = mediaNodeDefaultScale(placeholderNode);
+                    delete placeholderNode.w;
+                    delete placeholderNode.h;
+                    selectedId = placeholderNode.id;
+                    undoSuppressed = false;
+                    gen.results = gen.results.map((r, idx) => ({...r, nodeId: placeholderNode.id, nodeX: Number(placeholderNode.x) || 0, nodeY: Number(placeholderNode.y) || 0}));
+                }
+            } catch(e) {
+                gen.status = 'error';
+                gen.error = String(e.message || e).slice(0, 200);
+                if(placeholderNode){
+                    undoSuppressed = true;
+                    nodes = nodes.filter(n => n.id !== placeholderNode.id);
+                    undoSuppressed = false;
+                }
+            }
+            renderAgentMessages();
+            saveAgentState();
+            render();
+            scheduleSave();
+        }
+        break; // 只恢复最后一条 assistant 消息的生图
+    }
+}
+function agentCanvasImages(){
+    const items = [];
+    (nodes || []).forEach(node => {
+        if(!isSmartImageNode(node)) return;
+        (node.images || []).forEach(img => {
+            if(img?.url) items.push({url:img.url, name:img.name || node.title || 'image', nodeId:node.id, nodeTitle:node.title || '', x:Number(node.x) || 0, y:Number(node.y) || 0, ts:Number(node.created_at) || 0});
+        });
+    });
+    return items.sort((a, b) => b.ts - a.ts);
+}
+function showAgentMention(filter){
+    const panel = document.getElementById('agentMentionPanel');
+    if(!panel) return;
+    const images = agentCanvasImages();
+    const q = String(filter || '').toLowerCase();
+    const filtered = q ? images.filter(img => (img.name + ' ' + img.nodeTitle).toLowerCase().includes(q)) : images;
+    if(!filtered.length){
+        panel.innerHTML = '<div class="agent-mention-empty">画布中暂无图片</div>';
+        panel.hidden = false;
+        return;
+    }
+    agentMentionIdx = 0;
+    panel.innerHTML = filtered.slice(0, 20).map((img, i) => {
+        const time = img.ts ? new Date(img.ts).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) : '';
+        return `<button class="agent-mention-item${i === 0 ? ' active' : ''}" type="button" data-mention-url="${escapeHtml(img.url)}" data-mention-name="${escapeHtml(img.name)}" data-mention-node-id="${escapeHtml(img.nodeId || '')}" data-mention-x="${img.x || 0}" data-mention-y="${img.y || 0}"><img src="${escapeHtml(img.url)}" alt="" loading="lazy"><div class="agent-mention-item-info"><div class="agent-mention-item-name">${escapeHtml(img.name)}</div><div class="agent-mention-item-time">${escapeHtml(time)}</div></div></button>`;
+    }).join('');
+    panel.hidden = false;
+    panel.querySelectorAll('.agent-mention-item').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName, btn.dataset.mentionNodeId, btn.dataset.mentionX, btn.dataset.mentionY);
+        };
+    });
+}
+function hideAgentMention(){
+    const panel = document.getElementById('agentMentionPanel');
+    if(panel) panel.hidden = true;
+    agentMentionIdx = -1;
+}
+function insertAgentMention(url, name, nodeId, x, y){
+    if(!agentState || !url) return;
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+    if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX && !agentState.attachments.some(a => a.url === url)){
+        agentState.attachments.push({url, name: name || 'canvas-image', nodeId: nodeId || '', x: Number(x) || 0, y: Number(y) || 0});
+    }
+    if(agentInput){
+        const val = agentInput.value;
+        const atIdx = val.lastIndexOf('@');
+        if(atIdx >= 0) agentInput.value = val.slice(0, atIdx);
+        agentInput.focus();
+    }
+    hideAgentMention();
+    renderAgentAttachments();
+    saveAgentState();
+}
+function agentMentionKeydown(e){
+    const panel = document.getElementById('agentMentionPanel');
+    if(!panel || panel.hidden) return false;
+    const items = panel.querySelectorAll('.agent-mention-item');
+    if(!items.length) return false;
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+        e.preventDefault();
+        agentMentionIdx = e.key === 'ArrowDown' ? Math.min(agentMentionIdx + 1, items.length - 1) : Math.max(agentMentionIdx - 1, 0);
+        items.forEach((el, i) => el.classList.toggle('active', i === agentMentionIdx));
+        items[agentMentionIdx]?.scrollIntoView({block:'nearest'});
+        return true;
+    }
+    if(e.key === 'Enter' && agentMentionIdx >= 0 && items[agentMentionIdx]){
+        e.preventDefault();
+        const btn = items[agentMentionIdx];
+        insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName, btn.dataset.mentionNodeId, btn.dataset.mentionX, btn.dataset.mentionY);
+        return true;
+    }
+    if(e.key === 'Escape'){
+        e.preventDefault();
+        hideAgentMention();
+        return true;
+    }
+    return false;
+}
+function agentAutoResizeInput(){
+    const textarea = document.getElementById('agentInput');
+    if(!textarea) return;
+    textarea.style.height = 'auto';
+    const maxH = 500;
+    const newH = Math.min(textarea.scrollHeight, maxH);
+    textarea.style.height = newH + 'px';
+    if(agentState){
+        agentState.inputHeight = newH;
+        saveAgentState();
+    }
+}
+function initAgentInputResize(){
+    const handle = document.getElementById('agentInputResize');
+    const textarea = document.getElementById('agentInput');
+    if(!handle || !textarea) return;
+    if(agentState?.inputHeight > 0) textarea.style.height = agentState.inputHeight + 'px';
+    // 根据文字自动拉高
+    textarea.addEventListener('input', agentAutoResizeInput);
+    let startY = 0, startH = 0;
+    handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        startY = e.clientY;
+        startH = textarea.offsetHeight;
+        handle.classList.add('dragging');
+        const onMove = ev => {
+            const delta = startY - ev.clientY;
+            const newH = Math.max(60, Math.min(startH + delta, 500));
+            textarea.style.height = newH + 'px';
+        };
+        const onUp = () => {
+            handle.classList.remove('dragging');
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            if(agentState){
+                agentState.inputHeight = textarea.offsetHeight;
+                saveAgentState();
+            }
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+}
+function initAgentPanel(){
+    if(!agentPanel) return;
+    // 提前绑定发送按钮事件，确保即使后续初始化出错发送按钮也能用
+    agentSendBtn?.addEventListener('click', () => sendAgentMessage());
+    loadAgentState();
+    // 如果没有恢复中的任务，确保 agentSending 重置为 false
+    if(!_agentRecoveryInProgress) agentSending = false;
+    agentMoveSelectsToDropdown();
+    renderAgentModelSelectors();
+    renderAgentAttachments();
+    renderAgentMessages();
+    initAgentInputResize();
+    // 下拉面板交互
+    const modelBtn = document.getElementById('agentModelBtn');
+    const modelPanel = document.getElementById('agentModelPanel');
+    const paramsBtn = document.getElementById('agentParamsBtn');
+    const paramsPanel = document.getElementById('agentParamsPanel');
+    function closeAllDropdowns(){
+        if(modelPanel) modelPanel.hidden = true;
+        if(paramsPanel) paramsPanel.hidden = true;
+        const chatModelPanel = document.getElementById('agentChatModelPanel');
+        if(chatModelPanel) chatModelPanel.hidden = true;
+    }
+    function showDropdown(btn, panel, opts){
+        if(!btn || !panel) return;
+        // 把面板移到 document.body 中，避免被 Agent 面板的 backdrop-filter 遮挡
+        if(panel.parentElement !== document.body) document.body.appendChild(panel);
+        const rect = btn.getBoundingClientRect();
+        // 先显示面板以测量尺寸
+        panel.style.visibility = 'hidden';
+        panel.hidden = false;
+        const panelHeight = panel.offsetHeight;
+        const panelWidth = panel.offsetWidth;
+        panel.style.visibility = '';
+        // 水平位置
+        const alignRight = opts && opts.alignRight;
+        if(alignRight){
+            // 右对齐：面板右边缘对齐按钮右边缘，向左展开
+            const rightEdge = window.innerWidth - rect.right;
+            panel.style.right = Math.max(8, rightEdge) + 'px';
+            panel.style.left = 'auto';
+        } else {
+            // 默认左对齐：确保面板不会超出屏幕右边界
+            const maxLeft = window.innerWidth - panelWidth - 8;
+            panel.style.left = Math.min(Math.max(8, rect.left), Math.max(8, maxLeft)) + 'px';
+            panel.style.right = 'auto';
+        }
+        // 垂直位置：优先在按钮上方显示，如果空间不够则在下方显示
+        const spaceAbove = rect.top;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        if(spaceAbove >= panelHeight + 8 || spaceAbove >= spaceBelow){
+            panel.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+            panel.style.top = 'auto';
+        } else {
+            panel.style.top = (rect.bottom + 6) + 'px';
+            panel.style.bottom = 'auto';
+        }
+        panel.hidden = false;
+    }
+    window.__agentShowDropdown = showDropdown;
+    modelBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        const wasHidden = modelPanel?.hidden;
+        closeAllDropdowns();
+        if(wasHidden) showDropdown(modelBtn, modelPanel);
+    });
+    paramsBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        const wasHidden = paramsPanel?.hidden;
+        closeAllDropdowns();
+        if(wasHidden) showDropdown(paramsBtn, paramsPanel);
+    });
+    const chatModelPanel = document.getElementById('agentChatModelPanel');
+    document.addEventListener('pointerdown', e => {
+        if(!e.target.closest('.agent-toolbar-dropdown-wrap') && !e.target.closest('.agent-dropdown-panel')) closeAllDropdowns();
+    }, true);
+    agentToggle?.addEventListener('click', () => toggleAgentPanel());
+document.getElementById('inspireToggle')?.addEventListener('click', () => toggleInspirePanel());
+document.getElementById('inspireCloseBtn')?.addEventListener('click', () => toggleInspirePanel(false));
+initInspireScroll();
+initInspireSearch();
+initInspireRepoBtn();
+// ============ 灵感库 ← 内容脚本通信（图片+提示词送回画布） ============
+let pendingInspireDrag = null;
+let _pendingInspireDragTimer = null;
+function handleInspireImageToCanvas(imageUrl, prompt){
+    const url = String(imageUrl || '');
+    if(!url) return;
+    const pos = agentFindEmptyPosition(1);
+    const node = createImageNodeAt(pos, [{url, name:'inspire-' + Date.now() + '.png', kind:'image'}]);
+    if(node) node.runFinishedAt = nowMs();
+    render();
+    scheduleSave();
+    if(prompt) setPromptText(prompt);
+    toast(prompt ? '已接收灵感图 + 提示词（填入下方输入框）' : '已接收灵感图');
+}
+window.addEventListener('message', e => {
+    const d = e.data;
+    if(!d || typeof d !== 'object') return;
+    if(d.type === 'inspire-to-canvas'){
+        // 「发送到画布」按钮：直接创建节点 + 填提示词
+        handleInspireImageToCanvas(d.imageUrl, d.prompt);
+    } else if(d.type === 'inspire-drag-payload'){
+        // 拖拽开始：暂存图片+提示词，等画布 ondrop 取用
+        pendingInspireDrag = {imageUrl:String(d.imageUrl || ''), prompt:String(d.prompt || '')};
+        clearTimeout(_pendingInspireDragTimer);
+        // 兜底：6秒内没有 drop 就清空（防止拖拽取消后残留）
+        _pendingInspireDragTimer = setTimeout(() => { pendingInspireDrag = null; }, 6000);
+    } else if(d.type === 'inspire-drag-end'){
+        // 拖拽结束（未 drop）：稍延迟清空，给 ondrop 留处理时间
+        setTimeout(() => { pendingInspireDrag = null; }, 100);
+    }
+});
+    agentCloseBtn?.addEventListener('click', () => toggleAgentPanel(false));
+    document.getElementById('agentNewChatBtn')?.addEventListener('click', () => agentNewChat());
+    document.getElementById('agentDeleteChatBtn')?.addEventListener('click', () => agentDeleteChat());
+    document.getElementById('agentChatListBtn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        const panel = document.getElementById('agentChatListPanel');
+        if(!panel) return;
+        const wasHidden = panel.hidden;
+        if(wasHidden) renderAgentChatList();
+        panel.hidden = !wasHidden;
+    });
+    // 更多操作菜单（折叠新建/对话列表/删除）
+    const moreBtn = document.getElementById('agentMoreBtn');
+    const morePanel = document.getElementById('agentMorePanel');
+    moreBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(morePanel) morePanel.hidden = !morePanel.hidden;
+    });
+    document.addEventListener('pointerdown', e => {
+        if(morePanel && !morePanel.hidden && !e.target.closest('#agentMorePanel') && !e.target.closest('#agentMoreBtn')){
+            morePanel.hidden = true;
+        }
+    }, true);
+    document.addEventListener('pointerdown', e => {
+        const panel = document.getElementById('agentChatListPanel');
+        if(panel && !panel.hidden && !e.target.closest('#agentChatListPanel') && !e.target.closest('#agentChatListBtn')){
+            panel.hidden = true;
+        }
+    }, true);
+    agentChatProvider?.addEventListener('change', () => {
+        agentState.chatProvider = agentChatProvider.value;
+        agentState.chatModel = '';
+        renderAgentModelSelectors();
+        saveAgentState();
+    });
+    agentChatModel?.addEventListener('change', () => { agentState.chatModel = agentChatModel.value; saveAgentState(); });
+    agentGenProvider?.addEventListener('change', () => {
+        agentState.genProvider = agentGenProvider.value;
+        agentState.genModel = '';
+        renderAgentModelSelectors();
+        saveAgentState();
+    });
+    agentGenModel?.addEventListener('change', () => { agentState.genModel = agentGenModel.value; agentUpdateToolbarLabels(); saveAgentState(); });
+    // 参数面板交互
+    document.getElementById('agentRatioGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-ratio-btn');
+        if(!btn || !agentState) return;
+        agentState.genRatio = btn.dataset.ratio || 'square';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentResGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-res-btn');
+        if(!btn || !agentState) return;
+        agentState.genResolution = btn.dataset.res || '1k';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentCountGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-count-btn');
+        if(!btn || !agentState) return;
+        agentState.genCount = Number(btn.dataset.count) || 1;
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentQualitySeg')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-quality-btn');
+        if(!btn || !agentState) return;
+        agentState.genQuality = btn.dataset.quality || '';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    agentAttachBtn?.addEventListener('click', () => agentImageInput?.click());
+agentImageInput?.addEventListener('change', () => {
+agentAttachFiles(agentImageInput.files);
+agentImageInput.value = '';
+});
+// ★ 确认面板按钮事件
+document.getElementById('agentRefConfirmYes')?.addEventListener('click', () => hideImageRefConfirmPanel(true));
+document.getElementById('agentRefConfirmNo')?.addEventListener('click', () => hideImageRefConfirmPanel(false));
+document.getElementById('agentRefConfirmCancel')?.addEventListener('click', () => hideImageRefConfirmPanel(false));
+// 思维模式开关按钮
+const agentThinkingBtn = document.getElementById('agentThinkingBtn');
+function syncAgentThinkingBtn(){
+    if(agentThinkingBtn){
+        agentThinkingBtn.classList.toggle('active', !!agentState?.thinkingMode);
+    }
+}
+syncAgentThinkingBtn();
+agentThinkingBtn?.addEventListener('click', () => {
+    if(!agentState) return;
+    agentState.thinkingMode = !agentState.thinkingMode;
+    syncAgentThinkingBtn();
+    saveAgentState();
+    toast(agentState.thinkingMode ? '思维模式 ON：AI 会多轮追问补充细节，适合灵感探索' : '思维模式 OFF：直接执行，适合明确需求');
+});
+    agentInput?.addEventListener('input', () => {
+        const val = agentInput.value;
+        const cursorPos = agentInput.selectionStart || 0;
+        const beforeCursor = val.slice(0, cursorPos);
+        const atIdx = beforeCursor.lastIndexOf('@');
+        if(atIdx >= 0 && (atIdx === 0 || beforeCursor[atIdx - 1] === ' ' || beforeCursor[atIdx - 1] === '\n')){
+            const filter = beforeCursor.slice(atIdx + 1);
+            if(!filter.includes(' ') && !filter.includes('\n')) showAgentMention(filter);
+            else hideAgentMention();
+        } else hideAgentMention();
+    });
+    agentInput?.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if(agentMentionKeydown(e)) return;
+        if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+            e.preventDefault();
+            sendAgentMessage();
+        }
+    });
+    agentInput?.addEventListener('keyup', e => e.stopPropagation());
+    agentInput?.addEventListener('blur', () => setTimeout(hideAgentMention, 200));
+    agentInput?.addEventListener('paste', e => {
+        e.stopPropagation();
+        const files = [...(e.clipboardData?.files || [])].filter(f => String(f.type || '').startsWith('image/'));
+        if(files.length){
+            e.preventDefault();
+            agentAttachFiles(files);
+        }
+    });
+    ['dragenter', 'dragover'].forEach(evt => agentPanel.addEventListener(evt, e => {
+        e.preventDefault();
+        e.stopPropagation();
+        agentPanel.classList.add('drag-over-input');
+    }));
+    agentPanel.addEventListener('dragleave', e => {
+        if(!agentPanel.contains(e.relatedTarget)) agentPanel.classList.remove('drag-over-input');
+    });
+    agentPanel.addEventListener('drop', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        agentPanel.classList.remove('drag-over-input');
+        const files = [...(e.dataTransfer?.files || [])];
+        if(files.length) agentAttachFiles(files);
+    });
+}
 createMenu?.addEventListener('mousedown', event => event.stopPropagation());
 createMenu?.addEventListener('click', event => {
     event.stopPropagation();
@@ -18941,6 +22926,9 @@ window.addEventListener('studio-lang-change', () => {
     renderDynamicParams();
     renderInputThumbsRow(selectedNode());
     renderAssetLibrary();
+    renderAgentModelSelectors();
+    renderAgentSkill();
+    renderAgentMessages();
     if(document.getElementById('imageEditModal')?.classList.contains('open')){
         setImageEditMode(imageEditMode);
     }
@@ -18959,6 +22947,7 @@ window.onload = async () => {
     await loadConfig();
     await loadAssetLibrary();
     await loadCanvas();
+    initAgentPanel();
     syncApiKindToggleVisibility();
     render();
 };

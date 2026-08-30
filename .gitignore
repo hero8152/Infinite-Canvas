@@ -1,0 +1,20 @@
+# 敏感信息
+API/.env
+
+# 运行时数据
+assets/
+data/*
+!data/inspire_prompt_zh.json
+
+# 系统文件
+.DS_Store
+__pycache__/
+*.pyc
+history.json
+
+# 调试产物
+.qoder/
+inspire_image_dims.json
+
+# 本地工具目录
+.zcode/

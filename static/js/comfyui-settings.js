@@ -1,4 +1,12 @@
 function tr(key){ return window.StudioI18n ? window.StudioI18n.t(key) : key; }
+// 安全提取 fetch 错误响应中的提示信息，避免后端返回非 JSON（如 "Internal Server Error"）时前端崩溃
+async function safeApiError(r, fallback){
+    try {
+        const text = await r.text();
+        try { const d = JSON.parse(text); return d.detail || d.message || text.slice(0,200) || fallback; }
+        catch(_) { return text.slice(0,200) || fallback; }
+    } catch(_) { return fallback; }
+}
 function tf(key, vars={}){
     return Object.entries(vars).reduce((text, [k,v]) => text.replaceAll(`{${k}}`, v), tr(key));
 }
@@ -243,9 +251,9 @@ async function saveComfyInstances(){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({ instances: cleaned })
         });
-        if(!res.ok) throw new Error((await res.json()).detail || '保存失败');
-        const data = await res.json();
-        comfyInstances = data.instances || cleaned;
+if(!res.ok) throw new Error(await safeApiError(res, '保存失败'));
+const data = await res.json();
+comfyInstances = data.instances || cleaned;
         renderComfyInstances();
         try { new BroadcastChannel('studio-api').postMessage({ type: 'comfy-instances-changed' }); } catch(e) {}
         try { window.parent?.postMessage({ type: 'comfy-instances-changed' }, '*'); } catch(e) {}
@@ -1285,9 +1293,9 @@ async function onRun(){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({ fields:runFields, config:currentConfig, client_id:'workflow-test' })
         });
-        if(!res.ok) throw new Error((await res.json()).detail || tr('comfy.runFailed'));
-        const data = await res.json();
-        runResult = data.images?.[0] || null;
+if(!res.ok) throw new Error(await safeApiError(res, tr('comfy.runFailed')));
+const data = await res.json();
+runResult = data.images?.[0] || null;
         renderPreview();
         renderWorkspaceView();
         setStatus(tr('comfy.runSuccess'));
@@ -1358,8 +1366,8 @@ async function onSave(){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(currentConfig)
         });
-        if(!res.ok) throw new Error((await res.json()).detail || tr('comfy.saveFailed'));
-        setStatus(tr('comfy.saved'));
+if(!res.ok) throw new Error(await safeApiError(res, tr('comfy.saveFailed')));
+setStatus(tr('comfy.saved'));
         await loadList();
         new BroadcastChannel('studio-api').postMessage({ type: 'workflows-changed' });
     } catch(e){ alert(e.message || tr('comfy.saveFailed')); setStatus(tr('comfy.saveFailed')); }
@@ -1370,8 +1378,8 @@ async function onDelete(){
     if(!confirm(tf('comfy.deleteConfirm', {name: currentConfig.title || selectedName}))) return;
     try {
         const res = await fetch(`/api/workflows/${encodeURIComponent(selectedName)}`, { method:'DELETE' });
-        if(!res.ok) throw new Error((await res.json()).detail || tr('comfy.deleteFailed'));
-        selectedName = '';
+if(!res.ok) throw new Error(await safeApiError(res, tr('comfy.deleteFailed')));
+selectedName = '';
         currentWorkflow = null;
         currentConfig = null;
         renderEditor();
