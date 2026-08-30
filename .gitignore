@@ -15,3 +15,6 @@ history.json
 # 调试产物
 .qoder/
 inspire_image_dims.json
+
+# 本地工具目录
+.zcode/
