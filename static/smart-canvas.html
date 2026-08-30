@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=2026.08.29.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=2026.08.29.1784282603"></script>
     <script src="/static/js/i18n.js?v=2026.08.29.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.08.29.1788009341">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.08.29.1788060289">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -339,24 +339,15 @@
             <div class="inspire-head">
                 <div class="asset-title"><i data-lucide="sparkles"></i><span>灵感库</span></div>
                 <span id="inspireCount" class="inspire-count"></span>
-                <button id="inspireSettingsBtn" class="asset-mini-btn" type="button" title="API Key 设置"><i data-lucide="key"></i></button>
+                <button id="inspireRepoBtn" class="inspire-source" type="button" title="灵感库来源：github.com/freestylefly/awesome-gpt-image-2">
+                    <i data-lucide="external-link"></i><span>GitHub</span>
+                </button>
                 <button id="inspireCloseBtn" class="asset-mini-btn" type="button" title="关闭"><i data-lucide="x"></i></button>
             </div>
-            <!-- 配置页（未配置 Key 时显示，不加载图库） -->
-            <div id="inspireConfig" class="inspire-config" hidden>
-                <div class="inspire-config-icon"><i data-lucide="key-round"></i></div>
-                <div class="inspire-config-title">配置 Civitai API Key</div>
-                <div class="inspire-config-desc">灵感库使用 Civitai 公开 API（免费），汇集海量用户生成的 AI 图片。配置你自己的 Key 后即可浏览，限额更高、更稳定。</div>
-                <input id="inspireKeyInput" class="inspire-key-input" type="password" placeholder="粘贴你的 Civitai API Key" autocomplete="off">
-                <button id="inspireGetKeyBtn" class="inspire-getkey-btn" type="button"><i data-lucide="external-link"></i><span>去获取免费 Key</span></button>
-                <button id="inspireSaveKeyBtn" class="inspire-savekey-btn" type="button">保存并开始浏览</button>
-                <div class="inspire-config-tip">Key 仅存于本机浏览器，只用于请求 Civitai。</div>
-            </div>
-            <!-- 图库区（配置 Key 后显示） -->
             <div id="inspireGallery" class="inspire-gallery">
                 <div class="inspire-search-wrap">
                     <button id="inspireSearchBtn" class="inspire-search-btn" type="button" title="搜索"><i data-lucide="search"></i></button>
-                    <input id="inspireSearch" class="inspire-search" type="text" placeholder="搜中文/英文标签，点放大镜或按回车…" autocomplete="off">
+                    <input id="inspireSearch" class="inspire-search" type="text" placeholder="搜标题 / 提示词 / 标签，即时过滤…" autocomplete="off">
                 </div>
                 <div id="inspireCats" class="inspire-cats"></div>
                 <div id="inspireMoreTags" class="inspire-more-tags" hidden></div>
@@ -612,6 +603,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.08.29.1788009318"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.08.30.1788061637"></script>
 </body>
 </html>

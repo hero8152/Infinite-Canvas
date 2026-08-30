@@ -1967,134 +1967,270 @@ async def inspire_prompts(
         "hasMore": bool(data.get("hasMore")),
     }
 
-CIVITAI_IMAGES_API = "https://civitai.com/api/v1/images"
-CIVITAI_SEARCH_API = "https://search-new.civitai.com/multi-search"
-# Civitai 前端内置的 Meilisearch 公开搜索 key（仅搜索、无写入权限，免登录可用）
-CIVITAI_SEARCH_KEY = "8c46eb2508e21db1e9828a97968d91ab1ca1caa5f70a00e88a2ba1e286603b61"
-CIVITAI_IMG_CDN = "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA"
+# 灵感库数据源：GitHub 项目 awesome-gpt-image-2（GPT-Image2 提示词案例库，541 个案例：图片+提示词+分类标签）
+INSPIRE_GITHUB_REPO = "https://github.com/freestylefly/awesome-gpt-image-2"
+INSPIRE_RAW_BASE = "https://raw.githubusercontent.com/freestylefly/awesome-gpt-image-2/main"
+INSPIRE_CASES_URLS = [
+    "https://cdn.jsdelivr.net/gh/freestylefly/awesome-gpt-image-2@main/data/cases.json",
+    f"{INSPIRE_RAW_BASE}/data/cases.json",
+]
+INSPIRE_UPSTREAM_TTL = 6 * 3600        # 案例数据兜底刷新间隔（上游 SHA 解析失败时）
+INSPIRE_SHA_TTL = 15 * 60              # 上游 commit SHA 缓存 15 分钟 → 上游更新最迟约 15 分钟被发现
+INSPIRE_SHA_FAIL_TTL = 5 * 60          # SHA 解析失败后 5 分钟再试
+INSPIRE_DIMS_PROBE_BUDGET = 6.0        # 单次请求内同步探测图片尺寸的时间预算（秒），剩余转后台继续
+INSPIRE_DIMS_FILE = os.path.join(BASE_DIR, "inspire_image_dims.json")
+_inspire_cases_cache = {"data": None, "sha": "", "ts": 0.0}
+_inspire_sha_cache = {"sha": "", "ts": 0.0}
+_inspire_dims = {"loaded": False, "dims": {}}   # case_id(str) -> [width, height]
+_inspire_dims_task = None                        # 后台尺寸探测任务（防止重复起任务）
 
-async def _meili_post(body: dict):
-    """向 Civitai Meilisearch 发送搜索请求。"""
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {CIVITAI_SEARCH_KEY}"}
+
+async def _resolve_inspire_sha():
+    """解析上游最新 commit SHA（github.com 的 commits.atom；api.github.com 会按 TLS 指纹拦截部分客户端返回 403）。
+    SHA 同时用作数据版本号：上游 git 有新提交时 SHA 变化，前端比对版本实现自动更新。"""
+    now = time.time()
+    ttl = INSPIRE_SHA_TTL if _inspire_sha_cache["sha"] else INSPIRE_SHA_FAIL_TTL
+    if now - _inspire_sha_cache["ts"] < ttl:
+        return _inspire_sha_cache["sha"]
+    sha = ""
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0)) as client:
-            resp = await client.post(CIVITAI_SEARCH_API, json=body, headers=headers)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Civitai 搜索失败：{e}")
-    if resp.status_code == 429:
-        raise HTTPException(status_code=429, detail="Civitai 限流：请稍后再试")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Civitai 搜索错误：{resp.status_code}")
-    return resp.json()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0), follow_redirects=True) as client:
+            resp = await client.get(f"{INSPIRE_GITHUB_REPO}/commits/main.atom", headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code == 200:
+            m = re.search(r"Grit::Commit/([0-9a-f]{40})", resp.text)
+            sha = m.group(1) if m else ""
+    except (httpx.HTTPError, ValueError):
+        sha = ""
+    _inspire_sha_cache["sha"] = sha
+    _inspire_sha_cache["ts"] = now
+    return sha
 
 
-def _build_meili_item(h: dict):
-    url = h.get("url") or ""
-    if not url:
+async def _fetch_inspire_cases(sha: str = ""):
+    """拉取 awesome-gpt-image-2 的 cases.json（jsDelivr 优先，raw 兜底），内存缓存。
+    sha 与缓存版本不一致（上游有更新）时强制重新拉取；上游暂时不可达时回退旧数据保证可用。"""
+    now = time.time()
+    cached = _inspire_cases_cache["data"]
+    if cached and now - _inspire_cases_cache["ts"] < INSPIRE_UPSTREAM_TTL:
+        if not sha or _inspire_cases_cache["sha"] == sha:
+            return cached
+    last_err = None
+    for url in INSPIRE_CASES_URLS:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0), follow_redirects=True) as client:
+                resp = await client.get(url)
+            if resp.status_code != 200:
+                last_err = f"HTTP {resp.status_code}"
+                continue
+            data = resp.json()
+            _inspire_cases_cache["data"] = data
+            _inspire_cases_cache["sha"] = sha
+            _inspire_cases_cache["ts"] = now
+            return data
+        except (httpx.HTTPError, ValueError) as e:
+            last_err = str(e)
+    if cached:
+        return cached
+    raise HTTPException(status_code=502, detail=f"灵感库数据获取失败：{last_err}")
+
+
+def _probe_image_size(head: bytes):
+    """从图片头部字节解析像素尺寸（JPEG/PNG/GIF/WebP），失败返回 None。"""
+    try:
+        if head[:2] == b"\xff\xd8":  # JPEG：遍历段找 SOF0~SOF15
+            i, n = 2, len(head)
+            while i + 9 < n:
+                if head[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = head[i + 1]
+                if marker in (0xD8, 0x01, 0xFF) or 0xD0 <= marker <= 0xD7:
+                    i += 2
+                    continue
+                if marker == 0xD9 or i + 10 > n:
+                    break
+                seg_len = int.from_bytes(head[i + 2:i + 4], "big")
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                    height = int.from_bytes(head[i + 5:i + 7], "big")
+                    width = int.from_bytes(head[i + 7:i + 9], "big")
+                    return (width, height) if width and height else None
+                i += 2 + seg_len
+            return None
+        if head[:8] == b"\x89PNG\r\n\x1a\n" and len(head) >= 24:
+            return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+        if head[:4] == b"GIF8" and len(head) >= 10:
+            return int.from_bytes(head[6:8], "little"), int.from_bytes(head[8:10], "little")
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP" and len(head) >= 30:
+            fmt = head[12:16]
+            if fmt == b"VP8 ":
+                return (int.from_bytes(head[26:28], "little") & 0x3FFF,
+                        int.from_bytes(head[28:30], "little") & 0x3FFF)
+            if fmt == b"VP8L" and head[20] == 0x2F and len(head) >= 25:
+                bits = int.from_bytes(head[21:25], "little")
+                return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+            if fmt == b"VP8X" and len(head) >= 30:
+                return 1 + int.from_bytes(head[24:27], "little"), 1 + int.from_bytes(head[27:30], "little")
         return None
-    prompt = h.get("prompt") or ""
-    stats = h.get("stats") or {}
-    return {
-        "id": h.get("id"),
-        "image": f"{CIVITAI_IMG_CDN}/{url}/original=true/{url}.jpeg",
-        "thumb": f"{CIVITAI_IMG_CDN}/{url}/width=500/{url}.jpeg",
-        "prompt": prompt,
-        "promptZh": "",
-        "title": "",
-        "description": prompt[:100],
-        "width": h.get("width"),
-        "height": h.get("height"),
-        "model": "",
-        "username": (h.get("user") or {}).get("username") or "",
-        "tags": h.get("tagNames") or [],
-        "reactionCount": stats.get("reactionCountAllTime") or 0,
-    }
-
-
-async def civitai_meili_search(query: str, limit: int, cursor: str):
-    """搜索图片：按 Meilisearch 默认相关性排序（关键词匹配度优先），
-    保证搜什么像什么。注意：sort 与 filter 同时使用会破坏相关性，故只用 filter。"""
-    offset = int(cursor) if str(cursor).isdigit() else 0
-    body = {"queries": [{
-        "q": query,
-        "indexUid": "images_v6",
-        "limit": limit,
-        "offset": offset,
-        "filter": ["(poi != true) AND (combinedNsfwLevel=1)"]
-    }]}
-    data = await _meili_post(body)
-    result = (data.get("results") or [{}])[0]
-    hits = result.get("hits") or []
-    total = result.get("estimatedTotalHits") or 0
-    items = [it for it in (_build_meili_item(h) for h in hits) if it]
-    next_offset = offset + limit
-    has_more = bool(hits) and next_offset < total
-    return {"items": items, "cursor": str(next_offset) if has_more else "", "hasMore": has_more, "total": total}
-
-
-@app.get("/api/inspire-civitai")
-async def inspire_civitai(request: Request, cursor: str = "", limit: int = 24, sort: str = "Most Reactions", tag: str = ""):
-    """灵感库 Civitai 数据源：用户生成的 AI 图片（参考性强）。
-    Civitai 接口必须带 User-Agent 头，否则返回空。游标分页。
-    可选 API Key（前端经 X-Civitai-Key 头传入），带 Key 限额更高、更稳定。
-    tag 非空时走 Meilisearch 真搜索；否则走 /api/v1/images 排序浏览。"""
-    limit = min(100, max(1, int(limit)))
-    search_query = (tag or "").strip()
-    # 搜索模式：tag 非空 → Meilisearch 关键词搜索
-    if search_query:
-        return await civitai_meili_search(search_query, limit, cursor)
-    # 浏览模式：/api/v1/images + sort
-    params = {"limit": str(limit), "nsfw": "false"}
-    if sort: params["sort"] = sort
-    if cursor: params["cursor"] = cursor
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Content-Type": "application/json",
-    }
-    civitai_key = (request.headers.get("x-civitai-key") or "").strip()
-    if civitai_key:
-        headers["Authorization"] = f"Bearer {civitai_key}"
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0)) as client:
-            resp = await client.get(CIVITAI_IMAGES_API, params=params, headers=headers)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Civitai 请求失败：{e}")
-    if resp.status_code == 429:
-        raise HTTPException(status_code=429, detail="Civitai 限流：请求太频繁，请稍后再试（配置 API Key 可提高限额）")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Civitai 上游错误：{resp.status_code}")
-    try:
-        data = resp.json()
     except Exception:
-        raise HTTPException(status_code=502, detail="Civitai 响应解析失败")
+        return None
+
+
+def _load_inspire_dims():
+    if _inspire_dims["loaded"]:
+        return
+    _inspire_dims["loaded"] = True
+    try:
+        if os.path.isfile(INSPIRE_DIMS_FILE):
+            with open(INSPIRE_DIMS_FILE, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d.get("dims"), dict):
+                _inspire_dims["dims"] = {
+                    str(k): v for k, v in d["dims"].items()
+                    if isinstance(v, list) and len(v) == 2 and v[0] and v[1]
+                }
+    except Exception:
+        pass
+
+
+def _save_inspire_dims():
+    try:
+        with open(INSPIRE_DIMS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"dims": _inspire_dims["dims"]}, f)
+    except Exception:
+        pass
+
+
+async def _fill_inspire_dims(metas: list):
+    """并发探测缺失案例的图片尺寸：对 raw CDN 发 Range 请求只拉头部 64KB，从图片头解析宽高，磁盘缓存。
+    图片走 raw 直链（jsDelivr 对该仓库图片一律 301 回 raw）。"""
+    sem = asyncio.Semaphore(12)
+    timeout = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async def one(meta):
+            async with sem:
+                r = await client.get(INSPIRE_RAW_BASE + meta["path"], headers={"Range": "bytes=0-65535", "User-Agent": "Mozilla/5.0"})
+                size = _probe_image_size(r.content or b"")
+                if size:
+                    _inspire_dims["dims"][meta["id"]] = [size[0], size[1]]
+        await asyncio.gather(*(one(m) for m in metas), return_exceptions=True)
+    _save_inspire_dims()
+
+
+@app.get("/api/inspire-gallery")
+async def inspire_gallery():
+    """灵感库数据源：awesome-gpt-image-2 案例库全量精简数据（一次拉取，前端本地过滤/分页渲染）。
+    version 为上游 commit SHA：上游 git 有更新时 SHA 变化，前端比对后自动重新拉取实现同步。
+    width/height 由后端预探测（Range 拉图片头部解析，磁盘缓存），前端据此预留宽高比避免瀑布流跳动。"""
+    sha = await _resolve_inspire_sha()
+    data = await _fetch_inspire_cases(sha)
+    _load_inspire_dims()
+    cases = data.get("cases", []) or []
+    # 找出还没有尺寸记录的案例，起探测任务（预算时间内同步等一部分，其余后台继续）
+    missing = []
+    for c in cases:
+        img = c.get("image") or ""
+        cid = str(c.get("id") or "")
+        ext = img.rsplit(".", 1)[-1].lower() if "." in img else ""
+        if img and cid and cid not in _inspire_dims["dims"] and ext in ("jpg", "jpeg", "png", "gif", "webp"):
+            missing.append({"id": cid, "path": "/data" + img if img.startswith("/") else "/" + img})
+    if missing:
+        global _inspire_dims_task
+        if not _inspire_dims_task or _inspire_dims_task.done():
+            _inspire_dims_task = asyncio.create_task(_fill_inspire_dims(missing))
+        try:
+            await asyncio.wait({_inspire_dims_task}, timeout=INSPIRE_DIMS_PROBE_BUDGET)
+        except Exception:
+            pass
     items = []
-    for it in data.get("items", []) or []:
-        url = it.get("url") or ""
-        if not url: continue
-        thumb = url.replace("original=true", "width=400")  # 缩略图（宽400，兼顾清晰与加载速度）
-        meta = it.get("meta") or {}
-        prompt = meta.get("prompt") or ""
-        tags = [t.get("name") if isinstance(t, dict) else t for t in (it.get("tags") or [])]
+    for c in cases:
+        img = c.get("image") or ""
+        if not img:
+            continue
+        # cases.json 里图片路径是 /images/caseN.jpg，仓库实际位置在 data/images/
+        if img.startswith("/"):
+            img = INSPIRE_RAW_BASE + "/data" + img
+        else:
+            img = INSPIRE_RAW_BASE + "/" + img
+        dims = _inspire_dims["dims"].get(str(c.get("id") or ""))
         items.append({
-            "id": it.get("id"),
-            "image": url,
-            "thumb": thumb,
-            "prompt": prompt,
-            "promptZh": "",
-            "title": "",
-            "description": prompt[:100] if prompt else "",
-            "width": it.get("width"),
-            "height": it.get("height"),
-            "model": it.get("baseModel") or "",
-            "username": it.get("username") or "",
-            "tags": tags,
+            "id": c.get("id"),
+            "title": c.get("title") or "",
+            "prompt": c.get("prompt") or c.get("promptPreview") or "",
+            "category": c.get("category") or "",
+            "styles": c.get("styles") or [],
+            "scenes": c.get("scenes") or [],
+            "image": img,
+            "thumb": img,
+            "width": dims[0] if dims else None,
+            "height": dims[1] if dims else None,
+            "sourceLabel": c.get("sourceLabel") or "",
+            "sourceUrl": c.get("sourceUrl") or "",
+            "featured": bool(c.get("featured")),
         })
-    next_cursor = (data.get("metadata") or {}).get("nextCursor") or ""
     return {
         "items": items,
-        "cursor": next_cursor,
-        "hasMore": bool(next_cursor),
+        "total": len(items),
+        "categories": data.get("categories") or [],
+        "styles": data.get("styles") or [],
+        "scenes": data.get("scenes") or [],
+        "version": sha,
+        "repo": INSPIRE_GITHUB_REPO,
     }
+
+
+@app.get("/api/inspire-local")
+async def inspire_local():
+    """灵感库「本地」标签：本机历史生成的所有图片 + 当时的提示词（读 history.json，最新优先）。
+    image_items 自带宽高，无需探测；已被清理的文件自动过滤。"""
+    try:
+        if os.path.isfile(HISTORY_FILE):
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        else:
+            records = []
+    except Exception:
+        records = []
+    items = []
+    seen = set()
+    for rec in reversed(records if isinstance(records, list) else []):
+        prompt = str(rec.get("prompt") or "").strip()
+        model = str(rec.get("model") or "")
+        provider = str(rec.get("provider_name") or rec.get("provider_id") or "")
+        ts = rec.get("timestamp") or 0
+        for it in rec.get("image_items") or []:
+            url = str(it.get("url") or "")
+            if not url or url in seen:
+                continue
+            fname = os.path.basename(url)
+            if not fname or not os.path.isfile(output_path_for(fname, "output")):
+                continue  # 文件已被清理，跳过
+            seen.add(url)
+            items.append({
+                "id": "local-" + (re.sub(r"[^0-9a-zA-Z_-]", "", os.path.splitext(fname)[0]) or uuid.uuid4().hex[:8]),
+                "title": "",
+                "prompt": prompt,
+                "category": "",
+                "styles": [],
+                "scenes": [],
+                "image": url,
+                "thumb": url,
+                "width": it.get("natural_w") or it.get("width"),
+                "height": it.get("natural_h") or it.get("height"),
+                "sourceLabel": " · ".join(x for x in (provider, model) if x),
+                "sourceUrl": "",
+                "ts": ts,
+                "local": True,
+            })
+    items.sort(key=lambda x: x.get("ts") or 0, reverse=True)
+    return {"items": items[:1000], "total": len(items)}
+
+
+@app.get("/api/inspire-version")
+async def inspire_version():
+    """灵感库上游版本号（最新 commit SHA）。前端打开面板时及定时比对该版本，变化即自动重新拉取数据。"""
+    sha = await _resolve_inspire_sha()
+    data = _inspire_cases_cache["data"]
+    return {"version": sha, "total": len(data.get("cases") or []) if data else 0}
 
 class InspireLocalizeRequest(BaseModel):
     url: str
@@ -2102,24 +2238,26 @@ class InspireLocalizeRequest(BaseModel):
 
 @app.post("/api/inspire-localize")
 async def inspire_localize(payload: InspireLocalizeRequest):
-    """把 Civitai 图片下载保存到本地（中等高清 width=1024），按 civitaiId 命名实现去重。
+    """把灵感库图片下载保存到本地（output 目录），按来源 id 命名实现去重。
     已本地化过的直接返回本地地址，不重复下载。"""
     url = (payload.url or "").strip()
     cid = str(payload.id or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="缺少图片地址")
     safe_id = re.sub(r"[^0-9a-zA-Z_-]", "", cid) or uuid.uuid4().hex[:10]
-    filename = f"civitai_{safe_id}.jpg"
+    ext = ".jpg"
+    m = re.search(r"\.(jpe?g|png|webp|gif)(?:[?#]|$)", url, re.I)
+    if m:
+        ext = "." + m.group(1).lower()
+    filename = f"inspire_{safe_id}{ext}"
     path = output_path_for(filename, "output")
     # 去重：已本地化过直接返回本地地址
     if os.path.isfile(path):
         return {"url": output_url_for(filename, "output"), "cached": True}
-    # 中等高清：width=1024
-    dl_url = url.replace("original=true", "width=1024")
     try:
         timeout = httpx.Timeout(connect=20.0, read=120.0, write=60.0, pool=20.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            resp = await client.get(dl_url, headers={"User-Agent": "Mozilla/5.0 Chrome/124.0 Safari/537.36"})
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 Chrome/124.0 Safari/537.36"})
             resp.raise_for_status()
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as f:

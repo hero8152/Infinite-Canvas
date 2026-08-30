@@ -1438,7 +1438,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .inspire-grid { column-count:3; column-gap:4px; }
 @media (max-width:1100px){ .inspire-grid { column-count:2; } }
 .inspire-card { position:relative; break-inside:avoid; margin-bottom:4px; overflow:hidden; background:var(--soft); cursor:pointer; line-height:0; }
-.inspire-card img { width:100%; display:block; opacity:0; transition:opacity .3s ease; }
+.inspire-card img { width:100%; display:block; opacity:0; transition:opacity .3s ease; object-fit:cover; }
 .inspire-card img.loaded { opacity:1; }
 .inspire-card-ph { width:100%; background:var(--soft); animation:inspirePulse 1.2s ease-in-out infinite; }
 @keyframes inspirePulse { 0%,100%{opacity:.55} 50%{opacity:.9} }
@@ -1452,21 +1452,11 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .inspire-overlay-btn i,.inspire-overlay-btn svg { width:13px; height:13px; }
 .inspire-loader { display:flex; align-items:center; justify-content:center; gap:8px; padding:18px 0; color:var(--muted); font-size:11px; font-weight:600; }
 .inspire-empty { padding:40px 0; text-align:center; color:var(--faint); font-size:12px; }
+.inspire-source { display:inline-flex; align-items:center; gap:5px; flex:0 1 auto; min-width:0; height:24px; padding:0 9px; border-radius:999px; border:1px solid var(--line); background:var(--soft); color:var(--muted); font-size:10.5px; font-weight:650; cursor:pointer; transition:all .14s ease; }
+.inspire-source:hover { color:var(--text); border-color:var(--strong); }
+.inspire-source i,.inspire-source svg { width:12px; height:12px; flex:0 0 auto; }
+.inspire-source span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .inspire-gallery { display:flex; flex-direction:column; gap:10px; flex:1 1 auto; min-height:0; }
-.inspire-config { flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:28px 24px; text-align:center; }
-.inspire-config[hidden] { display:none; }
-.inspire-config-icon { width:56px; height:56px; border-radius:16px; background:var(--soft); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--strong); }
-.inspire-config-icon i,.inspire-config-icon svg { width:26px; height:26px; }
-.inspire-config-title { font-size:15px; font-weight:800; color:var(--text); }
-.inspire-config-desc { font-size:11.5px; line-height:1.7; color:var(--muted); max-width:300px; }
-.inspire-key-input { width:100%; max-width:300px; height:40px; padding:0 14px; border-radius:11px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:12.5px; outline:none; transition:border-color .14s ease; }
-.inspire-key-input:focus { border-color:var(--strong); }
-.inspire-getkey-btn { display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 16px; border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:12px; font-weight:700; cursor:pointer; transition:all .14s ease; }
-.inspire-getkey-btn:hover { border-color:var(--strong); color:var(--strong); }
-.inspire-getkey-btn i,.inspire-getkey-btn svg { width:13px; height:13px; }
-.inspire-savekey-btn { height:38px; padding:0 28px; border-radius:999px; border:none; background:var(--strong); color:var(--strong-text); font-size:13px; font-weight:800; cursor:pointer; transition:opacity .14s ease, transform .14s ease; }
-.inspire-savekey-btn:hover { opacity:.88; transform:translateY(-1px); }
-.inspire-config-tip { font-size:10px; color:var(--faint); }
 .inspire-end { padding:18px 0; text-align:center; color:var(--faint); font-size:11px; }
 .agent-skill-zone { display:flex; flex-direction:column; gap:6px; }
 .agent-skill-drop { min-height:44px; border:1px dashed var(--line); border-radius:13px; display:flex; align-items:center; justify-content:center; gap:7px; text-align:center; padding:8px; color:var(--faint); font-size:10.5px; font-weight:600; background:var(--soft); cursor:pointer; transition:border-color .14s ease, color .14s ease, background .14s ease; }
